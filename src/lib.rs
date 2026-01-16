@@ -35,7 +35,7 @@ pub use cells::cell_len;
 pub use color::Color;
 pub use console::{Console, ConsoleOptions};
 pub use error::ParseError;
-pub use measure::Measurement;
+pub use measure::{measure_renderables, Measurement};
 pub use segment::{ControlType, Segment, Segments};
 pub use style::{Style, StyleMeta};
 pub use text::Text;
