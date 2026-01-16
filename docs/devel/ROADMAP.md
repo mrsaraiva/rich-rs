@@ -86,6 +86,16 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 | Done | `Measurement::clamp_bounds()` | `measure.py:Measurement.clamp` | Clamp with optional bounds |
 | Done | `measure_renderables()` - combine measurements | `measure.py:measure_renderables` | Takes max of mins/maxs |
 
+### 1.6 Parity Testing
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Done | Python test scripts for Phase 1 modules | `tests/parity/phase1/python/` | test_color.py, test_cells.py, etc. |
+| Done | Rust parity binary crate | `tests/parity/phase1/rust/` | Matching output format |
+| Done | Parity test runner script | `tests/parity/run_parity.sh` | Runs both, shows diff |
+
+**Reference:** See `tests/parity/phase1/` for the canonical parity test structure. Each phase should have equivalent Python and Rust programs that produce identical output for comparison.
+
 ---
 
 ## Phase 2: Text & Console
@@ -156,6 +166,16 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 **Note:** No separate `Measurable` trait. Measurement is a default method on `Renderable`.
 
+### 2.5 Parity Testing
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | Python test scripts for Text module | `tests/parity/phase2/python/` | test_text.py, test_markup.py |
+| Todo | Python test scripts for Console | `tests/parity/phase2/python/` | test_console.py |
+| Todo | Rust parity binary crate | `tests/parity/phase2/rust/` | Matching output format |
+
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
+
 ---
 
 ## Phase 3: Box Drawing & Simple Renderables
@@ -192,6 +212,15 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 | Todo | `Align` struct | `align.py:Align` | horizontal + vertical alignment |
 | Todo | `Align::left()`, `center()`, `right()` constructors | `align.py:Align.*` | Convenience methods |
 | Todo | `impl Renderable for Align` | `align.py:Align.__rich_console__` | Pad to width |
+
+### 3.5 Parity Testing
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | Python test scripts for Box, Rule, Padding, Align | `tests/parity/phase3/python/` | test_box.py, test_rule.py, etc. |
+| Todo | Rust parity binary crate | `tests/parity/phase3/rust/` | Matching output format |
+
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
 
 ---
 
@@ -233,6 +262,15 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 |--------|------|------------------|-------|
 | Todo | `Columns` struct | `columns.py:Columns` | Uses Table.grid() internally |
 | Todo | `impl Renderable for Columns` | `columns.py:Columns.__rich_console__` | Delegates to Table |
+
+### 4.5 Parity Testing
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | Python test scripts for Panel, Tree, Table, Columns | `tests/parity/phase4/python/` | test_panel.py, test_table.py, etc. |
+| Todo | Rust parity binary crate | `tests/parity/phase4/rust/` | Matching output format |
+
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
 
 ---
 
@@ -278,6 +316,15 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 |--------|------|------------------|-------|
 | Todo | `Traceback` struct | `traceback.py:Traceback` | Error formatting |
 | Todo | `install()` for panic hook | N/A | Rust-specific |
+
+### 5.6 Parity Testing
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | Python test scripts for Progress, Live, Syntax | `tests/parity/phase5/python/` | test_progress.py, test_live.py, etc. |
+| Todo | Rust parity binary crate | `tests/parity/phase5/rust/` | Matching output format |
+
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
 
 ---
 
