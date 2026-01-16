@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Measurement` struct with `from_segments()` default measurement
 - `Console` struct with basic terminal detection
 - `cell_len()` function wrapping unicode-width
+- `char_width()` function for single character width
+- `set_cell_size()` function for padding/truncating text to exact cell width
+- `chop_cells()` function for splitting text into lines by cell width
+- `NULL_STYLE` constant for empty style
+- `Style::is_null()` method to check for empty styles
+- `Style::render()` method for ANSI escape code generation
+- `Style::get_html_style()` method for CSS style generation
+- `SimpleColor::downgrade()` method for color system downgrading
+- `SimpleColor::get_hex()` method for hex color strings
 - BBCode-like markup parser (basic implementation)
 - Box drawing character sets (ASCII, ROUNDED, HEAVY, DOUBLE, SQUARE)
 - `Renderable` trait with `Send + Sync` requirement and default `measure()` method
