@@ -1,0 +1,15 @@
+[package]
+name = "rich-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Rich text and beautiful formatting for the terminal"
+license = "MIT"
+keywords = ["terminal", "console", "ansi", "color", "formatting"]
+categories = ["command-line-interface"]
+
+[dependencies]
+crossterm = "0.28"
+unicode-width = "0.2"
+atty = "0.2"
+
+[dev-dependencies]
