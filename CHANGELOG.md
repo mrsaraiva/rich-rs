@@ -10,18 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial project scaffolding with core module stubs
 - `Segment` struct - atomic unit of terminal output
-- `Style` struct with builder pattern and parsing
-- `Color` enum with named color and hex parsing
+- `Segments` collection - SmallVec-backed collection with future streaming support
+- `Style` struct with builder pattern and parsing (Copy for efficiency)
+- `StyleMeta` struct for hyperlinks and metadata (separate to keep Style Copy)
+- Full color system with ~250 named colors, 256-color palette, truecolor support
+- `ColorTriplet` struct for RGB colors
+- `Color` struct with parsing, ANSI code generation, and downgrading
+- `SimpleColor` enum for Copy-compatible colors in Style
+- `Palette` struct with Euclidean distance color matching
+- Static palettes: `STANDARD_PALETTE`, `EIGHT_BIT_PALETTE`, `WINDOWS_PALETTE`
+- `ParseError` enum for unified error handling
 - `Text` struct with styled spans
-- `Measurement` struct for width requirements
+- `Measurement` struct with `from_segments()` default measurement
 - `Console` struct with basic terminal detection
 - `cell_len()` function wrapping unicode-width
 - BBCode-like markup parser (basic implementation)
 - Box drawing character sets (ASCII, ROUNDED, HEAVY, DOUBLE, SQUARE)
-- `Renderable`, `Measurable`, and `RichCast` traits
+- `Renderable` trait with `Send + Sync` requirement and default `measure()` method
+- `RichCast` trait with associated type (avoids Box allocation)
 - Development roadmap at `docs/devel/ROADMAP.md`
+
+### Changed
+- `Renderable::render()` now returns `Segments` instead of `Vec<Segment>`
+- Merged `Measurable` trait into `Renderable` as default method
+- `Segment.text` now uses `Cow<'static, str>` for efficiency
 
 ### Dependencies
 - `crossterm` 0.28 - Terminal abstraction
 - `unicode-width` 0.2 - Cell width calculation
 - `atty` 0.2 - Terminal detection
+- `smallvec` 1.13 - Stack-allocated vectors
+- `thiserror` 2.0 - Error type derivation
+- `once_cell` 1.19 - Lazy static initialization
