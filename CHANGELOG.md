@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Style::get_html_style()` method for CSS style generation
 - `SimpleColor::downgrade()` method for color system downgrading
 - `SimpleColor::get_hex()` method for hex color strings
+- `Segment::split_cells()` method for splitting at cell boundaries
+- `Segment::split_lines()` for splitting segments on newlines
+- `Segment::split_and_crop_lines()` for layout rendering (split + crop to width)
+- `Segment::adjust_line_length()` for cropping/padding lines to exact width
+- `Segment::simplify()` for merging adjacent same-style segments
+- `Segment::divide()` for splitting at multiple cell positions
+- `Segment::apply_style()`, `filter_control()`, `strip_styles()` utilities
+- `Segment::get_line_length()`, `get_shape()`, `set_shape()` for layout
+- `Measurement::normalize()`, `with_maximum()`, `with_minimum()`, `clamp_bounds()`
+- `measure_renderables()` function for combining measurements
 - BBCode-like markup parser (basic implementation)
 - Box drawing character sets (ASCII, ROUNDED, HEAVY, DOUBLE, SQUARE)
 - `Renderable` trait with `Send + Sync` requirement and default `measure()` method
@@ -43,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Renderable::render()` now returns `Segments` instead of `Vec<Segment>`
 - Merged `Measurable` trait into `Renderable` as default method
 - `Segment.text` now uses `Cow<'static, str>` for efficiency
+- `Measurement::clamp()` renamed to `clamp_width()` to avoid confusion with new `clamp_bounds()`
 
 ### Dependencies
 - `crossterm` 0.28 - Terminal abstraction

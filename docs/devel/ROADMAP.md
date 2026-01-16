@@ -18,17 +18,17 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `ColorTriplet` struct (r, g, b) with `hex`, `rgb`, `normalized` properties | `color_triplet.py` | No dependencies, start here |
-| Todo | `Palette` struct with `match(triplet)` method | `palette.py:Palette` | Finds closest color via Euclidean distance |
-| Todo | `STANDARD_PALETTE`, `EIGHT_BIT_PALETTE`, `WINDOWS_PALETTE` constants | `_palettes.py` | 16, 256, and Windows 10 palettes |
-| Todo | `ColorSystem` enum (Standard, EightBit, TrueColor, Windows) | `color.py:ColorSystem` | IntEnum in Python |
-| Todo | `ColorType` enum (Default, Standard, EightBit, TrueColor, Windows) | `color.py:ColorType` | Distinguishes color origin |
-| Todo | `Color` struct with `name`, `type`, `number`, `triplet` | `color.py:Color` | NamedTuple in Python |
-| Todo | `Color::parse()` - parse "red", "#ff0000", "rgb(255,0,0)", "color(196)" | `color.py:Color.parse` | Uses regex, ~250 named colors in `ANSI_COLOR_NAMES` |
-| Todo | `Color::from_ansi()`, `from_triplet()`, `from_rgb()`, `default()` | `color.py:Color.*` | Factory methods |
-| Todo | `Color::get_ansi_codes()` - generate SGR escape codes | `color.py:Color.get_ansi_codes` | Use once_cell::Lazy for caching |
-| Todo | `Color::downgrade()` - convert to lower color system | `color.py:Color.downgrade` | TrueColor→EightBit→Standard conversion |
-| Done | Basic `Color` enum with parse (partial) | `src/color.rs` | Needs full implementation |
+| Done | `ColorTriplet` struct (r, g, b) with `hex`, `rgb`, `normalized` properties | `color_triplet.py` | No dependencies, start here |
+| Done | `Palette` struct with `match(triplet)` method | `palette.py:Palette` | Finds closest color via Euclidean distance |
+| Done | `STANDARD_PALETTE`, `EIGHT_BIT_PALETTE`, `WINDOWS_PALETTE` constants | `_palettes.py` | 16, 256, and Windows 10 palettes |
+| Done | `ColorSystem` enum (Standard, EightBit, TrueColor, Windows) | `color.py:ColorSystem` | IntEnum in Python |
+| Done | `ColorType` enum (Default, Standard, EightBit, TrueColor, Windows) | `color.py:ColorType` | Distinguishes color origin |
+| Done | `Color` struct with `name`, `type`, `number`, `triplet` | `color.py:Color` | NamedTuple in Python |
+| Done | `Color::parse()` - parse "red", "#ff0000", "rgb(255,0,0)", "color(196)" | `color.py:Color.parse` | Uses regex, ~250 named colors in `ANSI_COLOR_NAMES` |
+| Done | `Color::from_ansi()`, `from_triplet()`, `from_rgb()`, `default()` | `color.py:Color.*` | Factory methods |
+| Done | `Color::get_ansi_codes()` - generate SGR escape codes | `color.py:Color.get_ansi_codes` | Use once_cell::Lazy for caching |
+| Done | `Color::downgrade()` - convert to lower color system | `color.py:Color.downgrade` | TrueColor→EightBit→Standard conversion |
+| Done | `SimpleColor` enum for Copy-compatible colors in Style | N/A | Rust-specific optimization |
 
 ### 1.2 Cell Width
 
@@ -36,8 +36,8 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 |--------|------|------------------|-------|
 | Done | `cell_len()` using unicode-width | `cells.py:cell_len` | Wrapped in `src/cells.rs` |
 | Done | `char_width()` - single character width | N/A | Uses `unicode-width` crate |
-| Todo | `set_cell_size()` - truncate/pad to exact cell width | `cells.py:set_cell_size` | Handles double-width boundaries |
-| Todo | `chop_cells()` - split text into width-limited lines | `cells.py:chop_cells` | For wrapping |
+| Done | `set_cell_size()` - truncate/pad to exact cell width | `cells.py:set_cell_size` | Handles double-width boundaries |
+| Done | `chop_cells()` - split text into width-limited lines | `cells.py:chop_cells` | For wrapping |
 
 **Note:** Using `unicode-width` crate instead of porting Python's `CELL_WIDTHS` table.
 
@@ -49,10 +49,10 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 | Done | `StyleMeta` struct for links/metadata | `style.py:Style` | Separate to keep Style Copy |
 | Done | `Style + Style` combination (impl Add) | `style.py:Style.__add__` | Combines styles |
 | Todo | Bitfield storage for attributes | `style.py:Style` | Optional optimization |
-| Todo | `Style::parse()` - full implementation | `style.py:Style.parse` | Use once_cell::Lazy for caching |
-| Todo | `Style::render()` - generate ANSI escape sequence | `style.py:Style.render` | Core output method |
-| Todo | `Style::get_html_style()` for HTML export | `style.py:Style.get_html_style` | CSS generation |
-| Todo | `NULL_STYLE` singleton | `style.py:NULL_STYLE` | Optimization for empty style |
+| Done | `Style::parse()` - basic implementation | `style.py:Style.parse` | Parses "bold red on blue" etc. |
+| Done | `Style::render()` - generate ANSI escape sequence | `style.py:Style.render` | Core output method |
+| Done | `Style::get_html_style()` for HTML export | `style.py:Style.get_html_style` | CSS generation |
+| Done | `NULL_STYLE` constant and `is_null()` method | `style.py:NULL_STYLE` | Empty style constant |
 
 ### 1.4 Segment
 
@@ -61,12 +61,18 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 | Done | `Segment` struct (text, style, control) | `src/segment.rs` | Uses `Cow<'static, str>` |
 | Done | `Segments` collection (SmallVec backed) | N/A | Abstracts storage for future streaming |
 | Done | `ControlType` enum (full 16 variants) | `segment.py:ControlType` | Cursor movement, erase, etc. |
-| Todo | `Segment::split_cells()` - split at cell boundary | `segment.py:Segment.split_cells` | Handles double-width |
-| Todo | `Segment::split_lines()` - split on newlines | `segment.py:Segment.split_lines` | Iterator |
-| Todo | `Segment::split_and_crop_lines()` - layout core | `segment.py:Segment.split_and_crop_lines` | Critical for rendering |
-| Todo | `Segment::adjust_line_length()` - crop or pad | `segment.py:Segment.adjust_line_length` | Width normalization |
-| Todo | `Segment::simplify()` - merge adjacent same-style | `segment.py:Segment.simplify` | Output optimization |
-| Todo | `Segment::divide()` - split at cell positions | `segment.py:Segment.divide` | For column layout |
+| Done | `Segment::split_cells()` - split at cell boundary | `segment.py:Segment.split_cells` | Handles double-width |
+| Done | `Segment::split_lines()` - split on newlines | `segment.py:Segment.split_lines` | Returns Vec<Vec<Segment>> |
+| Done | `Segment::split_and_crop_lines()` - layout core | `segment.py:Segment.split_and_crop_lines` | Critical for rendering |
+| Done | `Segment::adjust_line_length()` - crop or pad | `segment.py:Segment.adjust_line_length` | Width normalization |
+| Done | `Segment::simplify()` - merge adjacent same-style | `segment.py:Segment.simplify` | Output optimization |
+| Done | `Segment::divide()` - split at cell positions | `segment.py:Segment.divide` | For column layout |
+| Done | `Segment::apply_style()` - apply style to segments | `segment.py:Segment.apply_style` | Pre/post style support |
+| Done | `Segment::filter_control()` - filter by control | `segment.py:Segment.filter_control` | Filter control segments |
+| Done | `Segment::strip_styles()` - remove all styles | `segment.py:Segment.strip_styles` | Style stripping |
+| Done | `Segment::get_line_length()` - line cell width | `segment.py:Segment.get_line_length` | Sum of cell lengths |
+| Done | `Segment::get_shape()` - get (width, height) | `segment.py:Segment.get_shape` | Enclosing rectangle |
+| Done | `Segment::set_shape()` - set rectangle size | `segment.py:Segment.set_shape` | Pad/crop to shape |
 
 ### 1.5 Measurement
 
@@ -74,7 +80,11 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 |--------|------|------------------|-------|
 | Done | `Measurement` struct (minimum, maximum) | `src/measure.rs` | Basic structure |
 | Done | `Measurement::from_segments()` | N/A | Default measurement strategy |
-| Todo | `measure_renderables()` - combine measurements | `measure.py:measure_renderables` | Takes max of mins/maxs |
+| Done | `Measurement::normalize()` | `measure.py:Measurement.normalize` | Ensure min <= max >= 0 |
+| Done | `Measurement::with_maximum()` | `measure.py:Measurement.with_maximum` | Constrain to max width |
+| Done | `Measurement::with_minimum()` | `measure.py:Measurement.with_minimum` | Constrain to min width |
+| Done | `Measurement::clamp_bounds()` | `measure.py:Measurement.clamp` | Clamp with optional bounds |
+| Done | `measure_renderables()` - combine measurements | `measure.py:measure_renderables` | Takes max of mins/maxs |
 
 ---
 
