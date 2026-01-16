@@ -1,6 +1,12 @@
 //! Style: text formatting attributes.
 //!
 //! Styles are immutable and can be combined using the `+` operator or `combine` method.
+//!
+//! The core `Style` struct is `Copy` for efficiency. For advanced features like
+//! hyperlinks and metadata (used by Textual), use `StyleMeta` separately.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::color::Color;
 
@@ -169,6 +175,65 @@ impl std::ops::Add for Style {
         self.combine(&other)
     }
 }
+
+/// Metadata for styles, used for hyperlinks and custom data.
+///
+/// This is kept separate from `Style` to preserve `Style: Copy` for the
+/// common case. Only segments with links or metadata need a `StyleMeta`.
+///
+/// Uses `BTreeMap` instead of `HashMap` for deterministic ordering,
+/// which is important for segment simplification and serialization.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StyleMeta {
+    /// Hyperlink URL (terminal OSC 8 escape sequence).
+    pub link: Option<Arc<str>>,
+    /// Link ID for grouping multiple segments with the same link.
+    pub link_id: Option<Arc<str>>,
+    /// Custom metadata (used by Textual for event handlers).
+    pub meta: Option<Arc<BTreeMap<String, String>>>,
+}
+
+impl StyleMeta {
+    /// Create a new empty StyleMeta.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a StyleMeta with a hyperlink.
+    pub fn with_link(link: impl Into<Arc<str>>) -> Self {
+        StyleMeta {
+            link: Some(link.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Check if this meta has any content.
+    pub fn is_empty(&self) -> bool {
+        self.link.is_none() && self.link_id.is_none() && self.meta.is_none()
+    }
+
+    /// Combine with another StyleMeta, with `other` taking precedence.
+    pub fn combine(&self, other: &StyleMeta) -> Self {
+        StyleMeta {
+            link: other.link.clone().or_else(|| self.link.clone()),
+            link_id: other.link_id.clone().or_else(|| self.link_id.clone()),
+            meta: match (&self.meta, &other.meta) {
+                (Some(a), Some(b)) => {
+                    let mut merged = (**a).clone();
+                    merged.extend((**b).clone());
+                    Some(Arc::new(merged))
+                }
+                (None, Some(b)) => Some(b.clone()),
+                (Some(a), None) => Some(a.clone()),
+                (None, None) => None,
+            },
+        }
+    }
+}
+
+// StyleMeta is Send + Sync because Arc<str> and Arc<BTreeMap> are
+unsafe impl Send for StyleMeta {}
+unsafe impl Sync for StyleMeta {}
 
 #[cfg(test)]
 mod tests {
