@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Emoji` struct with 3608 emoji entries and `:name:` replacement
+- `Highlighter` trait for regex-based text highlighting
+- `RegexHighlighter`, `NullHighlighter` implementations
+- Factory functions: `repr_highlighter()`, `json_highlighter()`, `iso8601_highlighter()`
+- `NoEmoji` error variant for unknown emoji names
+
+### Dependencies
+- `phf` 0.11 - Compile-time perfect hash map for emoji lookup
+- `regex` 1.x - Regular expression support for highlighters
+
 ## [0.1.0] - 2026-01-16
 
 ### Added
