@@ -128,9 +128,9 @@ mod tests {
     fn test_text_styled() {
         let style = Style::new().with_bold(true);
         let text = Text::styled("hello", style);
-        assert_eq!(text.spans().len(), 1);
-        assert_eq!(text.spans()[0].start, 0);
-        assert_eq!(text.spans()[0].end, 5);
+        // Text::styled sets base style, not a span (matching Python behavior)
+        assert_eq!(text.spans().len(), 0);
+        assert_eq!(text.base_style(), Some(style));
     }
 
     #[test]

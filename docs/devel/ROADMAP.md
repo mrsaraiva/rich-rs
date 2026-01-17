@@ -129,17 +129,15 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 |--------|------|------------------|-------|
 | Done | `Text` struct with spans | `src/text.rs` | Basic structure |
 | Done | `Span` struct (start, end, style) | `src/text.rs` | Basic structure |
-| Todo | `Span::split()`, `move()`, `right_crop()`, `extend()` | `text.py:Span.*` | Span manipulation |
-| Todo | `Text::from_markup()` - parse BBCode | `text.py:Text.from_markup` | Depends on markup.rs |
-| Todo | `Text::from_ansi()` - parse ANSI codes | `text.py:Text.from_ansi` | Reverse rendering |
-| Todo | `Text::assemble()` - build from (str, style) pairs | `text.py:Text.assemble` | Common construction |
-| Todo | `Text::stylize()`, `stylize_before()` | `text.py:Text.stylize*` | Apply style to range |
-| Todo | `Text::highlight_regex()`, `highlight_words()` | `text.py:Text.highlight_*` | Pattern-based styling |
-| Todo | `Text::wrap()` - word wrapping with justify | `text.py:Text.wrap` | Complex algorithm |
-| Todo | `Text::divide()` - split at offsets | `text.py:Text.divide` | For column layout |
-| Todo | `impl Renderable for Text` | `text.py:Text.__rich_console__` | Returns Segments |
+| Done | `Span::split()`, `move()`, `right_crop()`, `extend()` | `text.py:Span.*` | Span manipulation |
+| Done | `Text::from_markup()` - parse BBCode | `text.py:Text.from_markup` | Depends on markup.rs |
+| Done | `Text::assemble()` - build from (str, style) pairs | `text.py:Text.assemble` | Common construction |
+| Done | `Text::stylize()`, `stylize_before()` | `text.py:Text.stylize*` | Apply style to range |
+| Done | `Text::highlight_regex()`, `highlight_words()` | `text.py:Text.highlight_*` | Pattern-based styling |
+| Done | `Text::divide()` - split at offsets | `text.py:Text.divide` | For column layout |
+| Done | `impl Renderable for Text` | `text.py:Text.__rich_console__` | Returns Segments |
 
-### 2.3 Console
+### 2.3 Console & Text Wrapping
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
@@ -155,6 +153,8 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 | Todo | Theme support (`Theme`, `ThemeStack`) | `console.py` + `theme.py` | Named style definitions |
 | Todo | Capture for testing | `console.py:Console.capture` | Returns string |
 | Todo | Screen/alt screen support | `console.py:Console.screen` | Via crossterm |
+| Todo | `divide_line()` - word wrap helper | `_wrap.py:divide_line` | Find wrap offsets for Text::wrap() |
+| Todo | `Text::wrap()` - word wrapping with justify | `text.py:Text.wrap` | Uses divide_line + Console |
 
 ### 2.4 Traits
 
@@ -171,9 +171,10 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Text module | `tests/parity/phase2/python/` | test_text.py, test_markup.py |
-| Todo | Python test scripts for Console | `tests/parity/phase2/python/` | test_console.py |
-| Todo | Rust parity binary crate | `tests/parity/phase2/rust/` | Matching output format |
+| Done | Python test scripts for Text module | `tests/parity/phase2/python/` | test_text.py |
+| Done | Python test scripts for Markup module | `tests/parity/phase2/python/` | test_markup.py |
+| Done | Rust parity binary for Phase 2 | `tests/parity/phase2/rust/` | Matching output format |
+| Todo | Python test scripts for Console | `tests/parity/phase2/python/` | test_console.py (Phase 2.3) |
 
 **Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
 
@@ -341,6 +342,8 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 | Todo | `Spinner` animations | `spinner.py` + `_spinners.py` | Animation frames |
 | Todo | `ProgressBar` visual bar | `progress_bar.py` | Bar rendering |
 | Todo | `filesize` formatting | `filesize.py` | Human-readable sizes |
+| Todo | `AnsiDecoder` struct | `ansi.py:AnsiDecoder` | Parse ANSI escape sequences |
+| Todo | `Text::from_ansi()` | `text.py:Text.from_ansi` | Uses AnsiDecoder (lower priority) |
 
 ---
 
