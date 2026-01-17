@@ -75,7 +75,7 @@ run_test() {
 get_modules() {
     case "$PHASE" in
         phase1) echo "color cells style segment measure" ;;
-        phase2) echo "markup" ;;
+        phase2) echo "text markup" ;;
         *) echo "" ;;
     esac
 }

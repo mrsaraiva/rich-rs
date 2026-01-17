@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RegexHighlighter`, `NullHighlighter` implementations
 - Factory functions: `repr_highlighter()`, `json_highlighter()`, `iso8601_highlighter()`
 - `NoEmoji` error variant for unknown emoji names
+- Full Text module (Phase 2.2):
+  - `Span::split()` - split span at offset into two parts
+  - `Span::move_by()` - shift span by offset (supports negative)
+  - `Span::right_crop()` - crop span at offset
+  - `Span::extend()` - extend span end by cells
+  - `Text::from_markup()` - parse BBCode markup into styled Text
+  - `Text::assemble()` - build Text from mixed parts (str, Text, (str, Style))
+  - `TextPart` enum for flexible assembly
+  - `Text::stylize_range()` - apply style with negative index support
+  - `Text::stylize_before()` - apply style at lower priority
+  - `Text::highlight_regex()` - highlight regex matches with style
+  - `Text::highlight_words()` - highlight word occurrences (case-insensitive option)
+  - `Text::divide()` - split text at offsets preserving spans
+  - `Text::append_text()` - append Text preserving base style and spans
+  - `Text::join()` - join multiple Text objects with separator
+  - `Text::copy()`, `blank_copy()` - copying utilities
+  - `impl Renderable for Text` - render to Segments with style combination
+  - `impl Measurable for Text` - calculate min/max width
 - Full markup parser (Phase 2.1):
   - `Tag` struct with name and optional parameters
   - `parse()` function - regex-based tokenizer yielding `(position, text, tag)` tuples
