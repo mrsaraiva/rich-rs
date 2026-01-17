@@ -219,54 +219,55 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Align` struct | `align.py:Align` | horizontal + vertical alignment |
-| Todo | `Align::left()`, `center()`, `right()` constructors | `align.py:Align.*` | Convenience methods |
-| Todo | `impl Renderable for Align` | `align.py:Align.__rich_console__` | Pad to width |
+| Done | `Align` struct | `align.py:Align` | horizontal + vertical alignment |
+| Done | `Align::left()`, `center()`, `right()` constructors | `align.py:Align.*` | Convenience methods |
+| Done | `impl Renderable for Align` | `align.py:Align.__rich_console__` | Pad to width |
+| Done | `VerticalAlignMethod` enum | `align.py:VerticalAlignMethod` | Top, Middle, Bottom with parse() |
+| Done | Builder methods | N/A | with_style(), with_vertical(), with_pad(), with_width(), with_height() |
 
 ### 3.5 Parity Testing
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Box, Rule, Padding, Align | `tests/parity/phase3/python/` | test_box.py, test_rule.py, etc. |
-| Todo | Rust parity binary crate | `tests/parity/phase3/rust/` | Matching output format |
+| Done | Python test scripts for Box, Rule, Padding, Align | `tests/parity/phase3/python/` | test_box.py, test_rule.py, etc. |
+| Done | Rust parity binary crate | `tests/parity/phase3/rust/` | Matching output format |
 
 **Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
 
 ---
 
-## Phase 4 Blocker: Console State in Renderable
-
-**MUST be resolved before starting Phase 4.**
+## Phase 4 Blocker: Console State in Renderable (RESOLVED)
 
 | Status | Task | Notes |
 |--------|------|-------|
-| Todo | Fix Console state not passed to renderables | See `src/console.rs` `render_lines()` |
+| Done | Fix Console state not passed to renderables | Solution: pass state through `ConsoleOptions` |
 
-### Problem
+### Problem (Historical)
 
-The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generic `Console<W>` methods (like `render_lines()`, `print()`, `measure_renderable()`) create a **temporary** `Console<Stdout>` to call renderables. This means:
+The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generic `Console<W>` methods (like `render_lines()`, `print()`, `measure_renderable()`) create a **temporary** `Console<Stdout>` to call renderables. This meant renderables couldn't access `theme_stack`, `markup_enabled`, etc.
 
-- Renderables cannot access the caller's `theme_stack`
-- Renderables cannot check `markup_enabled`, `emoji_enabled`, `highlight_enabled`
-- Renderables cannot use the caller's `tab_size` or other console configuration
-- Any renderable that inspects console state will get **default values**, not the caller's config
+### Solution Implemented
 
-### Impact
+**Option 3: Pass state through ConsoleOptions** was implemented:
 
-This is **not a problem** for Phase 1-3 (simple renderables like Text, Rule, Padding).
+1. **Enriched `ConsoleOptions`** with console state fields:
+   - `theme_stack: ThemeStack`
+   - `markup_enabled`, `emoji_enabled`, `highlight_enabled`: `bool`
+   - `tab_size: usize`
+   - `color_system: Option<ColorSystem>`
 
-This **becomes critical** in Phase 4 when:
-- Panel needs to read theme styles for borders
-- Table needs to read theme styles and console options
-- Nested renderables need consistent configuration throughout the tree
+2. **Console setters sync to options** - Calling `set_markup_enabled()` etc. updates both `self.markup_enabled` AND `self.options.markup_enabled`, keeping them in sync.
 
-### Solution Options
+3. **`Console::with_options()` initializes from options** - When a temp Console is created, it reads state from the provided options, ensuring nested renderables see correct state.
 
-1. **Change Renderable trait** to accept generic `Console<W>` or a trait object
-2. **Create a ConsoleRef trait** that abstracts Console state for renderables
-3. **Pass relevant state through ConsoleOptions** instead of Console reference
+4. **Renderables access state via options** - `options.get_style("name")`, `options.theme_stack`, `options.markup_enabled`, etc.
 
-Each option has trade-offs around lifetimes, object safety, and API ergonomics. Must evaluate before Phase 4.
+### Benefits
+
+- No trait signature changes required
+- No lifetime complexity
+- State flows naturally through the existing `ConsoleOptions` parameter
+- Nested renderables work correctly (verified by tests)
 
 ---
 
