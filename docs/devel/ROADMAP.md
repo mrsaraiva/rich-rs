@@ -277,31 +277,31 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Panel` struct | `panel.py:Panel` | box, title, subtitle, padding |
-| Todo | `Panel::fit()` - non-expanding variant | `panel.py:Panel.fit` | Constructor |
-| Todo | `impl Renderable for Panel` | `panel.py:Panel.__rich_console__` | ~100 lines in Python |
+| Done | `Panel` struct | `panel.py:Panel` | box, title, subtitle, padding |
+| Done | `Panel::fit()` - non-expanding variant | `panel.py:Panel.fit` | Constructor |
+| Done | `impl Renderable for Panel` | `panel.py:Panel.__rich_console__` | ~100 lines in Python |
 
 ### 4.2 Tree
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Tree` struct | `tree.py:Tree` | label, children, guide_style |
-| Todo | `Tree::add()` - add child node | `tree.py:Tree.add` | Returns child for chaining |
-| Todo | Guide constants (ASCII_GUIDES, TREE_GUIDES) | `tree.py` | 4 guide character sets |
-| Todo | `impl Renderable for Tree` | `tree.py:Tree.__rich_console__` | Stack-based traversal |
+| Done | `Tree` struct | `tree.py:Tree` | label, children, guide_style |
+| Done | `Tree::add()` - add child node | `tree.py:Tree.add` | Returns child for chaining |
+| Done | Guide constants (ASCII_GUIDES, TREE_GUIDES) | `tree.py` | 4 guide character sets |
+| Done | `impl Renderable for Tree` | `tree.py:Tree.__rich_console__` | Stack-based traversal |
 
 ### 4.3 Table
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Column` struct | `table.py:Column` | header, footer, width, ratio |
-| Todo | `Row` struct | `table.py:Row` | style, end_section |
-| Todo | `Table` struct | `table.py:Table` | columns, rows, box, title |
-| Todo | `Table::grid()` - headerless table | `table.py:Table.grid` | Common pattern |
-| Todo | `Table::add_column()`, `add_row()` | `table.py:Table.*` | Builder methods |
-| Todo | `_calculate_column_widths()` | `table.py` | Ratio distribution |
-| Todo | `impl Renderable for Table` | `table.py:Table.__rich_console__` | ~300 lines |
-| Todo | Ratio distribution utilities | `_ratio.py` | ratio_distribute, ratio_reduce |
+| Done | `Column` struct | `table.py:Column` | header, footer, width, ratio |
+| Done | `Row` struct | `table.py:Row` | style, end_section |
+| Done | `Table` struct | `table.py:Table` | columns, rows, box, title |
+| Done | `Table::grid()` - headerless table | `table.py:Table.grid` | Common pattern |
+| Done | `Table::add_column()`, `add_row()` | `table.py:Table.*` | Builder methods |
+| Done | `_calculate_column_widths()` | `table.py` | Ratio distribution |
+| Done | `impl Renderable for Table` | `table.py:Table.__rich_console__` | ~300 lines |
+| Done | Ratio distribution utilities | `_ratio.py` | ratio_distribute, ratio_reduce |
 
 ### 4.4 Columns (Multi-column Layout)
 
@@ -314,8 +314,8 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Panel, Tree, Table, Columns | `tests/parity/phase4/python/` | test_panel.py, test_table.py, etc. |
-| Todo | Rust parity binary crate | `tests/parity/phase4/rust/` | Matching output format |
+| Done | Python test scripts for Panel, Tree, Table | `tests/parity/phase4/python/` | test_panel.py, test_table.py, test_tree.py |
+| Done | Rust parity binary crate | `tests/parity/phase4/rust/` | Matching output format |
 
 **Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
 
