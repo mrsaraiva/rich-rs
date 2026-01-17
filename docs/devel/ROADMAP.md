@@ -226,6 +226,42 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 ---
 
+## Phase 4 Blocker: Console State in Renderable
+
+**MUST be resolved before starting Phase 4.**
+
+| Status | Task | Notes |
+|--------|------|-------|
+| Todo | Fix Console state not passed to renderables | See `src/console.rs` `render_lines()` |
+
+### Problem
+
+The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generic `Console<W>` methods (like `render_lines()`, `print()`, `measure_renderable()`) create a **temporary** `Console<Stdout>` to call renderables. This means:
+
+- Renderables cannot access the caller's `theme_stack`
+- Renderables cannot check `markup_enabled`, `emoji_enabled`, `highlight_enabled`
+- Renderables cannot use the caller's `tab_size` or other console configuration
+- Any renderable that inspects console state will get **default values**, not the caller's config
+
+### Impact
+
+This is **not a problem** for Phase 1-3 (simple renderables like Text, Rule, Padding).
+
+This **becomes critical** in Phase 4 when:
+- Panel needs to read theme styles for borders
+- Table needs to read theme styles and console options
+- Nested renderables need consistent configuration throughout the tree
+
+### Solution Options
+
+1. **Change Renderable trait** to accept generic `Console<W>` or a trait object
+2. **Create a ConsoleRef trait** that abstracts Console state for renderables
+3. **Pass relevant state through ConsoleOptions** instead of Console reference
+
+Each option has trade-offs around lifetimes, object safety, and API ergonomics. Must evaluate before Phase 4.
+
+---
+
 ## Phase 4: Complex Renderables
 
 ### 4.1 Panel
