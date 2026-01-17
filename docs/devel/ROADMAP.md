@@ -174,7 +174,7 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 | Done | Python test scripts for Text module | `tests/parity/phase2/python/` | test_text.py |
 | Done | Python test scripts for Markup module | `tests/parity/phase2/python/` | test_markup.py |
 | Done | Rust parity binary for Phase 2 | `tests/parity/phase2/rust/` | Matching output format |
-| Todo | Python test scripts for Console | `tests/parity/phase2/python/` | test_console.py (Phase 2.3) |
+| Done | Python test scripts for Console | `tests/parity/phase2/python/` | test_console.py (Phase 2.3) |
 
 **Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
 
