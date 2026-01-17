@@ -13,6 +13,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RegexHighlighter`, `NullHighlighter` implementations
 - Factory functions: `repr_highlighter()`, `json_highlighter()`, `iso8601_highlighter()`
 - `NoEmoji` error variant for unknown emoji names
+- Full Console module (Phase 2.3):
+  - `Theme` struct with style registry and INI config parsing
+  - `ThemeStack` for nested theme contexts
+  - 100+ default styles matching Python Rich (info, warning, error, repr.*, etc.)
+  - `JustifyMethod` enum (Left, Center, Right, Full)
+  - `OverflowMethod` enum (Fold, Crop, Ellipsis, Ignore)
+  - Expanded `ConsoleOptions` with all Python Rich fields (16+ fields)
+  - `Console<W: Write>` generic over writer for testability
+  - Color system detection from TERM/COLORTERM/NO_COLOR environment
+  - `Console::render()` - core render method returning Segments
+  - `Console::render_lines()` - render to cropped line grid
+  - `Console::render_str()` - convert string to Text with markup/emoji/highlight
+  - `Console::print()` - full-featured print with style, justify, highlight options
+  - `Console::capture()` - capture output for testing
+  - Alt screen support via crossterm (`Console::set_alt_screen()`)
+- Wrap module (Phase 2.3):
+  - `divide_line()` - find word wrap offsets for text wrapping
+  - `Words` iterator for tokenizing text into words/whitespace
+- Text wrapping methods (Phase 2.3):
+  - `Text::pad_left()`, `pad_right()`, `center()` - alignment padding
+  - `Text::expand_tabs()` - expand tabs with configurable width
+  - `Text::rstrip()`, `rstrip_end()` - trailing whitespace removal
+  - `Text::truncate()` - truncate to width with optional ellipsis/pad
+  - `Text::split()` - split on separator string
+  - `Text::wrap()` - full word wrapping with justify and overflow support
 - Full Text module (Phase 2.2):
   - `Span::split()` - split span at offset into two parts
   - `Span::move_by()` - shift span by offset (supports negative)
