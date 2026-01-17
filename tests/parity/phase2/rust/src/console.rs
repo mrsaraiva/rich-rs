@@ -1,5 +1,33 @@
-use rich_rs::{Console, Style, Theme};
+use rich_rs::{Console, SimpleColor, Style, Theme};
 use std::collections::HashMap;
+
+/// Get human-readable color name for standard ANSI colors
+fn color_name(color: &SimpleColor) -> String {
+    match color {
+        SimpleColor::Standard(n) => match n {
+            0 => "black".to_string(),
+            1 => "red".to_string(),
+            2 => "green".to_string(),
+            3 => "yellow".to_string(),
+            4 => "blue".to_string(),
+            5 => "magenta".to_string(),
+            6 => "cyan".to_string(),
+            7 => "white".to_string(),
+            8 => "bright_black".to_string(),
+            9 => "bright_red".to_string(),
+            10 => "bright_green".to_string(),
+            11 => "bright_yellow".to_string(),
+            12 => "bright_blue".to_string(),
+            13 => "bright_magenta".to_string(),
+            14 => "bright_cyan".to_string(),
+            15 => "bright_white".to_string(),
+            _ => format!("color({})", n),
+        },
+        SimpleColor::EightBit(n) => format!("color({})", n),
+        SimpleColor::Rgb { r, g, b } => format!("#{:02x}{:02x}{:02x}", r, g, b),
+        SimpleColor::Default => "default".to_string(),
+    }
+}
 
 pub fn run() {
     println!("=== Console.render_str() ===");
@@ -22,34 +50,38 @@ pub fn run() {
         text.spans().len()
     );
 
-    // Emoji replacement
+    // Emoji replacement - verify both emoji present AND :smile: removed
     let text = console.render_str(":smile: emoji", Some(true), Some(true), None, None);
     let has_emoji = text.plain_text().contains('\u{1f604}');
-    println!(
-        r#"render_str(":smile: emoji") -> has_emoji={}"#,
-        has_emoji
-    );
-
-    // Markup disabled
-    let text = console.render_str("[bold]literal[/bold]", Some(false), Some(true), None, None);
-    println!(
-        r#"render_str(markup=False) -> plain="{}""#,
-        text.plain_text()
-    );
-
-    // Emoji disabled
-    let text = console.render_str(":smile: literal", Some(true), Some(false), None, None);
     let has_colon = text.plain_text().contains(":smile:");
     println!(
-        r#"render_str(emoji=False) -> has_colon={}"#,
-        has_colon
+        r#"render_str(":smile: emoji") -> has_emoji={}, has_colon={}"#,
+        has_emoji, has_colon
     );
 
-    // Both disabled
-    let text = console.render_str("[bold]:smile:[/bold]", Some(false), Some(false), None, None);
+    // Markup disabled - verify plain text AND spans empty (highlight=false)
+    let text = console.render_str("[bold]literal[/bold]", Some(false), Some(true), Some(false), None);
     println!(
-        r#"render_str(both=False) -> plain="{}""#,
-        text.plain_text()
+        r#"render_str(markup=False) -> plain="{}", spans={}"#,
+        text.plain_text(),
+        text.spans().len()
+    );
+
+    // Emoji disabled - verify emoji NOT present AND :smile: remains (highlight=false)
+    let text = console.render_str(":smile: literal", Some(true), Some(false), Some(false), None);
+    let has_emoji = text.plain_text().contains('\u{1f604}');
+    let has_colon = text.plain_text().contains(":smile:");
+    println!(
+        r#"render_str(emoji=False) -> has_emoji={}, has_colon={}"#,
+        has_emoji, has_colon
+    );
+
+    // Both disabled - verify both remain literal (highlight=false)
+    let text = console.render_str("[bold]:smile:[/bold]", Some(false), Some(false), Some(false), None);
+    println!(
+        r#"render_str(both=False) -> plain="{}", spans={}"#,
+        text.plain_text(),
+        text.spans().len()
     );
 
     println!("\n=== Theme.styles ===");
@@ -95,8 +127,16 @@ pub fn run() {
     println!(r#"get_style("italic") -> italic={}"#, is_italic);
 
     let style = console.theme_stack().get_style("red");
-    let is_red = style.is_some(); // Has the style
-    println!(r#"get_style("red") -> is_red={}"#, is_red);
+    let cname = if let Some(s) = &style {
+        if let Some(c) = &s.color {
+            color_name(c)
+        } else {
+            "none".to_string()
+        }
+    } else {
+        "none".to_string()
+    };
+    println!(r#"get_style("red") -> color={}"#, cname);
 
     // Parse style string (using Style::parse directly since Console doesn't have get_style for arbitrary strings)
     let style = Style::parse("bold red on blue").unwrap();
@@ -117,10 +157,18 @@ pub fn run() {
     console.push_theme(custom);
 
     let style = console.theme_stack().get_style("highlight");
-    let is_bold = style.map(|s| s.bold == Some(true)).unwrap_or(false);
-    let is_yellow = style.is_some(); // Has some color
+    let is_bold = style.as_ref().map(|s| s.bold == Some(true)).unwrap_or(false);
+    let cname = if let Some(s) = &style {
+        if let Some(c) = &s.color {
+            color_name(c)
+        } else {
+            "none".to_string()
+        }
+    } else {
+        "none".to_string()
+    };
     println!(
-        r#"get_style("highlight") -> bold={}, yellow={}"#,
-        is_bold, is_yellow
+        r#"get_style("highlight") -> bold={}, color={}"#,
+        is_bold, cname
     );
 }
