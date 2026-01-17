@@ -186,11 +186,13 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Done | `BoxChars` struct | `src/box_chars.rs` | Basic structure |
-| Done | `ASCII`, `SQUARE`, `ROUNDED`, `HEAVY`, `DOUBLE` constants | `src/box_chars.rs` | 5 of ~20 boxes |
-| Todo | Remaining box types (MINIMAL, SIMPLE, MARKDOWN, etc.) | `box.py` | ~15 more variants |
-| Todo | `Box::substitute()` - platform compatibility | `box.py:Box.substitute` | Windows legacy fallback |
-| Todo | `Box::get_top()`, `get_row()`, `get_bottom()` for tables | `box.py:Box.get_*` | Column-aware borders |
+| Done | `Box` struct with 28 character fields | `src/box.rs` | Full 8-row structure for tables |
+| Done | All 19 box constants | `src/box.rs` | ASCII, ASCII2, ASCII_DOUBLE_HEAD, SQUARE, SQUARE_DOUBLE_HEAD, MINIMAL, MINIMAL_HEAVY_HEAD, MINIMAL_DOUBLE_HEAD, SIMPLE, SIMPLE_HEAD, SIMPLE_HEAVY, HORIZONTALS, ROUNDED, HEAVY, HEAVY_EDGE, HEAVY_HEAD, DOUBLE, DOUBLE_EDGE, MARKDOWN |
+| Done | `Box::substitute()` - platform compatibility | `box.py:Box.substitute` | Windows legacy + ASCII fallback |
+| Done | `Box::get_plain_headed_box()` | `box.py:Box.get_plain_headed_box` | Header character substitution |
+| Done | `Box::get_top()`, `get_row()`, `get_bottom()` | `box.py:Box.get_*` | Column-aware table borders |
+| Done | `RowLevel` enum | N/A | Head, Row, Foot, Mid variants |
+| Done | Backward compat `BoxChars` type alias | N/A | Deprecated alias to `Box` |
 
 ### 3.2 Rule (Horizontal Line)
 

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Full Box module (Phase 3.1):
+  - `Box` struct with 28 character fields for table borders (8-row structure)
+  - All 19 box constants matching Python Rich (ASCII, ASCII2, ASCII_DOUBLE_HEAD, SQUARE, SQUARE_DOUBLE_HEAD, MINIMAL, MINIMAL_HEAVY_HEAD, MINIMAL_DOUBLE_HEAD, SIMPLE, SIMPLE_HEAD, SIMPLE_HEAVY, HORIZONTALS, ROUNDED, HEAVY, HEAVY_EDGE, HEAVY_HEAD, DOUBLE, DOUBLE_EDGE, MARKDOWN)
+  - `RowLevel` enum (Head, Row, Foot, Mid) for row separator types
+  - `Box::substitute()` - platform-safe substitution (legacy Windows, ASCII-only)
+  - `Box::get_plain_headed_box()` - header character substitution
+  - `Box::get_top()`, `get_row()`, `get_bottom()` - table border generation
+  - Backward-compatible `BoxChars` type alias (deprecated)
 - `Emoji` struct with 3608 emoji entries and `:name:` replacement
 - `Highlighter` trait for regex-based text highlighting
 - `RegexHighlighter`, `NullHighlighter` implementations
