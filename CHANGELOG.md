@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Rule module (Phase 3.2):
+  - `Rule` struct for horizontal line renderables
+  - `AlignMethod` enum (Left, Center, Right) for title alignment
+  - Builder pattern with `with_title()`, `with_characters()`, `with_style()`, `with_align()`
+  - ASCII-only fallback (substitutes "-" for non-ASCII characters)
+  - Title truncation with ellipsis for narrow widths
+- Padding module (Phase 3.3):
+  - `Padding` struct wrapping `Box<dyn Renderable + Send + Sync>`
+  - `PaddingDimensions` enum for CSS-style 1/2/4 value padding
+  - `Padding::unpack()` for CSS-style padding parsing
+  - `Padding::indent()` convenience constructor for left-indent
+  - Proportional padding collapse when padding exceeds available width
 - Full Box module (Phase 3.1):
   - `Box` struct with 28 character fields for table borders (8-row structure)
   - All 19 box constants matching Python Rich (ASCII, ASCII2, ASCII_DOUBLE_HEAD, SQUARE, SQUARE_DOUBLE_HEAD, MINIMAL, MINIMAL_HEAVY_HEAD, MINIMAL_DOUBLE_HEAD, SIMPLE, SIMPLE_HEAD, SIMPLE_HEAVY, HORIZONTALS, ROUNDED, HEAVY, HEAVY_EDGE, HEAVY_HEAD, DOUBLE, DOUBLE_EDGE, MARKDOWN)

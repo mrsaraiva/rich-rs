@@ -198,16 +198,22 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Rule` struct | `rule.py:Rule` | title, characters, style, align |
-| Todo | `impl Renderable for Rule` | `rule.py:Rule.__rich_console__` | Render horizontal line |
+| Done | `Rule` struct | `rule.py:Rule` | title, characters, style, end, align |
+| Done | `AlignMethod` enum | N/A | Left, Center, Right |
+| Done | `impl Renderable for Rule` | `rule.py:Rule.__rich_console__` | Horizontal line with optional title |
+| Done | Builder pattern | N/A | with_title(), with_characters(), with_style(), with_align() |
+| Done | ASCII-only fallback | `rule.py` | Substitutes "-" for non-ASCII characters |
 
 ### 3.3 Padding
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Padding` struct | `padding.py:Padding` | (top, right, bottom, left) |
-| Todo | `Padding::unpack()` - CSS-style parsing | `padding.py:Padding.unpack` | 1, 2, or 4 values |
-| Todo | `impl Renderable for Padding` | `padding.py:Padding.__rich_console__` | Wrap with space |
+| Done | `Padding` struct | `padding.py:Padding` | Wraps Box<dyn Renderable> |
+| Done | `PaddingDimensions` enum | `padding.py:PaddingDimensions` | CSS-style 1/2/4 values |
+| Done | `Padding::unpack()` | `padding.py:Padding.unpack` | CSS-style parsing |
+| Done | `Padding::indent()` | `padding.py:Padding.indent` | Left-indent convenience |
+| Done | `impl Renderable for Padding` | `padding.py:Padding.__rich_console__` | Wrap with space |
+| Done | `impl measure()` | `padding.py:Padding.__rich_measure__` | Add padding to measurement |
 
 ### 3.4 Align
 
