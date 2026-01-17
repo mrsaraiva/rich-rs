@@ -104,8 +104,8 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Emoji` lookup | `emoji.py` + `_emoji_codes.py` | :name: → character, needed by markup |
-| Todo | `Highlighter` base trait | `highlighter.py` | Regex-based highlighting |
+| Done | `Emoji` lookup | `emoji.py` + `_emoji_codes.py` | :name: → character, needed by markup |
+| Done | `Highlighter` base trait | `highlighter.py` | Regex-based highlighting |
 
 ### 2.1 Markup Parser
 
@@ -113,14 +113,15 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Done | Basic `render()` function | `src/markup.rs` | Partial implementation |
-| Todo | `Tag` struct (name, parameters) | `markup.py:Tag` | NamedTuple in Python |
-| Todo | `_parse()` tokenizer yielding (pos, text, tag) | `markup.py:_parse` | Stack-based parser |
-| Todo | `escape()` function | `markup.py:escape` | Escape brackets |
-| Todo | Link syntax: `[link=url]text[/link]` | `markup.py` | URL handling |
-| Todo | Metadata syntax: `[@name=value]` | `markup.py` | For Textual |
-| Todo | Nested tag support with style stacking | `markup.py:render` | Combines styles |
-| Todo | Emoji code replacement | `_emoji_replace.py` | :warning: → ⚠️ |
+| Done | `Tag` struct (name, parameters) | `markup.py:Tag` | NamedTuple in Python |
+| Done | `parse()` tokenizer yielding (pos, text, tag) | `markup.py:_parse` | Regex-based parser |
+| Done | `escape()` function | `markup.py:escape` | Escape brackets |
+| Done | Link syntax: `[link=url]text[/link]` | `markup.py` | Underlined cyan style |
+| Done | Metadata syntax: `[@name=value]` | `markup.py` | Basic support |
+| Done | Nested tag support with style stacking | `markup.py:render` | Combines styles |
+| Done | Emoji code replacement | `_emoji_replace.py` | :warning: → ⚠️ |
+| Done | `render()` returns `Result<Text>` | `markup.py:render` | Full implementation |
+| Done | `render_with_style()` base style support | N/A | Rust convenience API |
 
 ### 2.2 Text
 

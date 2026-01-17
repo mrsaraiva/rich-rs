@@ -13,10 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RegexHighlighter`, `NullHighlighter` implementations
 - Factory functions: `repr_highlighter()`, `json_highlighter()`, `iso8601_highlighter()`
 - `NoEmoji` error variant for unknown emoji names
+- Full markup parser (Phase 2.1):
+  - `Tag` struct with name and optional parameters
+  - `parse()` function - regex-based tokenizer yielding `(position, text, tag)` tuples
+  - `escape()` function - escape text for safe inclusion in markup
+  - `render()` function - render markup to `Text` with styled spans
+  - `render_with_style()` function - render with base style applied
+  - Link syntax: `[link=url]text[/link]` (styled as underlined cyan)
+  - Metadata syntax: `[@handler=params]text[/@handler]`
+  - Nested tag support with style stacking
+  - Emoji code replacement integration (`:smile:` → emoji)
+  - Escaped bracket support (`\[` → `[`)
+  - Implicit close tags (`[/]` closes most recent)
+
+### Changed
+- `markup::render()` now returns `Result<Text>` with proper error handling
+- Markup module completely rewritten to match Python Rich behavior
 
 ### Dependencies
 - `phf` 0.11 - Compile-time perfect hash map for emoji lookup
-- `regex` 1.x - Regular expression support for highlighters
+- `regex` 1.x - Regular expression support for highlighters and markup parsing
 
 ## [0.1.0] - 2026-01-16
 
