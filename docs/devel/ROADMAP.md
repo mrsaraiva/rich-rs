@@ -143,18 +143,18 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 |--------|------|------------------|-------|
 | Done | Basic `Console` struct | `src/console.rs` | Minimal implementation |
 | Done | `ConsoleOptions` struct | `src/console.rs` | Basic fields |
-| Todo | Full `ConsoleOptions` fields (16+ fields) | `console.py:ConsoleOptions` | justify, overflow, etc. |
-| Todo | `Console<W: Write>` generic over writer | N/A | Enables testing |
-| Todo | Color system detection (auto from TERM) | `console.py:Console._detect_color_system` | Environment-based |
-| Todo | `Console::render()` - core render method | `console.py:Console.render` | Calls Renderable::render |
-| Todo | `Console::render_lines()` - render to line grid | `console.py:Console.render_lines` | Uses split_and_crop_lines |
-| Todo | `Console::render_str()` - string to Text | `console.py:Console.render_str` | With markup/emoji/highlight |
-| Todo | `Console::print()` - main print method | `console.py:Console.print` | Many parameters |
-| Todo | Theme support (`Theme`, `ThemeStack`) | `console.py` + `theme.py` | Named style definitions |
-| Todo | Capture for testing | `console.py:Console.capture` | Returns string |
-| Todo | Screen/alt screen support | `console.py:Console.screen` | Via crossterm |
-| Todo | `divide_line()` - word wrap helper | `_wrap.py:divide_line` | Find wrap offsets for Text::wrap() |
-| Todo | `Text::wrap()` - word wrapping with justify | `text.py:Text.wrap` | Uses divide_line + Console |
+| Done | Full `ConsoleOptions` fields (16+ fields) | `console.py:ConsoleOptions` | justify, overflow, etc. |
+| Done | `Console<W: Write>` generic over writer | N/A | Enables testing |
+| Done | Color system detection (auto from TERM) | `console.py:Console._detect_color_system` | Environment-based |
+| Done | `Console::render()` - core render method | `console.py:Console.render` | Calls Renderable::render |
+| Done | `Console::render_lines()` - render to line grid | `console.py:Console.render_lines` | Uses split_and_crop_lines |
+| Done | `Console::render_str()` - string to Text | `console.py:Console.render_str` | With markup/emoji/highlight |
+| Done | `Console::print()` - main print method | `console.py:Console.print` | Many parameters |
+| Done | Theme support (`Theme`, `ThemeStack`) | `console.py` + `theme.py` | Named style definitions |
+| Done | Capture for testing | `console.py:Console.capture` | Returns string |
+| Done | Screen/alt screen support | `console.py:Console.screen` | Via crossterm |
+| Done | `divide_line()` - word wrap helper | `_wrap.py:divide_line` | Find wrap offsets for Text::wrap() |
+| Done | `Text::wrap()` - word wrapping with justify | `text.py:Text.wrap` | Uses divide_line + Console |
 
 ### 2.4 Traits
 
