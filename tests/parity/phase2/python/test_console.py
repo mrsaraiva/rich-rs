@@ -21,23 +21,25 @@ def main():
     text = console.render_str("[bold][red]Nested[/red][/bold]")
     print(f'render_str("[bold][red]Nested[/]") -> plain="{text.plain}", spans={len(text.spans)}')
 
-    # Emoji replacement
+    # Emoji replacement - verify both emoji present AND :smile: removed
     text = console.render_str(":smile: emoji")
     has_emoji = "\U0001f604" in text.plain
-    print(f'render_str(":smile: emoji") -> has_emoji={str(has_emoji).lower()}')
-
-    # Markup disabled
-    text = console.render_str("[bold]literal[/bold]", markup=False)
-    print(f'render_str(markup=False) -> plain="{text.plain}"')
-
-    # Emoji disabled
-    text = console.render_str(":smile: literal", emoji=False)
     has_colon = ":smile:" in text.plain
-    print(f'render_str(emoji=False) -> has_colon={str(has_colon).lower()}')
+    print(f'render_str(":smile: emoji") -> has_emoji={str(has_emoji).lower()}, has_colon={str(has_colon).lower()}')
 
-    # Both disabled
-    text = console.render_str("[bold]:smile:[/bold]", markup=False, emoji=False)
-    print(f'render_str(both=False) -> plain="{text.plain}"')
+    # Markup disabled - verify plain text AND spans empty (also disable highlight for clean test)
+    text = console.render_str("[bold]literal[/bold]", markup=False, highlight=False)
+    print(f'render_str(markup=False) -> plain="{text.plain}", spans={len(text.spans)}')
+
+    # Emoji disabled - verify emoji NOT present AND :smile: remains
+    text = console.render_str(":smile: literal", emoji=False, highlight=False)
+    has_emoji = "\U0001f604" in text.plain
+    has_colon = ":smile:" in text.plain
+    print(f'render_str(emoji=False) -> has_emoji={str(has_emoji).lower()}, has_colon={str(has_colon).lower()}')
+
+    # Both disabled - verify both remain literal
+    text = console.render_str("[bold]:smile:[/bold]", markup=False, emoji=False, highlight=False)
+    print(f'render_str(both=False) -> plain="{text.plain}", spans={len(text.spans)}')
 
     print("\n=== Theme.styles ===")
 
@@ -76,8 +78,8 @@ def main():
     print(f'get_style("italic") -> italic={str(style.italic).lower()}')
 
     style = console.get_style("red")
-    is_red = style.color is not None and "red" in str(style.color).lower()
-    print(f'get_style("red") -> is_red={str(is_red).lower()}')
+    color_name = str(style.color).split("'")[1] if style.color else "none"
+    print(f'get_style("red") -> color={color_name}')
 
     # Parse style string
     style = console.get_style("bold red on blue")
@@ -93,8 +95,9 @@ def main():
 
     style = console.get_style("highlight")
     is_bold = style.bold == True
-    is_yellow = style.color is not None and "yellow" in str(style.color).lower()
-    print(f'get_style("highlight") -> bold={str(is_bold).lower()}, yellow={str(is_yellow).lower()}')
+    # Extract color name - Python str(color) gives "<color 'yellow' (...)>" so extract the name
+    color_name = str(style.color).split("'")[1] if style.color else "none"
+    print(f'get_style("highlight") -> bold={str(is_bold).lower()}, color={color_name}')
 
 
 if __name__ == "__main__":
