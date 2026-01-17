@@ -54,6 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Merged `Measurable` trait into `Renderable` as default method
 - `Segment.text` now uses `Cow<'static, str>` for efficiency
 - `Measurement::clamp()` renamed to `clamp_width()` to avoid confusion with new `clamp_bounds()`
+- `ParseError` now implements `Clone`, `PartialEq`, `Eq` and is `#[non_exhaustive]`
+- `Segment::divide()` now always yields a trailing partition (matches Python Rich behavior)
+
+### Fixed
+- Color downgrade to Windows palette now works correctly (was incorrectly skipped)
+- `chop_cells()` no longer creates leading empty lines when first char exceeds width
+- Style parsing now supports negation ("not bold", "not italic", etc.)
+- Style ANSI codes now emit proper SGR reset codes (22-29) for `Some(false)` attributes
+- `Style::get_html_style()` combines underline and strike into single `text-decoration` property
+- Removed incorrect `unsafe impl Send/Sync` on Segment/Segments (now derived automatically)
 
 ### Dependencies
 - `crossterm` 0.28 - Terminal abstraction
