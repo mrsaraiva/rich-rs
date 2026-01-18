@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Syntax highlighting module (Phase 5.3):
+  - `Syntax` struct for code highlighting with syntect integration
+  - `SyntaxTheme` trait with `AnsiTheme` and `SyntectTheme` implementations
+  - Line numbers, line range, dedent, tab expansion features
+  - `highlight()` method for standalone text highlighting
+  - 7 built-in themes (base16-ocean.dark, Solarized, InspiredGitHub, etc.)
+- Pretty printing module (Phase 5.4):
+  - `Pretty` struct for Debug trait formatting
+  - `pprint()` and `pretty_repr()` convenience functions
+  - Debug output parser with syntax highlighting
+  - Configurable indentation, max depth, max length, max string
+- Markdown module (Phase 5.6):
+  - `Markdown` struct for CommonMark + GFM rendering via pulldown-cmark
+  - Headings (H1-H6) with Panel wrapping for H1
+  - Fenced code blocks with syntax highlighting
+  - Block quotes with border styling
+  - Ordered and unordered lists (including tight lists)
+  - Tables using Table module
+  - Inline formatting (bold, italic, strikethrough, code)
+  - Links, images (placeholder with emoji), horizontal rules
 - Rule module (Phase 3.2):
   - `Rule` struct for horizontal line renderables
   - `AlignMethod` enum (Left, Center, Right) for title alignment
