@@ -1,5 +1,6 @@
-//! Phase 4 parity tests: Panel, Tree, Table
+//! Phase 4 parity tests: Panel, Tree, Table, Columns
 
+mod columns;
 mod panel;
 mod table;
 mod tree;
@@ -12,6 +13,7 @@ fn main() {
             "panel" => panel::run(),
             "tree" => tree::run(),
             "table" => table::run(),
+            "columns" => columns::run(),
             "all" | _ => {
                 println!("========== PANEL ==========\n");
                 panel::run();
@@ -19,6 +21,8 @@ fn main() {
                 tree::run();
                 println!("\n========== TABLE ==========\n");
                 table::run();
+                println!("\n========== COLUMNS ==========\n");
+                columns::run();
             }
         }
     } else {
@@ -28,5 +32,7 @@ fn main() {
         tree::run();
         println!("\n========== TABLE ==========\n");
         table::run();
+        println!("\n========== COLUMNS ==========\n");
+        columns::run();
     }
 }
