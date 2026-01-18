@@ -347,15 +347,21 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Syntax` struct | `syntax.py:Syntax` | Code highlighting |
-| Todo | Integration with syntect or tree-sitter | N/A | Rust-native highlighting |
+| Done | `Syntax` struct | `syntax.py:Syntax` | Code highlighting |
+| Done | Integration with syntect | N/A | Uses syntect crate for highlighting |
+| Done | `SyntaxTheme` trait + `AnsiTheme`, `SyntectTheme` | `syntax.py` | Configurable themes |
+| Done | Line numbers, line range, dedent, tab expansion | `syntax.py` | Full feature set |
+| Done | `highlight()` for standalone highlighting | `syntax.py:Syntax.highlight` | Returns styled Text |
 
 ### 5.4 Pretty Printing
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Pretty` struct | `pretty.py:Pretty` | Value formatting |
-| Todo | `pprint()` function | `pretty.py:pprint` | Simple API |
+| Done | `Pretty` struct | `pretty.py:Pretty` | Value formatting via Debug trait |
+| Done | `pprint()` function | `pretty.py:pprint` | Simple API |
+| Done | `pretty_repr()` function | `pretty.py:pretty_repr` | Debug string formatting |
+| Done | Debug output parser | N/A | Parses Rust {:?} format |
+| Done | Syntax highlighting of output | `pretty.py` | Uses repr_highlighter |
 
 ### 5.5 Traceback
 
@@ -368,21 +374,25 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Markdown` struct | `markdown.py:Markdown` | Markdown rendering |
-| Todo | Heading rendering (H1-H6) | `markdown.py` | Style headers |
-| Todo | Code blocks (inline and fenced) | `markdown.py` | Uses Syntax for fenced |
-| Todo | Lists (ordered, unordered) | `markdown.py` | Bullet/numbered lists |
-| Todo | Block quotes | `markdown.py` | Indented quotes |
-| Todo | Links and emphasis | `markdown.py` | Bold, italic, links |
-| Todo | Integration with markdown parser crate | N/A | pulldown-cmark or similar |
+| Done | `Markdown` struct | `markdown.py:Markdown` | Markdown rendering |
+| Done | Heading rendering (H1-H6) | `markdown.py` | H1 in Panel, H2-H6 styled |
+| Done | Code blocks (inline and fenced) | `markdown.py` | Uses Syntax for fenced blocks |
+| Done | Lists (ordered, unordered) | `markdown.py` | Bullet/numbered lists with nested support |
+| Done | Block quotes | `markdown.py` | Bordered indented quotes |
+| Done | Links and emphasis | `markdown.py` | Bold, italic, strikethrough, links |
+| Done | Tables | `markdown.py` | Uses Table for markdown tables |
+| Done | Images (placeholder) | `markdown.py` | Shows 🌆 emoji with alt text |
+| Done | Horizontal rules | `markdown.py` | Simple divider lines |
+| Done | Integration with pulldown-cmark | N/A | Full CommonMark + GFM support |
 
-**Note:** Required for demo. Consider using `pulldown-cmark` crate for parsing.
+**Note:** Uses `pulldown-cmark` crate for parsing. Syntax highlighting via the Syntax module.
 
 ### 5.7 Parity Testing
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Progress, Live, Syntax, Markdown | `tests/parity/phase5/python/` | test_progress.py, test_live.py, etc. |
+| Done | Unit tests for Syntax, Pretty, Markdown | `src/syntax.rs`, `src/pretty.rs`, `src/markdown.rs` | Extensive test coverage |
+| Todo | Python test scripts for Progress, Live | `tests/parity/phase5/python/` | test_progress.py, test_live.py |
 | Todo | Rust parity binary crate | `tests/parity/phase5/rust/` | Matching output format |
 
 **Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
@@ -407,7 +417,7 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 | Todo | Panel with sponsor message | `__main__.py` | Final call-to-action |
 | Todo | Timing output (cold/warm cache) | `__main__.py` | Performance comparison |
 
-**Prerequisites:** Phase 5.3 (Syntax), Phase 5.4 (Pretty), Phase 5.6 (Markdown)
+**Prerequisites:** Phase 5.3 (Syntax) ✓, Phase 5.4 (Pretty) ✓, Phase 5.6 (Markdown) ✓ - All complete!
 
 **Reference:** See `rich/__main__.py` for the exact demo structure and content.
 
