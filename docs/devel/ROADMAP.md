@@ -364,14 +364,52 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 | Todo | `Traceback` struct | `traceback.py:Traceback` | Error formatting |
 | Todo | `install()` for panic hook | N/A | Rust-specific |
 
-### 5.6 Parity Testing
+### 5.6 Markdown
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Progress, Live, Syntax | `tests/parity/phase5/python/` | test_progress.py, test_live.py, etc. |
+| Todo | `Markdown` struct | `markdown.py:Markdown` | Markdown rendering |
+| Todo | Heading rendering (H1-H6) | `markdown.py` | Style headers |
+| Todo | Code blocks (inline and fenced) | `markdown.py` | Uses Syntax for fenced |
+| Todo | Lists (ordered, unordered) | `markdown.py` | Bullet/numbered lists |
+| Todo | Block quotes | `markdown.py` | Indented quotes |
+| Todo | Links and emphasis | `markdown.py` | Bold, italic, links |
+| Todo | Integration with markdown parser crate | N/A | pulldown-cmark or similar |
+
+**Note:** Required for demo. Consider using `pulldown-cmark` crate for parsing.
+
+### 5.7 Parity Testing
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | Python test scripts for Progress, Live, Syntax, Markdown | `tests/parity/phase5/python/` | test_progress.py, test_live.py, etc. |
 | Todo | Rust parity binary crate | `tests/parity/phase5/rust/` | Matching output format |
 
 **Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
+
+---
+
+## Phase 6: Demo & Polish
+
+### 6.1 Demo Example
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | Create `cargo run --example demo` | `python -m rich` | Showcase all features |
+| Todo | Colors section (4-bit, 8-bit, Truecolor gradients) | `__main__.py` | Color palette display |
+| Todo | Styles section (bold, italic, underline, etc.) | `__main__.py` | All ANSI styles |
+| Todo | Text section (wrapping, justification) | `__main__.py` | Left/center/right/full |
+| Todo | Asian language support section | `__main__.py` | CJK text demo |
+| Todo | Markup section (BBCode + emoji) | `__main__.py` | Styled text with emoji |
+| Todo | Tables section | `__main__.py` | Data table with styling |
+| Todo | Syntax + Pretty side-by-side | `__main__.py` | Code and data structure |
+| Todo | Markdown section (raw + rendered) | `__main__.py` | Side-by-side comparison |
+| Todo | Panel with sponsor message | `__main__.py` | Final call-to-action |
+| Todo | Timing output (cold/warm cache) | `__main__.py` | Performance comparison |
+
+**Prerequisites:** Phase 5.3 (Syntax), Phase 5.4 (Pretty), Phase 5.6 (Markdown)
+
+**Reference:** See `rich/__main__.py` for the exact demo structure and content.
 
 ---
 
