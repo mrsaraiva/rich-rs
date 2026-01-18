@@ -307,14 +307,14 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Columns` struct | `columns.py:Columns` | Uses Table.grid() internally |
-| Todo | `impl Renderable for Columns` | `columns.py:Columns.__rich_console__` | Delegates to Table |
+| Done | `Columns` struct | `columns.py:Columns` | Uses Table.grid() internally |
+| Done | `impl Renderable for Columns` | `columns.py:Columns.__rich_console__` | Delegates to Table |
 
 ### 4.5 Parity Testing
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Done | Python test scripts for Panel, Tree, Table | `tests/parity/phase4/python/` | test_panel.py, test_table.py, test_tree.py |
+| Done | Python test scripts for Panel, Tree, Table, Columns | `tests/parity/phase4/python/` | test_panel.py, test_table.py, test_tree.py, test_columns.py |
 | Done | Rust parity binary crate | `tests/parity/phase4/rust/` | Matching output format |
 
 **Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
