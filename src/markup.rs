@@ -81,9 +81,8 @@ pub enum Token {
 /// - Group 1: Full match including backslashes
 /// - Group 2: Backslash escapes
 /// - Group 3: Tag content (without brackets)
-static RE_TAGS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"((?:\\)*)\[([a-z#/@][^\[]*?)]").expect("Invalid regex pattern")
-});
+static RE_TAGS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"((?:\\)*)\[([a-z#/@][^\[]*?)]").expect("Invalid regex pattern"));
 
 /// Parse markup into an iterator of (position, text, tag) tuples.
 ///
@@ -180,9 +179,8 @@ pub fn parse(markup: &str) -> Vec<(usize, Option<String>, Option<Tag>)> {
 /// assert_eq!(escape("\\[bold]"), "\\\\\\[bold]");
 /// ```
 pub fn escape(markup: &str) -> String {
-    static ESCAPE_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(\\*)(\[[a-z#/@][^\[]*?])").expect("Invalid escape regex")
-    });
+    static ESCAPE_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"(\\*)(\[[a-z#/@][^\[]*?])").expect("Invalid escape regex"));
 
     let result = ESCAPE_RE.replace_all(markup, |caps: &regex::Captures| {
         let backslashes = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -435,10 +433,7 @@ mod tests {
 
         let open_tag = tokens[0].2.as_ref().unwrap();
         assert_eq!(open_tag.name, "link");
-        assert_eq!(
-            open_tag.parameters,
-            Some("https://example.com".to_string())
-        );
+        assert_eq!(open_tag.parameters, Some("https://example.com".to_string()));
     }
 
     #[test]

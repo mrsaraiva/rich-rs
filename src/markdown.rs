@@ -30,7 +30,6 @@ use std::io::Stdout;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use crate::cells::cell_len;
-use crate::color::{Color, SimpleColor};
 use crate::console::{Console, ConsoleOptions, JustifyMethod};
 use crate::measure::Measurement;
 use crate::panel::Panel;

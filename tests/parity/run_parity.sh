@@ -25,7 +25,7 @@ fi
 # Build Rust crate once
 echo -e "${CYAN}Building Rust parity crate...${NC}"
 (cd "$PHASE_DIR/rust" && cargo build --release --quiet)
-RUST_BIN="$PHASE_DIR/rust/target/release/parity-${PHASE}"
+RUST_BIN="$PHASE_DIR/rust/target/release/parity-phase1"
 
 run_test() {
     local module="$1"
@@ -71,19 +71,9 @@ run_test() {
     rm -f "$tmp_python" "$tmp_rust"
 }
 
-# Get module list for phase
-get_modules() {
-    case "$PHASE" in
-        phase1) echo "color cells style segment measure" ;;
-        phase2) echo "text markup wrap text_wrap console" ;;
-        phase3) echo "box rule padding align" ;;
-        *) echo "" ;;
-    esac
-}
-
 # Run tests
 if [ "$MODULE" = "all" ]; then
-    for mod in $(get_modules); do
+    for mod in color cells style segment measure; do
         run_test "$mod"
     done
 else

@@ -5,40 +5,98 @@
 //! # Example
 //!
 //! ```
-//! use rich_rs::Console;
+//! use rich_rs::{Console, Text};
 //!
 //! let mut console = Console::new();
-//! console.print("Hello, [bold red]World[/]!").unwrap();
+//! // Print plain text
+//! console.print_text("Hello, World!").unwrap();
+//!
+//! // Print styled text using Text and render
+//! let text = Text::from_markup("Hello, [bold red]World[/]!", false).unwrap();
+//! console.print(&text, None, None, None, false, "\n").unwrap();
 //! ```
 
 // Core modules
 mod cells;
 mod color;
+mod emoji;
 pub mod error;
 mod measure;
 mod segment;
 mod style;
+mod theme;
 
 // Higher-level modules
 mod console;
+pub mod highlighter;
 pub mod markup;
-mod text;
+pub mod text;
+pub mod wrap;
 
 // Box drawing characters
-mod box_chars;
+pub mod r#box;
+
+// Simple renderables
+pub mod align;
+pub mod columns;
+pub mod padding;
+pub mod panel;
+pub mod pretty;
+pub mod rule;
+pub mod scope;
+pub mod syntax;
+pub mod table;
+pub mod traceback;
+pub mod tree;
+pub mod markdown;
 
 // Builtin renderables
 mod renderables;
 
 // Re-exports for public API
-pub use cells::cell_len;
-pub use color::Color;
-pub use console::{Console, ConsoleOptions};
-pub use error::ParseError;
-pub use measure::{measure_renderables, Measurement};
+pub use cells::{cell_len, chop_cells, set_cell_size};
+pub use color::{
+    ANSI_COLOR_NAMES, Color, ColorSystem, ColorTriplet, ColorType, EIGHT_BIT_PALETTE, Palette,
+    STANDARD_PALETTE, SimpleColor, WINDOWS_PALETTE, blend_rgb, parse_rgb_hex,
+};
+pub use console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod};
+pub use error::{ParseError, Result as ParseResult};
+pub use measure::{Measurement, measure_renderables};
 pub use segment::{ControlType, Segment, Segments};
-pub use style::{Style, StyleMeta};
-pub use text::Text;
+pub use style::{NULL_STYLE, Style, StyleMeta};
+pub use text::{Span, Text, TextPart};
+pub use theme::{Theme, ThemeError, ThemeStack, default_styles};
+pub use wrap::divide_line;
+
+// Emoji re-exports
+pub use emoji::{EMOJI, Emoji, EmojiVariant};
+
+// Highlighter re-exports
+pub use highlighter::{
+    Highlighter, NullHighlighter, RegexHighlighter, combine_regex, iso8601_highlighter,
+    json_highlighter, repr_highlighter,
+};
+
+// Simple renderable re-exports
+pub use align::{Align, VerticalAlignMethod};
+pub use columns::Columns;
+pub use padding::{Padding, PaddingDimensions};
+pub use panel::Panel;
+pub use rule::{AlignMethod, Rule};
+pub use table::{Column, Row, Table};
+pub use tree::{ASCII_GUIDES, TREE_GUIDES, Tree, TreeGuides};
+
+// Syntax highlighting re-exports
+pub use syntax::{AnsiTheme, Syntax, SyntaxTheme, SyntectTheme, DEFAULT_THEME};
+
+// Pretty printing re-exports
+pub use pretty::{Pretty, pprint, pretty_repr};
+
+// Scope re-exports
+pub use scope::{ScopeRenderable, render_scope};
+
+// Traceback re-exports
+pub use traceback::{Frame, Stack, SyntaxErrorInfo, Trace, Traceback, TracebackBuilder};
 
 /// A type that can be rendered to the console.
 ///

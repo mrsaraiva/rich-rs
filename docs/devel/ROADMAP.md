@@ -90,11 +90,11 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Done | Python test scripts for Phase 1 modules | `tests/parity/phase1/python/` | test_color.py, test_cells.py, etc. |
-| Done | Rust parity binary crate | `tests/parity/phase1/rust/` | Matching output format |
-| Done | Parity test runner script | `tests/parity/run_parity.sh` | Runs both, shows diff |
+| Done | Python test scripts for Phase 1 modules | `tests/parity/phase1/python/` | Recovered from JSONL transcripts |
+| Done | Rust parity binary crate | `tests/parity/phase1/rust/` | Recovered from JSONL transcripts |
+| Done | Parity test runner script | `tests/parity/run_parity.sh` | Recovered from JSONL transcripts |
 
-**Reference:** See `tests/parity/phase1/` for the canonical parity test structure. Each phase should have equivalent Python and Rust programs that produce identical output for comparison.
+**Reference:** See `tests/parity/phase1/` for the canonical parity test structure.
 
 ---
 
@@ -171,12 +171,9 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Done | Python test scripts for Text module | `tests/parity/phase2/python/` | test_text.py |
-| Done | Python test scripts for Markup module | `tests/parity/phase2/python/` | test_markup.py |
-| Done | Rust parity binary for Phase 2 | `tests/parity/phase2/rust/` | Matching output format |
-| Done | Python test scripts for Console | `tests/parity/phase2/python/` | test_console.py (Phase 2.3) |
+| Done | Phase 2 parity tests | `tests/parity/phase2/` | Recovered from JSONL transcripts |
 
-**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization.
 
 ---
 
@@ -229,10 +226,9 @@ A comprehensive task list for porting Python Rich to Rust. Reference: `/home/msa
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Done | Python test scripts for Box, Rule, Padding, Align | `tests/parity/phase3/python/` | test_box.py, test_rule.py, etc. |
-| Done | Rust parity binary crate | `tests/parity/phase3/rust/` | Matching output format |
+| Done | Phase 3 parity tests | `tests/parity/phase3/` | Recovered from JSONL transcripts |
 
-**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization.
 
 ---
 
@@ -314,10 +310,9 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Done | Python test scripts for Panel, Tree, Table, Columns | `tests/parity/phase4/python/` | test_panel.py, test_table.py, test_tree.py, test_columns.py |
-| Done | Rust parity binary crate | `tests/parity/phase4/rust/` | Matching output format |
+| Done | Phase 4 parity tests | `tests/parity/phase4/` | Recovered from JSONL transcripts |
 
-**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization.
 
 ---
 
@@ -367,7 +362,13 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Traceback` struct | `traceback.py:Traceback` | Error formatting |
+| Done | `Frame` struct | `traceback.py:Frame` | Stack frame data |
+| Done | `Stack` struct | `traceback.py:Stack` | Exception with frames |
+| Done | `Trace` struct | `traceback.py:Trace` | Collection of stacks |
+| Done | `Traceback` struct + TracebackBuilder | `traceback.py:Traceback` | Configuration/display |
+| Done | `SyntaxErrorInfo` struct | `traceback.py` | Syntax error details |
+| Done | `ScopeRenderable` + `render_scope()` | `scope.py` | Local variables table |
+| Todo | `impl Renderable for Traceback` | `traceback.py:Traceback.__rich_console__` | Rendering logic |
 | Todo | `install()` for panic hook | N/A | Rust-specific |
 
 ### 5.6 Markdown
@@ -392,10 +393,10 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
 | Done | Unit tests for Syntax, Pretty, Markdown | `src/syntax.rs`, `src/pretty.rs`, `src/markdown.rs` | Extensive test coverage |
-| Todo | Python test scripts for Progress, Live | `tests/parity/phase5/python/` | test_progress.py, test_live.py |
-| Todo | Rust parity binary crate | `tests/parity/phase5/rust/` | Matching output format |
+| Done | Parity test framework | `tests/parity/` | Recovered from JSONL transcripts |
+| Todo | Phase 5 parity tests | `tests/parity/phase5/` | Add parity tests for advanced features |
 
-**Reference:** Follow the structure in `tests/parity/phase1/` for test organization and output format.
+**Reference:** Follow the structure in `tests/parity/phase1/` for test organization.
 
 ---
 

@@ -1,9 +1,5 @@
 use rich_rs::{ColorSystem, SimpleColor, Style};
 
-fn py_bool(b: bool) -> &'static str {
-    if b { "True" } else { "False" }
-}
-
 fn color_name(color: &SimpleColor) -> String {
     // Reverse lookup standard ANSI colors to names
     match color {
@@ -32,38 +28,38 @@ pub fn run() {
     println!("=== Style Parsing ===");
 
     let s = Style::parse("bold").unwrap();
-    println!("parse(\"bold\") -> bold={}", py_bool(s.bold.unwrap()));
+    println!("parse(\"bold\") -> bold={}", s.bold.unwrap());
 
     let s = Style::parse("italic").unwrap();
-    println!("parse(\"italic\") -> italic={}", py_bool(s.italic.unwrap()));
+    println!("parse(\"italic\") -> italic={}", s.italic.unwrap());
 
     let s = Style::parse("bold italic").unwrap();
-    println!("parse(\"bold italic\") -> bold={}, italic={}", py_bool(s.bold.unwrap()), py_bool(s.italic.unwrap()));
+    println!("parse(\"bold italic\") -> bold={}, italic={}", s.bold.unwrap(), s.italic.unwrap());
 
     let s = Style::parse("bold red").unwrap();
-    println!("parse(\"bold red\") -> bold={}, color={}", py_bool(s.bold.unwrap()), format_color(&s));
+    println!("parse(\"bold red\") -> bold={}, color={}", s.bold.unwrap(), format_color(&s));
 
     let s = Style::parse("bold red on blue").unwrap();
     let bgcolor = match &s.bgcolor {
         Some(c) => color_name(c),
         None => "None".to_string(),
     };
-    println!("parse(\"bold red on blue\") -> bold={}, color={}, bgcolor={}", py_bool(s.bold.unwrap()), format_color(&s), bgcolor);
+    println!("parse(\"bold red on blue\") -> bold={}, color={}, bgcolor={}", s.bold.unwrap(), format_color(&s), bgcolor);
 
     let s = Style::parse("underline strike").unwrap();
-    println!("parse(\"underline strike\") -> underline={}, strike={}", py_bool(s.underline.unwrap()), py_bool(s.strike.unwrap()));
+    println!("parse(\"underline strike\") -> underline={}, strike={}", s.underline.unwrap(), s.strike.unwrap());
 
     println!("\n=== Style Combination ===");
 
     let s1 = Style::parse("bold").unwrap();
     let s2 = Style::parse("italic").unwrap();
     let combined = s1 + s2;
-    println!("bold + italic -> bold={}, italic={}", py_bool(combined.bold.unwrap()), py_bool(combined.italic.unwrap()));
+    println!("bold + italic -> bold={}, italic={}", combined.bold.unwrap(), combined.italic.unwrap());
 
     let s1 = Style::parse("bold red").unwrap();
     let s2 = Style::parse("blue").unwrap();
     let combined = s1 + s2;
-    println!("(bold red) + blue -> bold={}, color={}", py_bool(combined.bold.unwrap()), format_color(&combined));
+    println!("(bold red) + blue -> bold={}, color={}", combined.bold.unwrap(), format_color(&combined));
 
     println!("\n=== ANSI Rendering ===");
 
@@ -94,9 +90,9 @@ pub fn run() {
     println!("\n=== Null Style ===");
 
     let s = Style::new();
-    println!("Style() is null -> {}", s.is_null().to_string().to_lowercase());
+    println!("Style() is null -> {}", s.is_null());
     println!("Style().render(\"X\") -> {}", escape_ansi(&s.render("X", ColorSystem::TrueColor)));
 
     let s = Style::parse("bold").unwrap();
-    println!("Style(bold) is null -> {}", s.is_null().to_string().to_lowercase());
+    println!("Style(bold) is null -> {}", s.is_null());
 }

@@ -403,7 +403,9 @@ impl Renderable for Align {
                     }
                     VerticalAlignMethod::Middle => {
                         let top_space = (v_height.saturating_sub(rendered_height)) / 2;
-                        let bottom_space = v_height.saturating_sub(top_space).saturating_sub(rendered_height);
+                        let bottom_space = v_height
+                            .saturating_sub(top_space)
+                            .saturating_sub(rendered_height);
                         blank_lines(&mut result, top_space);
                         generate_segments(&mut result);
                         blank_lines(&mut result, bottom_space);
