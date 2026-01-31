@@ -3,7 +3,8 @@
 use thiserror::Error;
 
 /// Errors that can occur when parsing styles, colors, or markup.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ParseError {
     /// Invalid color specification.
     #[error("invalid color: {0}")]
@@ -24,6 +25,10 @@ pub enum ParseError {
     /// Unexpected closing tag in markup.
     #[error("unexpected closing tag: {0}")]
     UnexpectedClosingTag(String),
+
+    /// No emoji found with the given name.
+    #[error("no emoji called {0:?}")]
+    NoEmoji(String),
 }
 
 impl ParseError {
@@ -41,4 +46,12 @@ impl ParseError {
     pub fn invalid_markup(s: impl Into<String>) -> Self {
         ParseError::InvalidMarkup(s.into())
     }
+
+    /// Create a no emoji error.
+    pub fn no_emoji(s: impl Into<String>) -> Self {
+        ParseError::NoEmoji(s.into())
+    }
 }
+
+/// A specialized Result type for parsing operations.
+pub type Result<T> = std::result::Result<T, ParseError>;

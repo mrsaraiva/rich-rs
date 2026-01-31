@@ -24,8 +24,7 @@ pub fn run() {
     let lines: Vec<&str> = output.lines().collect();
     println!("Panel('Hello, World!') lines={}", lines.len());
     for (i, line) in lines.iter().enumerate() {
-        // Use chars().count() for Unicode character count (not bytes)
-        println!("  line[{}]: len={}", i, line.chars().count());
+        println!("  line[{}]: len={}", i, line.len());
     }
 
     println!("\n=== Panel with title ===");

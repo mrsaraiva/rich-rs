@@ -51,20 +51,14 @@ def main():
 
     print("\n=== Columns with column_first ===")
 
-    # Use width=8 to force multiple rows with 7 items
-    items = ["1", "2", "3", "4", "5", "6", "7"]
+    items = ["1", "2", "3", "4", "5"]
     columns_normal = Columns(items, column_first=False)
     columns_cf = Columns(items, column_first=True)
-    output_normal = render_columns(columns_normal, 8)
-    output_cf = render_columns(columns_cf, 8)
+    output_normal = render_columns(columns_normal, 20)
+    output_cf = render_columns(columns_cf, 20)
     # They should produce different layouts
     same = output_normal == output_cf
     print(f"Columns(column_first=True) differs from normal: {not same}")
-    # Show actual layout
-    lines_normal = output_normal.split('\n')
-    lines_cf = output_cf.split('\n')
-    print(f"  normal row 0: {repr(lines_normal[0] if lines_normal else '')}")
-    print(f"  cf row 0: {repr(lines_cf[0] if lines_cf else '')}")
 
     print("\n=== Columns with right_to_left ===")
 

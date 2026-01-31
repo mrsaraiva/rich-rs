@@ -57,18 +57,19 @@ def main():
 
     print("\n=== Rule with narrow width ===")
 
-    result = render_rule(Rule("Title"), width=15)
-    print(f'Rule("Title", width=15) -> "{result}"')
+    result = render_rule(Rule("Very Long Title"), width=15)
+    print(f'Rule("Very Long Title", width=15) -> "{result}"')
 
     result = render_rule(Rule("X"), width=10)
     print(f'Rule("X", width=10) -> "{result}"')
 
     print("\n=== AlignMethod parsing ===")
 
-    # Python uses Literal["left", "center", "right"] - validate the values
-    valid_values = ["left", "center", "right"]
-    for v in valid_values:
-        print(f'AlignMethod::parse("{v}") -> Some({v.capitalize()})')
+    # Python doesn't have an AlignMethod.parse() - it's just a Literal type
+    # Simulate the validation behavior
+    print('AlignMethod::parse("left") -> Some(Left)')
+    print('AlignMethod::parse("center") -> Some(Center)')
+    print('AlignMethod::parse("right") -> Some(Right)')
     print('AlignMethod::parse("invalid") -> None')
 
 

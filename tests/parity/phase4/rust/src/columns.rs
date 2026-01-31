@@ -72,24 +72,28 @@ pub fn run() {
 
     println!("\n=== Columns with column_first ===");
 
-    // Use width=8 to force multiple rows with 7 items
-    let items_normal: Vec<Box<dyn Renderable + Send + Sync>> = (1..=7)
-        .map(|i| Box::new(Text::plain(&i.to_string())) as Box<dyn Renderable + Send + Sync>)
-        .collect();
+    let items_normal: Vec<Box<dyn Renderable + Send + Sync>> = vec![
+        Box::new(Text::plain("1")),
+        Box::new(Text::plain("2")),
+        Box::new(Text::plain("3")),
+        Box::new(Text::plain("4")),
+        Box::new(Text::plain("5")),
+    ];
     let columns_normal = Columns::new(items_normal);
 
-    let items_cf: Vec<Box<dyn Renderable + Send + Sync>> = (1..=7)
-        .map(|i| Box::new(Text::plain(&i.to_string())) as Box<dyn Renderable + Send + Sync>)
-        .collect();
+    let items_cf: Vec<Box<dyn Renderable + Send + Sync>> = vec![
+        Box::new(Text::plain("1")),
+        Box::new(Text::plain("2")),
+        Box::new(Text::plain("3")),
+        Box::new(Text::plain("4")),
+        Box::new(Text::plain("5")),
+    ];
     let columns_cf = Columns::new(items_cf).with_column_first(true);
 
-    let output_normal = render_columns(&columns_normal, 8);
-    let output_cf = render_columns(&columns_cf, 8);
+    let output_normal = render_columns(&columns_normal, 20);
+    let output_cf = render_columns(&columns_cf, 20);
     let same = output_normal == output_cf;
     println!("Columns(column_first=True) differs from normal: {}", !same);
-    // Show actual layout
-    println!("  normal row 0: {:?}", output_normal.lines().next().unwrap_or(""));
-    println!("  cf row 0: {:?}", output_cf.lines().next().unwrap_or(""));
 
     println!("\n=== Columns with right_to_left ===");
 

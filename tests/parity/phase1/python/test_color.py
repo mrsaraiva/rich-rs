@@ -42,25 +42,25 @@ def main():
     print("\n=== ANSI Codes (foreground) ===")
 
     c = Color.parse("red")
-    codes = c.get_ansi_codes(foreground=True)
+    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR)
     print(f'Standard red -> {";".join(codes)}')
 
     c = Color.parse("color(196)")
-    codes = c.get_ansi_codes(foreground=True)
+    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR)
     print(f'EightBit(196) -> {";".join(codes)}')
 
     c = Color.parse("#ff0000")
-    codes = c.get_ansi_codes(foreground=True)
+    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR)
     print(f'TrueColor(255,0,0) -> {";".join(codes)}')
 
     print("\n=== ANSI Codes (background) ===")
 
     c = Color.parse("red")
-    codes = c.get_ansi_codes(foreground=False)
+    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR, foreground=False)
     print(f'Standard red bg -> {";".join(codes)}')
 
     c = Color.parse("#ff0000")
-    codes = c.get_ansi_codes(foreground=False)
+    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR, foreground=False)
     print(f'TrueColor(255,0,0) bg -> {";".join(codes)}')
 
     print("\n=== Color Downgrade ===")
