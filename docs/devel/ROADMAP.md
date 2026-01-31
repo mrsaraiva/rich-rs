@@ -368,8 +368,8 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 | Done | `Traceback` struct + TracebackBuilder | `traceback.py:Traceback` | Configuration/display |
 | Done | `SyntaxErrorInfo` struct | `traceback.py` | Syntax error details |
 | Done | `ScopeRenderable` + `render_scope()` | `scope.py` | Local variables table |
-| Todo | `impl Renderable for Traceback` | `traceback.py:Traceback.__rich_console__` | Rendering logic |
-| Todo | `install()` for panic hook | N/A | Rust-specific |
+| Done | `impl Renderable for Traceback` | `traceback.py:Traceback.__rich_console__` | Rendering logic |
+| Done | `install()` for panic hook | N/A | Rust-specific |
 
 ### 5.6 Markdown
 

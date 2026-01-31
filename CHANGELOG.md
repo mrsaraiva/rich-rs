@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Traceback rendering (Phase 5.5):
+  - `impl Renderable for Traceback` for complete exception display
+  - Renders stack frames with syntax-highlighted source code
+  - Panel-style output with styled borders and title
+  - Exception chaining support with cause messages
+  - Syntax error display with offset indicator (▲)
+  - Frame suppression and max_frames limiting
+  - Local variables display via scope module
+  - `install()` and `install_with_options()` for panic hook registration
 - Syntax highlighting module (Phase 5.3):
   - `Syntax` struct for code highlighting with syntect integration
   - `SyntaxTheme` trait with `AnsiTheme` and `SyntectTheme` implementations
