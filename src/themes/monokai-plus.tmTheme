@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>name</key>
+	<string>Monokai Plus</string>
+	<key>settings</key>
+	<array>
+		<!-- Global settings -->
+		<dict>
+			<key>settings</key>
+			<dict>
+				<key>background</key>
+				<string>#272822</string>
+				<key>foreground</key>
+				<string>#f8f8f2</string>
+				<key>caret</key>
+				<string>#f8f8f0</string>
+				<key>lineHighlight</key>
+				<string>#49483e</string>
+				<key>selection</key>
+				<string>#49483e</string>
+			</dict>
+		</dict>
+
+		<!-- Comments -->
+		<dict>
+			<key>name</key>
+			<string>Comment</string>
+			<key>scope</key>
+			<string>comment</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#959077</string>
+			</dict>
+		</dict>
+
+		<!-- Documentation strings (docstrings) - should be yellow like strings, not gray like comments -->
+		<dict>
+			<key>name</key>
+			<string>Docstring</string>
+			<key>scope</key>
+			<string>comment.block.documentation, string.quoted.docstring, string.docstring</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#e6db74</string>
+			</dict>
+		</dict>
+
+		<!-- Strings -->
+		<dict>
+			<key>name</key>
+			<string>String</string>
+			<key>scope</key>
+			<string>string</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#e6db74</string>
+			</dict>
+		</dict>
+
+		<!-- Numbers -->
+		<dict>
+			<key>name</key>
+			<string>Number</string>
+			<key>scope</key>
+			<string>constant.numeric</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ae81ff</string>
+			</dict>
+		</dict>
+
+		<!-- Constants -->
+		<dict>
+			<key>name</key>
+			<string>Constant</string>
+			<key>scope</key>
+			<string>constant</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ae81ff</string>
+			</dict>
+		</dict>
+
+		<!-- Built-in constants (True, False, None) -->
+		<dict>
+			<key>name</key>
+			<string>Built-in constant</string>
+			<key>scope</key>
+			<string>constant.language</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ae81ff</string>
+			</dict>
+		</dict>
+
+		<!-- Keywords -->
+		<dict>
+			<key>name</key>
+			<string>Keyword</string>
+			<key>scope</key>
+			<string>keyword</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#66d9ef</string>
+			</dict>
+		</dict>
+
+		<!-- Control keywords (if, for, while, return, etc.) - same as base keyword in Pygments -->
+		<dict>
+			<key>name</key>
+			<string>Keyword Control</string>
+			<key>scope</key>
+			<string>keyword.control</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#66d9ef</string>
+			</dict>
+		</dict>
+
+		<!-- Import/namespace keywords (import, from) - pink in Pygments Monokai -->
+		<dict>
+			<key>name</key>
+			<string>Keyword Import</string>
+			<key>scope</key>
+			<string>keyword.control.import, keyword.other.import</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ff4689</string>
+			</dict>
+		</dict>
+
+		<!-- Storage (def, class, function, etc.) -->
+		<dict>
+			<key>name</key>
+			<string>Storage</string>
+			<key>scope</key>
+			<string>storage</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#66d9ef</string>
+				<key>fontStyle</key>
+				<string>italic</string>
+			</dict>
+		</dict>
+
+		<!-- Storage type (class, function, def) -->
+		<dict>
+			<key>name</key>
+			<string>Storage type</string>
+			<key>scope</key>
+			<string>storage.type</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#66d9ef</string>
+				<key>fontStyle</key>
+				<string>italic</string>
+			</dict>
+		</dict>
+
+		<!-- Function names -->
+		<dict>
+			<key>name</key>
+			<string>Function name</string>
+			<key>scope</key>
+			<string>entity.name.function</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#a6e22e</string>
+			</dict>
+		</dict>
+
+		<!-- Class names -->
+		<dict>
+			<key>name</key>
+			<string>Class name</string>
+			<key>scope</key>
+			<string>entity.name.class, entity.name.type</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#a6e22e</string>
+				<key>fontStyle</key>
+				<string>underline</string>
+			</dict>
+		</dict>
+
+		<!-- Inherited class -->
+		<dict>
+			<key>name</key>
+			<string>Inherited class</string>
+			<key>scope</key>
+			<string>entity.other.inherited-class</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#a6e22e</string>
+				<key>fontStyle</key>
+				<string>italic underline</string>
+			</dict>
+		</dict>
+
+		<!-- Decorators -->
+		<dict>
+			<key>name</key>
+			<string>Decorator</string>
+			<key>scope</key>
+			<string>entity.name.function.decorator, meta.function.decorator</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#a6e22e</string>
+			</dict>
+		</dict>
+
+		<!-- Function parameters -->
+		<dict>
+			<key>name</key>
+			<string>Function parameter</string>
+			<key>scope</key>
+			<string>variable.parameter</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fd971f</string>
+				<key>fontStyle</key>
+				<string>italic</string>
+			</dict>
+		</dict>
+
+		<!-- Operators -->
+		<dict>
+			<key>name</key>
+			<string>Operator</string>
+			<key>scope</key>
+			<string>keyword.operator</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ff4689</string>
+			</dict>
+		</dict>
+
+		<!-- Punctuation -->
+		<dict>
+			<key>name</key>
+			<string>Punctuation</string>
+			<key>scope</key>
+			<string>punctuation</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#f8f8f2</string>
+			</dict>
+		</dict>
+
+		<!-- Support (built-in functions, types) -->
+		<dict>
+			<key>name</key>
+			<string>Support function</string>
+			<key>scope</key>
+			<string>support.function</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#66d9ef</string>
+			</dict>
+		</dict>
+
+		<!-- Support types -->
+		<dict>
+			<key>name</key>
+			<string>Support type</string>
+			<key>scope</key>
+			<string>support.type</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#66d9ef</string>
+				<key>fontStyle</key>
+				<string>italic</string>
+			</dict>
+		</dict>
+
+		<!-- Support class -->
+		<dict>
+			<key>name</key>
+			<string>Support class</string>
+			<key>scope</key>
+			<string>support.class</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#66d9ef</string>
+				<key>fontStyle</key>
+				<string>italic</string>
+			</dict>
+		</dict>
+
+		<!-- Exception types (like StopIteration, ValueError) - green like class names in Pygments -->
+		<dict>
+			<key>name</key>
+			<string>Exception type</string>
+			<key>scope</key>
+			<string>support.type.exception, entity.name.type.class.exception</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#a6e22e</string>
+			</dict>
+		</dict>
+
+		<!-- Variable -->
+		<dict>
+			<key>name</key>
+			<string>Variable</string>
+			<key>scope</key>
+			<string>variable</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#f8f8f2</string>
+			</dict>
+		</dict>
+
+		<!-- Invalid -->
+		<dict>
+			<key>name</key>
+			<string>Invalid</string>
+			<key>scope</key>
+			<string>invalid</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#f8f8f2</string>
+				<key>background</key>
+				<string>#ff4689</string>
+			</dict>
+		</dict>
+
+		<!-- Tag names (HTML/XML) -->
+		<dict>
+			<key>name</key>
+			<string>Tag name</string>
+			<key>scope</key>
+			<string>entity.name.tag</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ff4689</string>
+			</dict>
+		</dict>
+
+		<!-- Tag attributes -->
+		<dict>
+			<key>name</key>
+			<string>Tag attribute</string>
+			<key>scope</key>
+			<string>entity.other.attribute-name</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#a6e22e</string>
+			</dict>
+		</dict>
+
+		<!-- Escape characters -->
+		<dict>
+			<key>name</key>
+			<string>String escape</string>
+			<key>scope</key>
+			<string>constant.character.escape</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ae81ff</string>
+			</dict>
+		</dict>
+
+	</array>
+</dict>
+</plist>

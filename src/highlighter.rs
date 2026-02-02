@@ -6,6 +6,7 @@
 use regex::Regex;
 
 use crate::text::Text;
+use crate::theme::Theme;
 
 /// Build a byte-offset to char-offset lookup table for O(1) conversion.
 ///
@@ -53,6 +54,8 @@ pub struct RegexHighlighter {
     pub highlights: Vec<Regex>,
     /// Style prefix for named groups (e.g., "repr." -> "repr.number").
     pub base_style: String,
+    /// Theme for style lookups.
+    theme: Theme,
 }
 
 impl RegexHighlighter {
@@ -75,6 +78,7 @@ impl RegexHighlighter {
         RegexHighlighter {
             highlights,
             base_style: base_style.to_string(),
+            theme: Theme::new(),
         }
     }
 
@@ -94,23 +98,21 @@ impl RegexHighlighter {
         Ok(RegexHighlighter {
             highlights: highlights?,
             base_style: base_style.to_string(),
+            theme: Theme::new(),
         })
+    }
+
+    /// Set the theme for this highlighter.
+    ///
+    /// The theme determines the colors and styles applied to matched patterns.
+    pub fn with_theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
     }
 }
 
 impl Highlighter for RegexHighlighter {
     fn highlight(&self, text: &mut Text) {
-        // TODO: Full implementation requires Text::highlight_regex() method
-        // which would iterate over patterns, find all matches with named groups,
-        // and apply styles like `format!("{}{}", self.base_style, group_name)`.
-        //
-        // The implementation would look something like:
-        //
-        // for regex in &self.highlights {
-        //     text.highlight_regex(regex, &self.base_style);
-        // }
-        //
-        // For now, we provide a basic implementation that works with the current Text API.
         let plain = text.plain_text().to_string();
 
         // Precompute byte-to-char mapping for O(n) total complexity instead of O(n²)
@@ -125,17 +127,11 @@ impl Highlighter for RegexHighlighter {
                         let start_char = byte_to_char[m.start()];
                         let end_char = byte_to_char[m.end()];
 
-                        // Apply style based on base_style + capture group name
-                        // TODO: This requires style lookup from a theme/registry
-                        // For now, we apply a default style (will be expanded when
-                        // the style registry is implemented)
-                        let _style_name = format!("{}{}", self.base_style, name);
-
-                        // Apply the span - in a full implementation, we would look up
-                        // the style by name from a theme. For now, we just record the span.
-                        // This will work properly once Text::highlight_regex() is implemented.
-                        use crate::style::Style;
-                        text.stylize(start_char, end_char, Style::default());
+                        // Look up style from theme by base_style + capture group name
+                        let style_name = format!("{}{}", self.base_style, name);
+                        if let Some(style) = self.theme.get_style(&style_name) {
+                            text.stylize(start_char, end_char, style);
+                        }
                     }
                 }
             }
@@ -164,6 +160,15 @@ pub fn combine_regex(patterns: &[&str]) -> String {
 /// Note: Some patterns from Python's ReprHighlighter have been simplified because
 /// Rust's regex crate doesn't support look-around assertions or conditional patterns.
 pub fn repr_highlighter() -> RegexHighlighter {
+    repr_highlighter_with_theme(Theme::new())
+}
+
+/// Create a highlighter for `__repr__` output with a custom theme.
+///
+/// # Arguments
+///
+/// * `theme` - The theme to use for styling
+pub fn repr_highlighter_with_theme(theme: Theme) -> RegexHighlighter {
     // Patterns adapted from Python's ReprHighlighter
     // Note: Look-around assertions removed for Rust regex compatibility
     let patterns = [
@@ -195,7 +200,7 @@ pub fn repr_highlighter() -> RegexHighlighter {
     let owned_patterns: Vec<String> = patterns.iter().map(|s| s.to_string()).collect();
     let pattern_refs: Vec<&str> = owned_patterns.iter().map(|s| s.as_str()).collect();
 
-    RegexHighlighter::new(&pattern_refs, "repr.")
+    RegexHighlighter::new(&pattern_refs, "repr.").with_theme(theme)
 }
 
 /// Create a highlighter for JSON.
@@ -365,12 +370,13 @@ mod tests {
 
     #[test]
     fn test_regex_highlighter_basic_highlight() {
-        let highlighter = RegexHighlighter::new(&[r"(?P<number>\d+)"], "test.");
+        // Use "repr." base style which has "repr.number" defined in the theme
+        let highlighter = RegexHighlighter::new(&[r"(?P<number>\d+)"], "repr.");
         let mut text = Text::plain("value is 42");
 
         highlighter.highlight(&mut text);
 
-        // Should have added a span for the number
+        // Should have added a span for the number (repr.number exists in theme)
         assert!(!text.spans().is_empty());
         // The span should cover "42" (characters 9-11)
         let span = &text.spans()[0];

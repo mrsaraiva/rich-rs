@@ -392,7 +392,22 @@ impl Segment {
             if pad {
                 let mut new_line = line.to_vec();
                 let padding = " ".repeat(length - line_length);
-                new_line.push(Segment::new_with_style_control(padding, style, None));
+                let end_style = line
+                    .iter()
+                    .rev()
+                    .find_map(|seg| {
+                        if seg.control.is_some() {
+                            return None;
+                        }
+                        seg.style
+                    });
+                let padding_style = match (style, end_style) {
+                    (Some(base), Some(end)) => Some(base.combine(&end)),
+                    (Some(base), None) => Some(base),
+                    (None, Some(end)) => Some(end),
+                    (None, None) => None,
+                };
+                new_line.push(Segment::new_with_style_control(padding, padding_style, None));
                 new_line
             } else {
                 line.to_vec()
@@ -435,6 +450,16 @@ impl Segment {
             // Line is exactly the right length
             line.to_vec()
         }
+    }
+
+    /// Get the last non-control style in a line.
+    ///
+    /// This is useful for determining the "end of line" style when padding with spaces,
+    /// so background colors extend to the full width.
+    pub fn get_last_style(line: &[Segment]) -> Option<Style> {
+        line.iter()
+            .rev()
+            .find_map(|seg| if seg.control.is_some() { None } else { seg.style })
     }
 
     /// Simplify segments by merging adjacent segments with the same style.
@@ -1142,6 +1167,30 @@ mod tests {
         let result = Segment::adjust_line_length(&line, 5, None, true);
         assert_eq!(Segment::get_line_length(&result), 5);
         assert_eq!(result.len(), 2); // Original + padding
+    }
+
+    #[test]
+    fn test_adjust_line_length_pad_inherits_end_style() {
+        let end_style =
+            Style::new().with_bgcolor(crate::SimpleColor::Rgb { r: 1, g: 2, b: 3 });
+        let line = vec![Segment::styled("x", end_style)];
+        let result = Segment::adjust_line_length(&line, 3, None, true);
+        assert_eq!(Segment::get_line_length(&result), 3);
+        let padding = result.last().unwrap();
+        assert_eq!(&*padding.text, "  ");
+        assert_eq!(padding.style.unwrap().bgcolor, end_style.bgcolor);
+    }
+
+    #[test]
+    fn test_adjust_line_length_pad_combines_base_and_end_style() {
+        let base = Style::new().with_bold(true);
+        let end_style =
+            Style::new().with_bgcolor(crate::SimpleColor::Rgb { r: 4, g: 5, b: 6 });
+        let line = vec![Segment::styled("x", end_style)];
+        let result = Segment::adjust_line_length(&line, 3, Some(base), true);
+        let padding = result.last().unwrap().style.unwrap();
+        assert_eq!(padding.bold, Some(true));
+        assert_eq!(padding.bgcolor, end_style.bgcolor);
     }
 
     #[test]

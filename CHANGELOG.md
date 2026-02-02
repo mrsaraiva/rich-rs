@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Demo example (Phase 6.1):
+  - `cargo run --example demo` showcasing all rich-rs features
+  - ColorBox renderable with HLS→RGB TrueColor gradient
+  - Colors, Styles, Text, Asian language support sections
+  - Markup with BBCode and emoji display
+  - Tables section with styled movie data
+  - Syntax highlighting + Pretty printing side-by-side
+  - Markdown raw vs rendered comparison
+  - Panel with sponsor message and timing output
 - Traceback rendering (Phase 5.5):
   - `impl Renderable for Traceback` for complete exception display
   - Renders stack frames with syntax-highlighted source code

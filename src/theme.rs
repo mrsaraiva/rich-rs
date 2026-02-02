@@ -12,14 +12,38 @@
 //! theme.add_style("error", Style::parse("bold red").unwrap());
 //! assert!(theme.get_style("error").is_some());
 //! ```
+//!
+//! # Named Themes
+//!
+//! Several themes are embedded and can be loaded by name:
+//!
+//! ```
+//! use rich_rs::Theme;
+//!
+//! let theme = Theme::from_name("dracula").unwrap();
+//! assert!(theme.get_style("repr.number").is_some());
+//! ```
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Cursor};
 use std::path::Path;
 
 use crate::color::SimpleColor as Color;
 use crate::style::Style;
+
+// ============================================================================
+// Embedded Themes (generated from Pygments)
+// ============================================================================
+
+/// Dracula theme data (dark theme with purple accents)
+const DRACULA_THEME_DATA: &str = include_str!("themes/dracula.theme");
+
+/// Gruvbox Dark theme data (retro groove dark theme)
+const GRUVBOX_DARK_THEME_DATA: &str = include_str!("themes/gruvbox-dark.theme");
+
+/// Nord theme data (arctic, north-bluish color palette)
+const NORD_THEME_DATA: &str = include_str!("themes/nord.theme");
 
 /// Errors that can occur when working with themes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +230,55 @@ impl Theme {
         }
 
         lines.join("\n")
+    }
+
+    /// Load a theme by name.
+    ///
+    /// Available themes:
+    /// - `"default"` - The default rich-rs theme
+    /// - `"dracula"` - Dark theme with purple accents
+    /// - `"gruvbox-dark"` - Retro groove dark theme
+    /// - `"nord"` - Arctic, north-bluish color palette
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::Theme;
+    ///
+    /// let theme = Theme::from_name("dracula").unwrap();
+    /// assert!(theme.get_style("repr.number").is_some());
+    /// ```
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.to_lowercase().as_str() {
+            "default" => Some(Self::new()),
+            "dracula" => {
+                let reader = Cursor::new(DRACULA_THEME_DATA);
+                Self::from_reader(reader, true).ok()
+            }
+            "gruvbox-dark" | "gruvbox" => {
+                let reader = Cursor::new(GRUVBOX_DARK_THEME_DATA);
+                Self::from_reader(reader, true).ok()
+            }
+            "nord" => {
+                let reader = Cursor::new(NORD_THEME_DATA);
+                Self::from_reader(reader, true).ok()
+            }
+            _ => None,
+        }
+    }
+
+    /// List available theme names.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::Theme;
+    ///
+    /// let themes = Theme::available_themes();
+    /// assert!(themes.contains(&"dracula"));
+    /// ```
+    pub fn available_themes() -> Vec<&'static str> {
+        vec!["default", "dracula", "gruvbox-dark", "nord"]
     }
 }
 
@@ -1072,5 +1145,42 @@ test = bold
         let parsed = Style::parse(&s).unwrap();
         assert_eq!(parsed.bold, Some(true));
         assert_eq!(parsed.color, Some(Color::Standard(1)));
+    }
+
+    #[test]
+    fn test_theme_from_name() {
+        // Default theme
+        let default = Theme::from_name("default");
+        assert!(default.is_some());
+        assert!(default.unwrap().has_style("repr.number"));
+
+        // Dracula theme
+        let dracula = Theme::from_name("dracula");
+        assert!(dracula.is_some());
+        let dracula = dracula.unwrap();
+        assert!(dracula.has_style("repr.number"));
+        // Should have custom colors from the theme file
+        let style = dracula.get_style("repr.number").unwrap();
+        assert!(style.color.is_some());
+
+        // Gruvbox dark theme
+        let gruvbox = Theme::from_name("gruvbox-dark");
+        assert!(gruvbox.is_some());
+
+        // Nord theme
+        let nord = Theme::from_name("nord");
+        assert!(nord.is_some());
+
+        // Unknown theme returns None
+        assert!(Theme::from_name("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_theme_available_themes() {
+        let themes = Theme::available_themes();
+        assert!(themes.contains(&"default"));
+        assert!(themes.contains(&"dracula"));
+        assert!(themes.contains(&"gruvbox-dark"));
+        assert!(themes.contains(&"nord"));
     }
 }

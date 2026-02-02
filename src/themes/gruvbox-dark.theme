@@ -1,0 +1,15 @@
+# Rich-rs theme generated from Pygments 'gruvbox-dark' theme
+# Use with Theme::from_file() or Theme::from_reader()
+
+[styles]
+json.key = rgb(142,192,124)
+json.number = rgb(211,134,155)
+json.str = rgb(184,187,38)
+repr.attrib_name = rgb(250,189,47)
+repr.call = rgb(142,192,124)
+repr.error = rgb(40,40,40) on rgb(251,73,52)
+repr.indent = italic rgb(146,131,116)
+repr.number = rgb(211,134,155)
+repr.number_complex = rgb(211,134,155)
+repr.str = rgb(184,187,38)
+repr.tag_name = rgb(142,192,124)

@@ -654,16 +654,25 @@ impl Renderable for Panel {
             renderables.push(s);
         }
 
-        let width = if let Some(w) = self.width {
-            w
+        if let Some(w) = self.width {
+            return Measurement::exact(w).with_maximum(options.max_width);
+        }
+
+        // Measure the inner content within the space available after borders and padding.
+        // Use both min and max so parent layouts (e.g., Table) can shrink panels without
+        // thinking they require the full available width.
+        let measure_options =
+            options.update_width(options.max_width.saturating_sub(horizontal_padding + 2));
+        let inner_measurement = measure_renderables(console, &measure_options, &renderables);
+
+        let min_width = inner_measurement.minimum + horizontal_padding + 2;
+        let max_width = if self.expand {
+            options.max_width
         } else {
-            let measure_options =
-                options.update_width(options.max_width.saturating_sub(horizontal_padding + 2));
-            let inner_measurement = measure_renderables(console, &measure_options, &renderables);
             inner_measurement.maximum + horizontal_padding + 2
         };
 
-        Measurement::new(width, width)
+        Measurement::new(min_width, max_width).with_maximum(options.max_width)
     }
 }
 

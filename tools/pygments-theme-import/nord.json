@@ -1,0 +1,148 @@
+{
+  "name": "nord",
+  "background_color": "#2E3440",
+  "highlight_color": "#3B4252",
+  "line_number_color": "#D8DEE9",
+  "line_number_background_color": "#242933",
+  "styles": {
+    "Token": {
+      "color": "#d8dee9"
+    },
+    "Text.Whitespace": {
+      "color": "#d8dee9"
+    },
+    "Punctuation": {
+      "color": "#eceff4"
+    },
+    "Comment": {
+      "italic": true,
+      "color": "#616e87"
+    },
+    "Comment.Preproc": {
+      "color": "#5e81ac"
+    },
+    "Keyword": {
+      "bold": true,
+      "color": "#81a1c1"
+    },
+    "Keyword.Pseudo": {
+      "bold": false,
+      "color": "#81a1c1"
+    },
+    "Keyword.Type": {
+      "bold": false,
+      "color": "#81a1c1"
+    },
+    "Operator": {
+      "bold": true,
+      "color": "#81a1c1"
+    },
+    "Operator.Word": {
+      "bold": true,
+      "color": "#81a1c1"
+    },
+    "Name": {
+      "color": "#d8dee9"
+    },
+    "Name.Builtin": {
+      "color": "#81a1c1"
+    },
+    "Name.Function": {
+      "color": "#88c0d0"
+    },
+    "Name.Class": {
+      "color": "#8fbcbb"
+    },
+    "Name.Namespace": {
+      "color": "#8fbcbb"
+    },
+    "Name.Exception": {
+      "color": "#bf616a"
+    },
+    "Name.Variable": {
+      "color": "#d8dee9"
+    },
+    "Name.Constant": {
+      "color": "#8fbcbb"
+    },
+    "Name.Entity": {
+      "color": "#d08770"
+    },
+    "Name.Attribute": {
+      "color": "#8fbcbb"
+    },
+    "Name.Tag": {
+      "color": "#81a1c1"
+    },
+    "Name.Decorator": {
+      "color": "#d08770"
+    },
+    "Literal.String": {
+      "color": "#a3be8c"
+    },
+    "Literal.String.Doc": {
+      "color": "#616e87"
+    },
+    "Literal.String.Interpol": {
+      "color": "#a3be8c"
+    },
+    "Literal.String.Escape": {
+      "color": "#ebcb8b"
+    },
+    "Literal.String.Regex": {
+      "color": "#ebcb8b"
+    },
+    "Literal.String.Symbol": {
+      "color": "#a3be8c"
+    },
+    "Literal.String.Other": {
+      "color": "#a3be8c"
+    },
+    "Literal.Number": {
+      "color": "#b48ead"
+    },
+    "Generic.Heading": {
+      "bold": true,
+      "color": "#88c0d0"
+    },
+    "Generic.Subheading": {
+      "bold": true,
+      "color": "#88c0d0"
+    },
+    "Generic.Deleted": {
+      "color": "#bf616a"
+    },
+    "Generic.Inserted": {
+      "color": "#a3be8c"
+    },
+    "Generic.Error": {
+      "color": "#bf616a"
+    },
+    "Generic.Emph": {
+      "italic": true
+    },
+    "Generic.Strong": {
+      "bold": true
+    },
+    "Generic.EmphStrong": {
+      "bold": true,
+      "italic": true
+    },
+    "Generic.Prompt": {
+      "bold": true,
+      "color": "#616e88"
+    },
+    "Generic.Output": {
+      "color": "#d8dee9"
+    },
+    "Generic.Traceback": {
+      "color": "#bf616a"
+    },
+    "Error": {
+      "color": "#bf616a"
+    },
+    "Text": {
+      "color": "#d8dee9"
+    }
+  }
+}

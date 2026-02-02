@@ -406,17 +406,17 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Create `cargo run --example demo` | `python -m rich` | Showcase all features |
-| Todo | Colors section (4-bit, 8-bit, Truecolor gradients) | `__main__.py` | Color palette display |
-| Todo | Styles section (bold, italic, underline, etc.) | `__main__.py` | All ANSI styles |
-| Todo | Text section (wrapping, justification) | `__main__.py` | Left/center/right/full |
-| Todo | Asian language support section | `__main__.py` | CJK text demo |
-| Todo | Markup section (BBCode + emoji) | `__main__.py` | Styled text with emoji |
-| Todo | Tables section | `__main__.py` | Data table with styling |
-| Todo | Syntax + Pretty side-by-side | `__main__.py` | Code and data structure |
-| Todo | Markdown section (raw + rendered) | `__main__.py` | Side-by-side comparison |
-| Todo | Panel with sponsor message | `__main__.py` | Final call-to-action |
-| Todo | Timing output (cold/warm cache) | `__main__.py` | Performance comparison |
+| Done | Create `cargo run --example demo` | `python -m rich` | Showcase all features |
+| Done | Colors section (4-bit, 8-bit, Truecolor gradients) | `__main__.py` | ColorBox with HLS→RGB gradient |
+| Done | Styles section (bold, italic, underline, etc.) | `__main__.py` | All ANSI styles |
+| Done | Text section (wrapping, justification) | `__main__.py` | Left/center/right/full |
+| Done | Asian language support section | `__main__.py` | CJK text with flag emoji |
+| Done | Markup section (BBCode + emoji) | `__main__.py` | Styled text with emoji |
+| Done | Tables section | `__main__.py` | Movie data table with styling |
+| Done | Syntax + Pretty side-by-side | `__main__.py` | Python code + DemoData struct |
+| Done | Markdown section (raw + rendered) | `__main__.py` | Side-by-side comparison |
+| Done | Panel with sponsor message | `__main__.py` | rich-rs title with border |
+| Done | Timing output (cold/warm cache) | `__main__.py` | Cold ~50ms, warm ~8ms |
 
 **Prerequisites:** Phase 5.3 (Syntax) ✓, Phase 5.4 (Pretty) ✓, Phase 5.6 (Markdown) ✓ - All complete!
 
