@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>name</key>
+	<string>Gruvbox-dark</string>
+	<key>settings</key>
+	<array>
+		<!-- Global settings -->
+		<dict>
+			<key>settings</key>
+			<dict>
+				<key>background</key>
+				<string>#282828</string>
+				<key>foreground</key>
+				<string>#f8f8f2</string>
+				<key>caret</key>
+				<string>#f8f8f2</string>
+				<key>selection</key>
+				<string>#ebdbb2</string>
+				<key>lineHighlight</key>
+				<string>#ebdbb2</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Builtin -->
+		<dict>
+			<key>name</key>
+			<string>Name.Builtin</string>
+			<key>scope</key>
+			<string>support.function, variable.language</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fe8019</string>
+			</dict>
+		</dict>
+
+		<!-- Keyword -->
+		<dict>
+			<key>name</key>
+			<string>Keyword</string>
+			<key>scope</key>
+			<string>keyword</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Decorator -->
+		<dict>
+			<key>name</key>
+			<string>Name.Decorator</string>
+			<key>scope</key>
+			<string>entity.name.function.decorator, meta.decorator</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Operator.Word -->
+		<dict>
+			<key>name</key>
+			<string>Operator.Word</string>
+			<key>scope</key>
+			<string>keyword.operator.word</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Variable -->
+		<dict>
+			<key>name</key>
+			<string>Name.Variable</string>
+			<key>scope</key>
+			<string>variable</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#83a598</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Output -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Output</string>
+			<key>scope</key>
+			<string>markup.raw</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#f2e5bc</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Traceback -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Traceback</string>
+			<key>scope</key>
+			<string>invalid.deprecated</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Attribute -->
+		<dict>
+			<key>name</key>
+			<string>Name.Attribute</string>
+			<key>scope</key>
+			<string>entity.other.attribute-name</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fabd2f</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Tag -->
+		<dict>
+			<key>name</key>
+			<string>Name.Tag</string>
+			<key>scope</key>
+			<string>entity.name.tag</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#8ec07c</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Prompt -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Prompt</string>
+			<key>scope</key>
+			<string>markup.raw</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#a89984</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Subheading -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Subheading</string>
+			<key>scope</key>
+			<string>markup.heading</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ebdbb2</string>
+				<key>fontStyle</key>
+				<string>underline</string>
+			</dict>
+		</dict>
+
+		<!-- Comment.Special -->
+		<dict>
+			<key>name</key>
+			<string>Comment.Special</string>
+			<key>scope</key>
+			<string>comment.block.documentation</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ebdbb2</string>
+				<key>fontStyle</key>
+				<string>bold italic</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Heading -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Heading</string>
+			<key>scope</key>
+			<string>markup.heading</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#ebdbb2</string>
+				<key>fontStyle</key>
+				<string>bold</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Namespace -->
+		<dict>
+			<key>name</key>
+			<string>Name.Namespace</string>
+			<key>scope</key>
+			<string>entity.name.namespace, entity.name.module</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#8ec07c</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Function -->
+		<dict>
+			<key>name</key>
+			<string>Name.Function</string>
+			<key>scope</key>
+			<string>entity.name.function</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#8ec07c</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Deleted -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Deleted</string>
+			<key>scope</key>
+			<string>markup.deleted</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#282828</string>
+				<key>background</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Inserted -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Inserted</string>
+			<key>scope</key>
+			<string>markup.inserted</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#282828</string>
+				<key>background</key>
+				<string>#b8bb26</string>
+			</dict>
+		</dict>
+
+		<!-- Comment -->
+		<dict>
+			<key>name</key>
+			<string>Comment</string>
+			<key>scope</key>
+			<string>comment</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#928374</string>
+				<key>fontStyle</key>
+				<string>italic</string>
+			</dict>
+		</dict>
+
+		<!-- Error -->
+		<dict>
+			<key>name</key>
+			<string>Error</string>
+			<key>scope</key>
+			<string>invalid.illegal</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#282828</string>
+				<key>background</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Error -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Error</string>
+			<key>scope</key>
+			<string>invalid.illegal</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Emph -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Emph</string>
+			<key>scope</key>
+			<string>markup.italic</string>
+			<key>settings</key>
+			<dict>
+				<key>fontStyle</key>
+				<string>italic</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Constant -->
+		<dict>
+			<key>name</key>
+			<string>Name.Constant</string>
+			<key>scope</key>
+			<string>constant.other, variable.other.constant</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#d3869b</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Exception -->
+		<dict>
+			<key>name</key>
+			<string>Name.Exception</string>
+			<key>scope</key>
+			<string>support.type.exception, entity.name.type.class.exception</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#fb4934</string>
+			</dict>
+		</dict>
+
+		<!-- Name.Class -->
+		<dict>
+			<key>name</key>
+			<string>Name.Class</string>
+			<key>scope</key>
+			<string>entity.name.class, entity.name.type.class</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#8ec07c</string>
+			</dict>
+		</dict>
+
+		<!-- Generic.Strong -->
+		<dict>
+			<key>name</key>
+			<string>Generic.Strong</string>
+			<key>scope</key>
+			<string>markup.bold</string>
+			<key>settings</key>
+			<dict>
+				<key>fontStyle</key>
+				<string>bold</string>
+			</dict>
+		</dict>
+
+	</array>
+</dict>
+</plist>

@@ -136,6 +136,9 @@ pub struct ConsoleOptions {
     // =========================================================================
     /// Theme stack for style lookups. Cloned from the console.
     pub theme_stack: ThemeStack,
+    /// Current theme name (e.g., "default", "dracula").
+    /// Renderables can use this to match their theme to the console.
+    pub theme_name: String,
     /// Whether markup parsing is enabled by default.
     pub markup_enabled: bool,
     /// Whether emoji replacement is enabled by default.
@@ -144,6 +147,14 @@ pub struct ConsoleOptions {
     pub highlight_enabled: bool,
     /// Tab size for tab expansion.
     pub tab_size: usize,
+    /// Disable terminal automatic line wrap while printing.
+    ///
+    /// This prevents "soft wrap" artifacts when output fills exactly the last
+    /// column of the terminal (common on Windows Terminal and xterm-like VTs).
+    ///
+    /// When enabled and writing to a real terminal, the Console will emit
+    /// `ESC[?7l` before printing and `ESC[?7h` after.
+    pub disable_line_wrap: bool,
     /// Detected color system (None = no colors).
     pub color_system: Option<ColorSystem>,
 }
@@ -166,10 +177,12 @@ impl Default for ConsoleOptions {
             markup: None,
             // Console state defaults
             theme_stack: ThemeStack::default(),
+            theme_name: "default".to_string(),
             markup_enabled: true,
             emoji_enabled: true,
             highlight_enabled: true,
             tab_size: 8,
+            disable_line_wrap: false,
             color_system: Some(ColorSystem::EightBit),
         }
     }
@@ -186,10 +199,14 @@ impl ConsoleOptions {
         ConsoleOptions {
             size: (width, height),
             min_width: 1,
-            max_width: width,
+            max_width: width.max(1),
             max_height: height,
             height: None,
             is_terminal,
+            // Avoid soft-wrap artifacts by temporarily disabling automatic line wrap.
+            // This allows layouts to use the full terminal width while still preventing
+            // terminals from inserting an extra wrapped line when writing in the last column.
+            disable_line_wrap: true,
             color_system,
             ..Default::default()
         }
@@ -344,6 +361,8 @@ pub struct Console<W: Write = Stdout> {
     highlight_enabled: bool,
     /// Theme stack for styled output.
     theme_stack: ThemeStack,
+    /// Current theme name for renderables to use.
+    theme_name: String,
     /// Whether the alt screen is currently active.
     is_alt_screen: bool,
     /// Whether to suppress all output (quiet mode).
@@ -368,10 +387,35 @@ impl Console<Stdout> {
             emoji_enabled: true,
             highlight_enabled: true,
             theme_stack: ThemeStack::new(Theme::default()),
+            theme_name: "default".to_string(),
             is_alt_screen: false,
             quiet: false,
             tab_size: 8,
         }
+    }
+
+    /// Set the console theme by name.
+    ///
+    /// This sets the base theme for all renderables. Renderables like `Pretty` and
+    /// `Syntax` will automatically use this theme unless they have an explicit theme set.
+    ///
+    /// Available themes: "default", "dracula", "gruvbox-dark", "nord"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::Console;
+    ///
+    /// let console = Console::new().with_theme("dracula");
+    /// ```
+    pub fn with_theme(mut self, name: &str) -> Self {
+        if let Some(theme) = Theme::from_name(name) {
+            self.theme_stack = ThemeStack::new(theme.clone());
+            self.options.theme_stack = ThemeStack::new(theme);
+            self.theme_name = name.to_string();
+            self.options.theme_name = name.to_string();
+        }
+        self
     }
 
     /// Create a console with specific options.
@@ -388,6 +432,7 @@ impl Console<Stdout> {
             emoji_enabled: options.emoji_enabled,
             highlight_enabled: options.highlight_enabled,
             theme_stack: options.theme_stack.clone(),
+            theme_name: options.theme_name.clone(),
             tab_size: options.tab_size,
             legacy_windows: options.legacy_windows,
             // Non-state fields
@@ -401,12 +446,15 @@ impl Console<Stdout> {
 
     /// Detect color system from environment variables.
     fn detect_color_system_static(is_terminal: bool) -> Option<ColorSystem> {
-        // Check NO_COLOR environment variable
+        // Check NO_COLOR environment variable (takes precedence)
         if env::var("NO_COLOR").is_ok() {
             return None;
         }
 
-        if !is_terminal {
+        // Check FORCE_COLOR to enable colors even when not a terminal
+        let force_color = env::var("FORCE_COLOR").is_ok();
+
+        if !is_terminal && !force_color {
             return None;
         }
 
@@ -520,6 +568,7 @@ impl<W: Write> Console<W> {
             emoji_enabled: options.emoji_enabled,
             highlight_enabled: options.highlight_enabled,
             theme_stack: options.theme_stack.clone(),
+            theme_name: options.theme_name.clone(),
             tab_size: options.tab_size,
             legacy_windows: options.legacy_windows,
             // Non-state fields
@@ -568,6 +617,7 @@ impl<W: Write> Console<W> {
         self.tab_size = self.options.tab_size;
         self.color_system = self.options.color_system;
         self.theme_stack = self.options.theme_stack.clone();
+        self.theme_name = self.options.theme_name.clone();
         self.legacy_windows = self.options.legacy_windows;
     }
 
@@ -683,6 +733,36 @@ impl<W: Write> Console<W> {
     /// Enable or disable quiet mode (suppress all output).
     pub fn set_quiet(&mut self, quiet: bool) {
         self.quiet = quiet;
+    }
+
+    /// Get the current theme name.
+    ///
+    /// Returns the name of the base theme (e.g., "default", "dracula").
+    pub fn theme_name(&self) -> &str {
+        &self.theme_name
+    }
+
+    /// Set the theme by name.
+    ///
+    /// This replaces the base theme. Any pushed themes remain on the stack.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::Console;
+    ///
+    /// let mut console = Console::new();
+    /// console.set_theme("dracula");
+    /// assert_eq!(console.theme_name(), "dracula");
+    /// ```
+    pub fn set_theme(&mut self, name: &str) {
+        if let Some(theme) = Theme::from_name(name) {
+            // Create a new theme stack with the new base theme
+            self.theme_stack = ThemeStack::new(theme.clone());
+            self.options.theme_stack = ThemeStack::new(theme);
+            self.theme_name = name.to_string();
+            self.options.theme_name = name.to_string();
+        }
     }
 
     /// Get a reference to the theme stack.
@@ -887,15 +967,146 @@ impl<W: Write> Console<W> {
     }
 
     /// Print multiple segments.
+    ///
+    /// Uses streaming output that avoids resetting styles between segments,
+    /// which prevents visual artifacts like black hairlines between colored lines.
     pub fn print_segments(&mut self, segments: &Segments) -> io::Result<()> {
         if self.quiet {
             return Ok(());
         }
 
-        for segment in segments.iter() {
-            self.print_segment(segment)?;
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct StyleState {
+            fg: crate::color::SimpleColor,
+            bg: crate::color::SimpleColor,
+            bold: bool,
+            dim: bool,
+            italic: bool,
+            underline: bool,
+            blink: bool,
+            reverse: bool,
+            strike: bool,
         }
-        Ok(())
+
+        impl StyleState {
+            const DEFAULT: Self = Self {
+                fg: crate::color::SimpleColor::Default,
+                bg: crate::color::SimpleColor::Default,
+                bold: false,
+                dim: false,
+                italic: false,
+                underline: false,
+                blink: false,
+                reverse: false,
+                strike: false,
+            };
+
+            fn from_style(style: Option<Style>) -> Self {
+                let style = style.unwrap_or_default();
+                Self {
+                    fg: style.color.unwrap_or(crate::color::SimpleColor::Default),
+                    bg: style.bgcolor.unwrap_or(crate::color::SimpleColor::Default),
+                    bold: style.bold.unwrap_or(false),
+                    dim: style.dim.unwrap_or(false),
+                    italic: style.italic.unwrap_or(false),
+                    underline: style.underline.unwrap_or(false),
+                    blink: style.blink.unwrap_or(false),
+                    reverse: style.reverse.unwrap_or(false),
+                    strike: style.strike.unwrap_or(false),
+                }
+            }
+
+            fn sgr_diff(self, target: Self, color_system: ColorSystem) -> String {
+                if self == target {
+                    return String::new();
+                }
+
+                let mut sgr: Vec<String> = Vec::new();
+
+                // Reset codes first (explicitly turning attributes off).
+                // Note: SGR 22 resets both bold AND dim.
+                let needs_22 = (self.bold && !target.bold) || (self.dim && !target.dim);
+                if needs_22 {
+                    sgr.push("22".to_string());
+                }
+                if self.italic && !target.italic {
+                    sgr.push("23".to_string());
+                }
+                if self.underline && !target.underline {
+                    sgr.push("24".to_string());
+                }
+                if self.blink && !target.blink {
+                    sgr.push("25".to_string());
+                }
+                if self.reverse && !target.reverse {
+                    sgr.push("27".to_string());
+                }
+                if self.strike && !target.strike {
+                    sgr.push("29".to_string());
+                }
+
+                // Colors: treat unspecified colors as Default (39/49) to avoid "bleed"
+                // between segments when using streaming output.
+                if self.fg != target.fg {
+                    let fg = target.fg.downgrade(color_system);
+                    sgr.extend(fg.get_ansi_codes(true));
+                }
+                if self.bg != target.bg {
+                    let bg = target.bg.downgrade(color_system);
+                    sgr.extend(bg.get_ansi_codes(false));
+                }
+
+                // Enable codes last.
+                if target.bold && (!self.bold || needs_22) {
+                    sgr.push("1".to_string());
+                }
+                if target.dim && (!self.dim || needs_22) {
+                    sgr.push("2".to_string());
+                }
+                if target.italic && !self.italic {
+                    sgr.push("3".to_string());
+                }
+                if target.underline && !self.underline {
+                    sgr.push("4".to_string());
+                }
+                if target.blink && !self.blink {
+                    sgr.push("5".to_string());
+                }
+                if target.reverse && !self.reverse {
+                    sgr.push("7".to_string());
+                }
+                if target.strike && !self.strike {
+                    sgr.push("9".to_string());
+                }
+
+                sgr.join(";")
+            }
+        }
+
+        let mut current = StyleState::DEFAULT;
+        let mut used_sgr = false;
+
+        for segment in segments.iter() {
+            if let Some(color_system) = self.color_system {
+                let target = StyleState::from_style(segment.style);
+                let diff = current.sgr_diff(target, color_system);
+                if !diff.is_empty() {
+                    write!(self.writer, "\x1b[{}m", diff)?;
+                    used_sgr = true;
+                }
+                write!(self.writer, "{}", segment.text)?;
+                current = target;
+            } else {
+                write!(self.writer, "{}", segment.text)?;
+            }
+        }
+
+        // Reset at the end so terminal state doesn't leak past the renderable.
+        if self.color_system.is_some() && used_sgr && current != StyleState::DEFAULT {
+            write!(self.writer, "\x1b[0m")?;
+        }
+
+        self.writer.flush()
     }
 
     /// Print a renderable object.
@@ -951,15 +1162,31 @@ impl<W: Write> Console<W> {
             segments
         };
 
-        // Print segments
-        self.print_segments(&segments)?;
-
-        // Print end string
-        if !end.is_empty() {
-            write!(self.writer, "{}", end)?;
+        let should_disable_wrap = self.options.disable_line_wrap && atty::is(atty::Stream::Stdout);
+        if should_disable_wrap {
+            // Disable automatic line wrap (DECAWM) so output can use full width
+            // without terminals inserting an extra wrapped line.
+            write!(self.writer, "\x1b[?7l")?;
         }
 
-        self.writer.flush()
+        let result = (|| {
+            // Print segments
+            self.print_segments(&segments)?;
+
+            // Print end string
+            if !end.is_empty() {
+                write!(self.writer, "{}", end)?;
+            }
+
+            self.writer.flush()
+        })();
+
+        if should_disable_wrap {
+            // Always attempt to restore wrap mode.
+            let _ = write!(self.writer, "\x1b[?7h");
+        }
+
+        result
     }
 
     /// Render a line (horizontal rule).

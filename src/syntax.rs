@@ -29,7 +29,7 @@ use syntect::util::LinesWithEndings;
 
 use crate::cells::cell_len;
 use crate::color::SimpleColor as Color;
-use crate::console::{Console, ConsoleOptions};
+use crate::console::{Console, ConsoleOptions, OverflowMethod};
 use crate::measure::Measurement;
 use crate::padding::PaddingDimensions;
 use crate::segment::{Segment, Segments};
@@ -47,10 +47,66 @@ static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines
 /// Global theme set loaded once at startup.
 static THEME_SET: Lazy<ThemeSet> = Lazy::new(ThemeSet::load_defaults);
 
-/// Default theme name.
-pub const DEFAULT_THEME: &str = "base16-ocean.dark";
+/// Embedded Monokai theme (matches Pygments Monokai exactly).
+const MONOKAI_THEME_DATA: &[u8] = include_bytes!("themes/monokai.tmTheme");
+
+/// Embedded Monokai Plus theme (enhanced with more semantic highlighting).
+const MONOKAI_PLUS_THEME_DATA: &[u8] = include_bytes!("themes/monokai-plus.tmTheme");
+
+/// Embedded Dracula theme (imported from Pygments).
+const DRACULA_THEME_DATA: &[u8] = include_bytes!("themes/dracula.tmTheme");
+
+/// Embedded Gruvbox Dark theme (imported from Pygments).
+const GRUVBOX_DARK_THEME_DATA: &[u8] = include_bytes!("themes/gruvbox-dark.tmTheme");
+
+/// Embedded Nord theme (imported from Pygments).
+const NORD_THEME_DATA: &[u8] = include_bytes!("themes/nord.tmTheme");
+
+/// Monokai theme loaded from embedded data.
+static MONOKAI_THEME: Lazy<Option<Theme>> = Lazy::new(|| {
+    use std::io::Cursor;
+    let mut cursor = Cursor::new(MONOKAI_THEME_DATA);
+    ThemeSet::load_from_reader(&mut cursor).ok()
+});
+
+/// Monokai Plus theme loaded from embedded data.
+static MONOKAI_PLUS_THEME: Lazy<Option<Theme>> = Lazy::new(|| {
+    use std::io::Cursor;
+    let mut cursor = Cursor::new(MONOKAI_PLUS_THEME_DATA);
+    ThemeSet::load_from_reader(&mut cursor).ok()
+});
+
+/// Dracula theme loaded from embedded data.
+static DRACULA_THEME: Lazy<Option<Theme>> = Lazy::new(|| {
+    use std::io::Cursor;
+    let mut cursor = Cursor::new(DRACULA_THEME_DATA);
+    ThemeSet::load_from_reader(&mut cursor).ok()
+});
+
+/// Gruvbox Dark theme loaded from embedded data.
+static GRUVBOX_DARK_THEME: Lazy<Option<Theme>> = Lazy::new(|| {
+    use std::io::Cursor;
+    let mut cursor = Cursor::new(GRUVBOX_DARK_THEME_DATA);
+    ThemeSet::load_from_reader(&mut cursor).ok()
+});
+
+/// Nord theme loaded from embedded data.
+static NORD_THEME: Lazy<Option<Theme>> = Lazy::new(|| {
+    use std::io::Cursor;
+    let mut cursor = Cursor::new(NORD_THEME_DATA);
+    ThemeSet::load_from_reader(&mut cursor).ok()
+});
+
+/// Default theme name (matches Python Rich's default "monokai").
+/// We map "monokai" to "base16-mocha.dark" which is the closest available theme.
+pub const DEFAULT_THEME: &str = "monokai";
+
+/// Fallback syntect theme name for ANSI theme highlighting.
+const FALLBACK_SYNTECT_THEME: &str = "base16-mocha.dark";
 
 /// Default padding for line numbers column.
+/// Format: "  N │ " = 2 (pointer) + digits + 3 (separator " │ ")
+// Match Python Rich `rich.syntax.NUMBERS_COLUMN_DEFAULT_PADDING`.
 pub const NUMBERS_COLUMN_DEFAULT_PADDING: usize = 2;
 
 // ============================================================================
@@ -425,6 +481,8 @@ pub struct Syntax {
     indent_guides: bool,
     /// Padding around the syntax block.
     padding: (usize, usize, usize, usize),
+    /// Whether an explicit theme was set (if false, use Console's theme).
+    explicit_theme: bool,
 }
 
 impl std::fmt::Debug for Syntax {
@@ -442,6 +500,7 @@ impl std::fmt::Debug for Syntax {
             .field("word_wrap", &self.word_wrap)
             .field("indent_guides", &self.indent_guides)
             .field("padding", &self.padding)
+            .field("explicit_theme", &self.explicit_theme)
             .finish_non_exhaustive()
     }
 }
@@ -478,6 +537,7 @@ impl Syntax {
             background_color: None,
             indent_guides: false,
             padding: (0, 0, 0, 0),
+            explicit_theme: false,
         }
     }
 
@@ -580,10 +640,38 @@ impl Syntax {
             _ => {}
         }
 
-        // Try to find syntect theme
+        // Check for our embedded themes (imported from Pygments)
+        match name.to_lowercase().as_str() {
+            "monokai" => {
+                if let Some(ref theme) = *MONOKAI_THEME {
+                    return Box::new(SyntectTheme::new(theme.clone()));
+                }
+            }
+            "monokai-plus" | "monokai_plus" => {
+                if let Some(ref theme) = *MONOKAI_PLUS_THEME {
+                    return Box::new(SyntectTheme::new(theme.clone()));
+                }
+            }
+            "dracula" => {
+                if let Some(ref theme) = *DRACULA_THEME {
+                    return Box::new(SyntectTheme::new(theme.clone()));
+                }
+            }
+            "gruvbox-dark" | "gruvbox_dark" | "gruvbox" => {
+                if let Some(ref theme) = *GRUVBOX_DARK_THEME {
+                    return Box::new(SyntectTheme::new(theme.clone()));
+                }
+            }
+            "nord" => {
+                if let Some(ref theme) = *NORD_THEME {
+                    return Box::new(SyntectTheme::new(theme.clone()));
+                }
+            }
+            _ => {}
+        }
+
+        // Map common theme names to syntect equivalents
         let theme_name = match name.to_lowercase().as_str() {
-            "monokai" => "base16-mocha.dark",  // closest to Monokai in default themes
-            "dracula" => "base16-eighties.dark", // closest to Dracula in default themes
             "one-dark" | "onedark" => "base16-ocean.dark",
             "one-light" | "onelight" => "base16-ocean.light",
             "github-dark" => "base16-ocean.dark",
@@ -596,17 +684,28 @@ impl Syntax {
         SyntectTheme::from_name(theme_name)
             .map(|t| Box::new(t) as Box<dyn SyntaxTheme>)
             .unwrap_or_else(|| {
-                // Fall back to default theme
-                SyntectTheme::from_name(DEFAULT_THEME)
-                    .map(|t| Box::new(t) as Box<dyn SyntaxTheme>)
-                    .unwrap_or_else(|| Box::new(AnsiTheme::dark()))
+                // Fall back to embedded Monokai or ANSI theme
+                if let Some(ref theme) = *MONOKAI_THEME {
+                    Box::new(SyntectTheme::new(theme.clone()))
+                } else {
+                    Box::new(AnsiTheme::dark())
+                }
             })
     }
 
     /// List available theme names.
     pub fn available_themes() -> Vec<&'static str> {
         let mut themes: Vec<&str> = THEME_SET.themes.keys().map(|s| s.as_str()).collect();
-        themes.extend(["ansi_dark", "ansi_light"]);
+        // Add ANSI themes and embedded themes
+        themes.extend([
+            "ansi_dark",
+            "ansi_light",
+            "monokai",
+            "monokai-plus",
+            "dracula",
+            "gruvbox-dark",
+            "nord",
+        ]);
         themes.sort();
         themes
     }
@@ -625,14 +724,20 @@ impl Syntax {
     // ========================================================================
 
     /// Set the theme by name.
+    ///
+    /// This overrides the Console's theme for this renderable.
     pub fn with_theme(mut self, theme: impl AsRef<str>) -> Self {
         self.theme = Self::get_theme(theme.as_ref());
+        self.explicit_theme = true;
         self
     }
 
     /// Set a custom theme.
+    ///
+    /// This overrides the Console's theme for this renderable.
     pub fn with_custom_theme(mut self, theme: Box<dyn SyntaxTheme>) -> Self {
         self.theme = theme;
+        self.explicit_theme = true;
         self
     }
 
@@ -744,28 +849,49 @@ impl Syntax {
     /// This converts syntect-highlighted code into a rich-rs Text object
     /// with styled spans.
     pub fn highlight(&self) -> Text {
+        self.highlight_with_theme(&*self.theme)
+    }
+
+    /// Highlight the code with a specific theme.
+    fn highlight_with_theme(&self, theme: &dyn SyntaxTheme) -> Text {
         let (ends_on_nl, processed_code) = self.process_code();
+
+        // Normalize common lexer name aliases
+        let lexer_lower = self.lexer.to_lowercase();
+        let lexer_normalized = match lexer_lower.as_str() {
+            "python3" | "py3" | "py" => "python",
+            "javascript" | "js" => "javascript",
+            "typescript" | "ts" => "typescript",
+            "rust" | "rs" => "rust",
+            "cpp" | "c++" => "c++",
+            "csharp" | "cs" => "c#",
+            _ => lexer_lower.as_str(),
+        };
 
         // Find the syntax
         let syntax = SYNTAX_SET
-            .find_syntax_by_token(&self.lexer)
+            .find_syntax_by_token(lexer_normalized)
+            .or_else(|| SYNTAX_SET.find_syntax_by_extension(lexer_normalized))
+            .or_else(|| SYNTAX_SET.find_syntax_by_name(lexer_normalized))
+            // Also try original if normalized didn't match
+            .or_else(|| SYNTAX_SET.find_syntax_by_token(&self.lexer))
             .or_else(|| SYNTAX_SET.find_syntax_by_extension(&self.lexer))
             .or_else(|| SYNTAX_SET.find_syntax_by_name(&self.lexer))
             .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
 
-        let base_style = self.get_base_style();
+        let base_style = self.get_base_style_with_theme(theme);
         let mut text = Text::new();
         text.set_base_style(Some(base_style));
 
         // Highlight the code
-        if let Some(syntect_theme) = self.theme.syntect_theme() {
+        if let Some(syntect_theme) = theme.syntect_theme() {
             let mut highlighter = HighlightLines::new(syntax, syntect_theme);
 
             for line in LinesWithEndings::from(&processed_code) {
                 match highlighter.highlight_line(line, &SYNTAX_SET) {
                     Ok(ranges) => {
                         for (style, token) in ranges {
-                            let rich_style = self.theme.get_style(&style);
+                            let rich_style = theme.get_style(&style);
                             text.append(token, Some(rich_style));
                         }
                     }
@@ -779,14 +905,14 @@ impl Syntax {
             // For ANSI themes without syntect theme, use plain highlighting
             let mut highlighter = HighlightLines::new(
                 syntax,
-                &THEME_SET.themes[DEFAULT_THEME],
+                &THEME_SET.themes[FALLBACK_SYNTECT_THEME],
             );
 
             for line in LinesWithEndings::from(&processed_code) {
                 match highlighter.highlight_line(line, &SYNTAX_SET) {
                     Ok(ranges) => {
                         for (style, token) in ranges {
-                            let rich_style = self.theme.get_style(&style);
+                            let rich_style = theme.get_style(&style);
                             text.append(token, Some(rich_style));
                         }
                     }
@@ -825,7 +951,12 @@ impl Syntax {
 
     /// Get the base style for the syntax block.
     fn get_base_style(&self) -> Style {
-        let mut style = self.theme.get_background_style();
+        self.get_base_style_with_theme(&*self.theme)
+    }
+
+    /// Get the base style with a specific theme.
+    fn get_base_style_with_theme(&self, theme: &dyn SyntaxTheme) -> Style {
+        let mut style = theme.get_background_style();
         if let Some(bg) = self.background_color {
             style = style.with_bgcolor(bg);
         }
@@ -952,8 +1083,20 @@ impl Renderable for Syntax {
             options.max_width.saturating_sub(horizontal_padding)
         };
 
-        // Get highlighted text
-        let text = self.highlight();
+        // Determine which theme to use: explicit theme or Console's theme
+        let effective_theme: Option<Box<dyn SyntaxTheme>> =
+            if !self.explicit_theme && options.theme_name != "default" {
+                Some(Self::get_theme(&options.theme_name))
+            } else {
+                None
+            };
+
+        // Get highlighted text (using effective theme or self.theme)
+        let text = if let Some(ref theme) = effective_theme {
+            self.highlight_with_theme(&**theme)
+        } else {
+            self.highlight()
+        };
 
         // Split into lines
         let lines: Vec<Text> = text.split("\n", false, true);
@@ -973,17 +1116,36 @@ impl Renderable for Syntax {
             .take(end_idx.saturating_sub(start_idx))
             .collect();
 
-        let base_style = self.get_base_style();
+        // Get base style (using effective theme or self.theme)
+        let base_style = if let Some(ref theme) = effective_theme {
+            self.get_base_style_with_theme(&**theme)
+        } else {
+            self.get_base_style()
+        };
         let new_line = Segment::line();
 
-        // Line number styling
-        let number_style = if base_style.bgcolor.is_some() {
-            Style::new().with_dim(true)
-        } else {
-            Style::new().with_dim(true)
-        };
+        // Line number styling - same background as code, grayish foreground
+        // Color #656660 (RGB 101, 102, 96) matches Python Rich's Monokai line numbers
+        let number_style = base_style.combine(&Style::new().with_color(Color::Rgb {
+            r: 101,
+            g: 102,
+            b: 96,
+        }));
 
-        let highlight_number_style = Style::new().with_bold(true);
+        // Highlighted line number style - bold with same background
+        let highlight_number_style = base_style.combine(&Style::new().with_bold(true));
+
+        // Indent guide style - dim grayish color matching Python Rich's Monokai
+        // RGB(149, 144, 119) with dim attribute
+        let indent_guide_style = base_style.combine(
+            &Style::new()
+                .with_color(Color::Rgb {
+                    r: 149,
+                    g: 144,
+                    b: 119,
+                })
+                .with_dim(true),
+        );
 
         // Add top padding
         if pad_top > 0 {
@@ -1004,37 +1166,78 @@ impl Renderable for Syntax {
                 result.push(Segment::styled(" ".repeat(pad_left), base_style));
             }
 
-            // Line number
+            // Line number (inside the syntax block with background)
             if self.line_numbers {
-                let pointer = if is_highlighted { "> " } else { "  " };
-                let line_num_str =
-                    format!("{:>width$} ", line_no, width = numbers_width - 2);
+                // Match Python Rich: pointer (2 chars), then a right-aligned line number column,
+                // and a single trailing space before code. No "│" separator.
+                let pointer = if options.legacy_windows { "> " } else { "❱ " };
+                let line_num_str = format!(
+                    "{:>width$} ",
+                    line_no,
+                    width = numbers_width.saturating_sub(2)
+                );
 
                 if is_highlighted {
-                    result.push(Segment::styled(
-                        pointer.to_string(),
-                        Style::new().with_color(Color::Standard(1)), // red
-                    ));
+                    // Highlighted line: red pointer, bold number
+                    let pointer_style = base_style.combine(
+                        &Style::new().with_color(Color::Standard(1)).with_bold(true),
+                    );
+                    result.push(Segment::styled(pointer.to_string(), pointer_style));
                     result.push(Segment::styled(line_num_str, highlight_number_style));
                 } else {
-                    result.push(Segment::styled(pointer.to_string(), number_style));
+                    // Normal line: spaces for pointer area, dim number
+                    result.push(Segment::styled("  ".to_string(), highlight_number_style));
                     result.push(Segment::styled(line_num_str, number_style));
                 }
             }
 
-            // Render line content
-            let line_segments = line.render(console, &options.update_width(code_width));
-            for seg in line_segments {
-                result.push(seg);
+            // Calculate indent guides if enabled
+            let mut guides_width = 0;
+            let line_to_render;
+
+            if self.indent_guides {
+                let plain = line.plain_text();
+                let leading_spaces = plain.chars().take_while(|c| *c == ' ').count();
+                let num_guides = leading_spaces / self.tab_size;
+
+                if num_guides > 0 {
+                    // Each guide is "│" + (tab_size - 1) spaces
+                    for _ in 0..num_guides {
+                        result.push(Segment::styled("│".to_string(), indent_guide_style));
+                        result.push(Segment::styled(
+                            " ".repeat(self.tab_size - 1),
+                            indent_guide_style,
+                        ));
+                    }
+                    guides_width = num_guides * self.tab_size;
+
+                    // Use divide to extract the portion after the leading whitespace
+                    let parts = line.divide([guides_width]);
+                    line_to_render = if parts.len() > 1 {
+                        parts.into_iter().nth(1).unwrap_or_else(|| (*line).clone())
+                    } else {
+                        // No content after guides, just use empty
+                        Text::plain("")
+                    };
+                } else {
+                    line_to_render = (*line).clone();
+                }
+            } else {
+                line_to_render = (*line).clone();
             }
 
-            // Pad to code width if needed
-            let line_len = line.cell_len();
-            if line_len < code_width {
-                result.push(Segment::styled(
-                    " ".repeat(code_width - line_len),
-                    base_style,
-                ));
+            // Render line content without wrapping, then clip/pad to code width.
+            // Subtract indent guides width from available width
+            let content_width = code_width.saturating_sub(guides_width);
+            let mut line_options = options.update_width(content_width);
+            line_options.no_wrap = true;
+            line_options.overflow = Some(OverflowMethod::Crop);
+
+            let line_segments: Vec<Segment> = line_to_render.render(console, &line_options).into_iter().collect();
+            let adjusted =
+                Segment::adjust_line_length(&line_segments, content_width, Some(base_style), true);
+            for seg in adjusted {
+                result.push(seg);
             }
 
             // Right padding
@@ -1167,6 +1370,12 @@ mod tests {
         assert!(!themes.is_empty());
         assert!(themes.contains(&"ansi_dark"));
         assert!(themes.contains(&"ansi_light"));
+        // Check embedded themes are listed
+        assert!(themes.contains(&"dracula"), "Should contain dracula theme");
+        assert!(themes.contains(&"gruvbox-dark"), "Should contain gruvbox-dark theme");
+        assert!(themes.contains(&"nord"), "Should contain nord theme");
+        assert!(themes.contains(&"monokai"), "Should contain monokai theme");
+        assert!(themes.contains(&"monokai-plus"), "Should contain monokai-plus theme");
     }
 
     #[test]
@@ -1281,10 +1490,15 @@ mod tests {
 
     #[test]
     fn test_syntect_theme() {
-        let theme = SyntectTheme::from_name(DEFAULT_THEME);
-        assert!(theme.is_some(), "Default theme '{}' should exist", DEFAULT_THEME);
+        // Test that the fallback syntect theme exists
+        let theme = SyntectTheme::from_name(FALLBACK_SYNTECT_THEME);
+        assert!(theme.is_some(), "Fallback theme '{}' should exist", FALLBACK_SYNTECT_THEME);
         let theme = theme.unwrap();
         assert!(theme.syntect_theme().is_some());
+
+        // Test that DEFAULT_THEME works via get_theme (which handles mapping)
+        let default_theme = Syntax::get_theme(DEFAULT_THEME);
+        assert!(default_theme.syntect_theme().is_some());
     }
 
     #[test]
@@ -1318,7 +1532,36 @@ mod tests {
         let segments = syntax.render(&console, &options);
         let output: String = segments.iter().map(|s| s.text.to_string()).collect();
 
-        // Line 2 should be highlighted with ">"
-        assert!(output.contains('>'));
+        // Line 2 should be highlighted with pointer (❱ or > depending on legacy_windows)
+        assert!(output.contains('❱') || output.contains('>'));
+    }
+
+    #[test]
+    fn test_embedded_themes() {
+        // Test that all embedded themes load correctly
+        let themes = ["dracula", "gruvbox-dark", "nord", "monokai"];
+        let code = "def hello():\n    print('Hello')";
+
+        for theme_name in themes {
+            let theme = Syntax::get_theme(theme_name);
+            assert!(
+                theme.syntect_theme().is_some(),
+                "Theme '{}' should load a syntect theme",
+                theme_name
+            );
+
+            // Test that we can render with each theme
+            let syntax = Syntax::new(code, "python3").with_theme(theme_name);
+            let console = Console::new();
+            let options = ConsoleOptions::default();
+            let segments = syntax.render(&console, &options);
+
+            // Should produce non-empty output
+            assert!(
+                !segments.is_empty(),
+                "Theme '{}' should produce output",
+                theme_name
+            );
+        }
     }
 }

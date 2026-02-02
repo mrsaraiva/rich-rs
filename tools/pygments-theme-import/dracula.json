@@ -1,0 +1,109 @@
+{
+  "name": "dracula",
+  "background_color": "#282a36",
+  "highlight_color": "#44475a",
+  "line_number_color": "#f1fa8c",
+  "line_number_background_color": "#44475a",
+  "styles": {
+    "Text.Whitespace": {
+      "color": "#f8f8f2"
+    },
+    "Comment": {
+      "color": "#6272a4"
+    },
+    "Comment.Preproc": {
+      "color": "#ff79c6"
+    },
+    "Generic": {
+      "color": "#f8f8f2"
+    },
+    "Generic.Deleted": {
+      "color": "#8b080b"
+    },
+    "Generic.Emph": {
+      "underline": true
+    },
+    "Generic.Heading": {
+      "bold": true
+    },
+    "Generic.Inserted": {
+      "bold": true
+    },
+    "Generic.Output": {
+      "color": "#44475a"
+    },
+    "Generic.EmphStrong": {
+      "underline": true
+    },
+    "Generic.Subheading": {
+      "bold": true
+    },
+    "Error": {
+      "color": "#f8f8f2"
+    },
+    "Keyword": {
+      "color": "#ff79c6"
+    },
+    "Keyword.Constant": {
+      "color": "#ff79c6"
+    },
+    "Keyword.Declaration": {
+      "color": "#8be9fd",
+      "italic": true
+    },
+    "Keyword.Type": {
+      "color": "#8be9fd"
+    },
+    "Literal": {
+      "color": "#f8f8f2"
+    },
+    "Name": {
+      "color": "#f8f8f2"
+    },
+    "Name.Attribute": {
+      "color": "#50fa7b"
+    },
+    "Name.Builtin": {
+      "color": "#8be9fd",
+      "italic": true
+    },
+    "Name.Builtin.Pseudo": {
+      "color": "#f8f8f2"
+    },
+    "Name.Class": {
+      "color": "#50fa7b"
+    },
+    "Name.Function": {
+      "color": "#50fa7b"
+    },
+    "Name.Label": {
+      "color": "#8be9fd",
+      "italic": true
+    },
+    "Name.Tag": {
+      "color": "#ff79c6"
+    },
+    "Name.Variable": {
+      "color": "#8be9fd",
+      "italic": true
+    },
+    "Literal.Number": {
+      "color": "#ffb86c"
+    },
+    "Operator": {
+      "color": "#ff79c6"
+    },
+    "Other": {
+      "color": "#f8f8f2"
+    },
+    "Punctuation": {
+      "color": "#f8f8f2"
+    },
+    "Literal.String": {
+      "color": "#bd93f9"
+    },
+    "Text": {
+      "color": "#f8f8f2"
+    }
+  }
+}

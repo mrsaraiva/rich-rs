@@ -633,10 +633,23 @@ impl Table {
         width
     }
 
-    /// Get padding width for a column.
-    /// Get the total padding width for a column (left + right).
-    fn get_padding_width(&self, column_index: usize) -> usize {
-        let (left, right) = self.get_padding_for_column(column_index);
+    /// Get the padding width used for measuring / sizing columns.
+    ///
+    /// Mirrors Python Rich's `_get_padding_width`: collapse padding affects the
+    /// *computed* padding width, but `pad_edge` does not.
+    ///
+    /// Rich uses this value when interpreting column width constraints
+    /// (e.g. fixed-width columns, min/max bounds), while the actual padding applied
+    /// to cells may vary with `pad_edge` (handled in `get_padding_for_column`).
+    fn get_measure_padding_width(&self, column_index: usize) -> usize {
+        let (pad_left, pad_right) = self.padding;
+        let mut left = pad_left;
+        let right = pad_right;
+
+        if self.collapse_padding && column_index > 0 {
+            left = left.saturating_sub(right);
+        }
+
         left + right
     }
 
@@ -653,7 +666,9 @@ impl Table {
 
         // Collapse padding between columns (avoid double padding)
         if self.collapse_padding && !is_first {
-            left = 0; // Left padding already provided by previous column's right padding
+            // Mirror Python Rich behavior: subtract the right padding rather than forcing to 0.
+            // This matters when left != right.
+            left = left.saturating_sub(pad_right);
         }
 
         // Don't pad edges if pad_edge is false
@@ -693,11 +708,19 @@ impl Table {
             return Measurement::new(0, 0);
         }
 
-        let padding_width = self.get_padding_width(column._index);
+        // Python Rich measures padded cell renderables, which means `pad_edge` affects
+        // the measured width of flexible columns. For fixed-width columns / clamp
+        // bounds Rich uses `_get_padding_width` (which ignores `pad_edge`), so we
+        // keep both concepts here:
+        // - `content_padding_width`: actual padding applied at render time
+        // - `bounds_padding_width`: width used when interpreting column width constraints
+        let (pad_left, pad_right) = self.get_padding_for_column(column._index);
+        let content_padding_width = pad_left + pad_right;
+        let bounds_padding_width = self.get_measure_padding_width(column._index);
 
         // Fixed width column
         if let Some(w) = column.width {
-            return Measurement::new(w + padding_width, w + padding_width)
+            return Measurement::new(w + bounds_padding_width, w + bounds_padding_width)
                 .with_maximum(max_width);
         }
 
@@ -732,14 +755,19 @@ impl Table {
             }
         }
 
-        let min_w = min_widths.iter().max().copied().unwrap_or(1) + padding_width;
-        let max_w = max_widths.iter().max().copied().unwrap_or(max_width) + padding_width;
+        let min_w = min_widths.iter().max().copied().unwrap_or(1) + content_padding_width;
+        let max_w = max_widths
+            .iter()
+            .max()
+            .copied()
+            .unwrap_or(max_width)
+            + content_padding_width;
 
         Measurement::new(min_w, max_w)
             .with_maximum(max_width)
             .clamp_bounds(
-                column.min_width.map(|w| w + padding_width),
-                column.max_width.map(|w| w + padding_width),
+                column.min_width.map(|w| w + bounds_padding_width),
+                column.max_width.map(|w| w + bounds_padding_width),
             )
     }
 
@@ -753,8 +781,12 @@ impl Table {
             return Vec::new();
         }
 
+        // Important: `options.max_width` here is the available width for *columns* only
+        // (i.e. it excludes any border / divider extra width). This mirrors Python Rich,
+        // which calls `_calculate_column_widths` with `options.update_width(max_width - extra_width)`.
         let max_width = options.max_width;
-        let extra = self.extra_width();
+        let extra_width = self.extra_width();
+        let effective_expand = self.expand || self.width.is_some();
 
         // Measure each column
         let measurements: Vec<Measurement> = self
@@ -763,10 +795,13 @@ impl Table {
             .map(|col| self.measure_column(console, options, col))
             .collect();
 
-        let mut widths: Vec<usize> = measurements.iter().map(|m| m.maximum).collect();
+        let mut widths: Vec<usize> = measurements
+            .iter()
+            .map(|m| m.maximum.max(1))
+            .collect();
 
         // Handle flexible columns with ratios
-        if self.expand || self.width.is_some() {
+        if effective_expand {
             let ratios: Vec<usize> = self
                 .columns
                 .iter()
@@ -774,94 +809,94 @@ impl Table {
                 .map(|c| c.ratio.unwrap_or(0))
                 .collect();
 
-            if !ratios.is_empty() && ratios.iter().any(|&r| r > 0) {
-                let fixed_width: usize = self
+            if ratios.iter().any(|&r| r > 0) {
+                let fixed_widths: Vec<usize> = self
                     .columns
                     .iter()
                     .zip(measurements.iter())
-                    .filter(|(c, _)| !c.flexible())
-                    .map(|(_, m)| m.maximum)
-                    .sum();
-
-                let target_width = self.width.unwrap_or(max_width).saturating_sub(extra);
-                let flexible_width = target_width.saturating_sub(fixed_width);
-                let total_ratio: usize = ratios.iter().sum();
-
-                if total_ratio > 0 {
-                    let mut ratio_idx = 0;
-                    for (i, col) in self.columns.iter().enumerate() {
-                        if col.flexible() {
-                            let ratio = col.ratio.unwrap_or(0);
-                            let col_width = (flexible_width * ratio) / total_ratio;
-                            let padding = self.get_padding_width(i);
-                            widths[i] = col_width.max(padding + 1);
-                            ratio_idx += 1;
-                        }
-                    }
-                    // Distribute remainder
-                    let assigned: usize = self
-                        .columns
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, c)| c.flexible())
-                        .map(|(i, _)| widths[i])
-                        .sum();
-                    let remainder = flexible_width.saturating_sub(assigned);
-                    if remainder > 0 && ratio_idx > 0 {
-                        // Give remainder to the last flexible column
-                        for (i, col) in self.columns.iter().enumerate().rev() {
-                            if col.flexible() {
-                                widths[i] += remainder;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Calculate total width
-        let table_width: usize = widths.iter().sum::<usize>() + extra;
-
-        // If table is too wide, collapse columns proportionally
-        if table_width > max_width {
-            let excess = table_width - max_width;
-            let total_width: usize = widths.iter().sum();
-            if total_width > 0 {
-                let mut remaining_excess = excess;
-                for width in widths.iter_mut() {
-                    if *width > 1 {
-                        let reduce = (*width * excess) / total_width;
-                        let actual_reduce = reduce.min(*width - 1).min(remaining_excess);
-                        *width -= actual_reduce;
-                        remaining_excess = remaining_excess.saturating_sub(actual_reduce);
-                    }
-                }
-            }
-        }
-
-        // If expanding and table is too narrow, distribute extra space
-        let current_width: usize = widths.iter().sum::<usize>() + extra;
-        let min_target = self.min_width.unwrap_or(0);
-        if self.expand || current_width < min_target {
-            let target = self.width.unwrap_or(max_width).max(min_target);
-            if current_width < target {
-                let extra_space = target - current_width;
-                let total_width: usize = widths.iter().sum();
-                if total_width > 0 {
-                    let mut remaining = extra_space;
-                    let widths_count = widths.len();
-                    for (i, width) in widths.iter_mut().enumerate() {
-                        let add = if i == widths_count - 1 {
-                            remaining
+                    .map(|(column, measurement)| {
+                        if column.flexible() {
+                            0
                         } else {
-                            let proportional = (*width * extra_space) / total_width;
-                            proportional.min(remaining)
-                        };
-                        *width += add;
-                        remaining = remaining.saturating_sub(add);
+                            measurement.maximum
+                        }
+                    })
+                    .collect();
+
+                let flex_minimums: Vec<usize> = self
+                    .columns
+                    .iter()
+                    .filter(|column| column.flexible())
+                    .map(|column| {
+                        (column.width.unwrap_or(1)) + self.get_measure_padding_width(column._index)
+                    })
+                    .collect();
+
+                let fixed_total: usize = fixed_widths.iter().sum();
+                let flexible_width = max_width.saturating_sub(fixed_total);
+                let flex_widths = ratio_distribute(flexible_width, &ratios, Some(&flex_minimums));
+                let mut flex_iter = flex_widths.into_iter();
+                for (index, column) in self.columns.iter().enumerate() {
+                    if column.flexible() {
+                        widths[index] = fixed_widths[index] + flex_iter.next().unwrap_or(0);
                     }
                 }
+            }
+        }
+
+        let mut table_width: usize = widths.iter().sum();
+
+        if table_width > max_width {
+            widths = collapse_widths(
+                widths,
+                self.columns
+                    .iter()
+                    .map(|column| column.width.is_none() && !column.no_wrap)
+                    .collect(),
+                max_width,
+            );
+
+            table_width = widths.iter().sum();
+
+            // Last resort: reduce columns evenly.
+            if table_width > max_width {
+                let excess_width = table_width - max_width;
+                let ratios = vec![1; widths.len()];
+                widths = ratio_reduce(excess_width, &ratios, &widths, &widths);
+                table_width = widths.iter().sum();
+            }
+
+            // Re-measure with constrained widths (critical for parity with Python Rich).
+            let constrained: Vec<Measurement> = widths
+                .iter()
+                .zip(self.columns.iter())
+                .map(|(width, column)| {
+                    self.measure_column(console, &options.update_width(*width), column)
+                })
+                .collect();
+            widths = constrained.iter().map(|m| m.maximum).collect();
+        }
+
+        // If expanding and table is too narrow, distribute extra space.
+        // Mirrors Python Rich's logic: distribute proportionally using current widths.
+        if (table_width < max_width && effective_expand)
+            || (self.min_width.is_some()
+                && table_width < self.min_width.unwrap_or(0).saturating_sub(extra_width))
+        {
+            let min_target = self.min_width.unwrap_or(0).saturating_sub(extra_width);
+            let target = if self.min_width.is_some() {
+                min_target.min(max_width)
+            } else {
+                max_width
+            };
+
+            if table_width < target {
+                let pad_widths = ratio_distribute(target - table_width, &widths, None);
+                widths = widths
+                    .into_iter()
+                    .zip(pad_widths.into_iter())
+                    .map(|(w, pad)| w + pad)
+                    .collect();
             }
         }
 
@@ -886,7 +921,16 @@ impl Table {
         let content_width = width.saturating_sub(padding);
 
         // Create options for cell rendering
-        let cell_options = options.update_width(content_width);
+        let mut cell_options = options.update_width(content_width);
+        if column.justify != JustifyMethod::Left {
+            cell_options.justify = Some(column.justify);
+        }
+        if column.overflow != OverflowMethod::Ellipsis {
+            cell_options.overflow = Some(column.overflow);
+        }
+        if column.no_wrap {
+            cell_options.no_wrap = true;
+        }
 
         // Render cell content
         let cell_lines = console.render_lines(
@@ -943,10 +987,11 @@ impl Renderable for Table {
         let box_chars = self.box_type.map(|b| b.substitute(safe_box, options.ascii_only()));
 
         // Calculate column widths
-        // Note: calculate_column_widths handles extra_width internally, so pass full max_width
         let max_width = self.width.unwrap_or(options.max_width);
         let extra = self.extra_width();
-        let col_options = options.update_width(max_width);
+        // Match Python Rich: calculate widths against the available *column* width,
+        // which excludes the table's extra border / divider width.
+        let col_options = options.update_width(max_width.saturating_sub(extra));
         let widths = self.calculate_column_widths(console, &col_options);
 
         if widths.is_empty() {
@@ -960,7 +1005,7 @@ impl Renderable for Table {
 
         // Render title
         if let Some(ref title) = self.title {
-            let title_lines = console.render_lines(title, Some(options), None, true, false);
+            let title_lines = console.render_lines(title, Some(options), None, false, false);
             for line in title_lines {
                 let line_width = Segment::get_line_length(&line);
                 let padding = table_width.saturating_sub(line_width);
@@ -983,6 +1028,12 @@ impl Renderable for Table {
                 if right_pad > 0 {
                     result.push(Segment::new(" ".repeat(right_pad)));
                 }
+                result.push(new_line.clone());
+            }
+
+            // Match Python Rich's grid title spacing: insert a blank line after the title
+            // for borderless tables (e.g. `Table::grid()`).
+            if !self.show_edge {
                 result.push(new_line.clone());
             }
         }
@@ -1027,10 +1078,17 @@ impl Renderable for Table {
                 header_cells.push(cell_lines);
             }
 
-            // Normalize heights
+            // Normalize heights - use column header style for padding
             for (i, cells) in header_cells.iter_mut().enumerate() {
+                let col_style = header_row_style.combine(&self.columns[i].header_style);
+                let hint_style = cells
+                    .last()
+                    .and_then(|line| Segment::get_last_style(line));
                 while cells.len() < max_height {
-                    let blank = Segment::adjust_line_length(&[], widths[i], Some(header_row_style), true);
+                    let pad_style = hint_style
+                        .map(|hint| col_style.combine(&hint))
+                        .unwrap_or(col_style);
+                    let blank = Segment::adjust_line_length(&[], widths[i], Some(pad_style), true);
                     cells.push(blank);
                 }
             }
@@ -1101,12 +1159,50 @@ impl Renderable for Table {
                 row_cells.push(cell_lines);
             }
 
-            // Normalize heights
-            let combined_style = self.style.combine(&row_style);
+            // Normalize heights - use column style for padding and respect vertical alignment
             for (i, cells) in row_cells.iter_mut().enumerate() {
-                while cells.len() < max_height {
-                    let blank = Segment::adjust_line_length(&[], widths[i], Some(combined_style), true);
-                    cells.push(blank);
+                let col_style = self.style.combine(&self.columns[i].style).combine(&row_style);
+                let hint_style = cells
+                    .last()
+                    .and_then(|line| Segment::get_last_style(line));
+                let pad_style = hint_style
+                    .map(|hint| col_style.combine(&hint))
+                    .unwrap_or(col_style);
+                let blank = Segment::adjust_line_length(&[], widths[i], Some(pad_style), true);
+
+                let lines_needed = max_height.saturating_sub(cells.len());
+                if lines_needed > 0 {
+                    match self.columns[i].vertical {
+                        VerticalAlignMethod::Top => {
+                            // Add blanks at end
+                            for _ in 0..lines_needed {
+                                cells.push(blank.clone());
+                            }
+                        }
+                        VerticalAlignMethod::Middle => {
+                            // Add blanks at start and end
+                            let top_pad = lines_needed / 2;
+                            let bottom_pad = lines_needed - top_pad;
+                            let mut new_cells = Vec::with_capacity(max_height);
+                            for _ in 0..top_pad {
+                                new_cells.push(blank.clone());
+                            }
+                            new_cells.append(cells);
+                            for _ in 0..bottom_pad {
+                                new_cells.push(blank.clone());
+                            }
+                            *cells = new_cells;
+                        }
+                        VerticalAlignMethod::Bottom => {
+                            // Add blanks at start
+                            let mut new_cells = Vec::with_capacity(max_height);
+                            for _ in 0..lines_needed {
+                                new_cells.push(blank.clone());
+                            }
+                            new_cells.append(cells);
+                            *cells = new_cells;
+                        }
+                    }
                 }
             }
 
@@ -1194,10 +1290,17 @@ impl Renderable for Table {
                 footer_cells.push(cell_lines);
             }
 
-            // Normalize heights
+            // Normalize heights - use column footer style for padding
             for (i, cells) in footer_cells.iter_mut().enumerate() {
+                let col_style = footer_row_style.combine(&self.columns[i].footer_style);
+                let hint_style = cells
+                    .last()
+                    .and_then(|line| Segment::get_last_style(line));
                 while cells.len() < max_height {
-                    let blank = Segment::adjust_line_length(&[], widths[i], Some(footer_row_style), true);
+                    let pad_style = hint_style
+                        .map(|hint| col_style.combine(&hint))
+                        .unwrap_or(col_style);
+                    let blank = Segment::adjust_line_length(&[], widths[i], Some(pad_style), true);
                     cells.push(blank);
                 }
             }
@@ -1241,7 +1344,7 @@ impl Renderable for Table {
 
         // Render caption
         if let Some(ref caption) = self.caption {
-            let caption_lines = console.render_lines(caption, Some(options), None, true, false);
+            let caption_lines = console.render_lines(caption, Some(options), None, false, false);
             for line in caption_lines {
                 let line_width = Segment::get_line_length(&line);
                 let padding = table_width.saturating_sub(line_width);
@@ -1281,30 +1384,203 @@ impl Renderable for Table {
             return Measurement::new(0, 0);
         }
 
+        // Mirror Python Rich: measure columns against available column width
+        // (excluding border / dividers), then re-measure columns under the computed
+        // total column width to get final min/max ranges.
         let extra = self.extra_width();
-        // Note: calculate_column_widths handles extra_width internally, so pass full max_width
-        let col_options = options.update_width(max_width);
-        let widths = self.calculate_column_widths(console, &col_options);
+        let col_options = options.update_width(max_width.saturating_sub(extra));
+        let col_widths = self.calculate_column_widths(console, &col_options);
+        let content_max_width: usize = col_widths.iter().sum();
 
-        let total_width: usize = widths.iter().sum::<usize>() + extra;
-
-        // Calculate minimum width
-        let min_measurements: Vec<Measurement> = self
+        let measurements: Vec<Measurement> = self
             .columns
             .iter()
-            .map(|col| self.measure_column(console, options, col))
+            .map(|col| self.measure_column(console, &options.update_width(content_max_width), col))
             .collect();
-        let min_width: usize = min_measurements.iter().map(|m| m.minimum).sum::<usize>() + extra;
 
-        let final_max = if self.width.is_some() {
+        let min_width: usize = measurements.iter().map(|m| m.minimum).sum::<usize>() + extra;
+        let max_calc: usize = if self.width.is_some() {
             self.width.unwrap()
         } else {
-            total_width
+            measurements.iter().map(|m| m.maximum).sum::<usize>() + extra
         };
 
-        Measurement::new(min_width, final_max)
-            .clamp_bounds(self.min_width, Some(max_width))
+        Measurement::new(min_width, max_calc).clamp_bounds(self.min_width, Some(max_width))
     }
+}
+
+// ============================================================================
+// Width distribution helpers (ported from Python Rich)
+// ============================================================================
+
+fn div_ceil(numer: u128, denom: u128) -> usize {
+    if denom == 0 {
+        return 0;
+    }
+    ((numer + denom - 1) / denom) as usize
+}
+
+/// Banker's rounding (ties to even) for positive rationals.
+///
+/// Python's `round()` uses bankers rounding, which is important for Rich parity.
+fn round_div_bankers(numer: u128, denom: u128) -> usize {
+    if denom == 0 {
+        return 0;
+    }
+    let q = numer / denom;
+    let r = numer % denom;
+    let twice_r = r.saturating_mul(2);
+
+    if twice_r < denom {
+        q as usize
+    } else if twice_r > denom {
+        (q + 1) as usize
+    } else {
+        // Exactly half-way: round to even.
+        if q % 2 == 0 {
+            q as usize
+        } else {
+            (q + 1) as usize
+        }
+    }
+}
+
+/// Equivalent of `rich._ratio.ratio_reduce`.
+///
+/// `total` is the number of cells to remove from `values`, proportionally to `ratios`,
+/// with per-slot caps in `maximums`.
+fn ratio_reduce(total: usize, ratios: &[usize], maximums: &[usize], values: &[usize]) -> Vec<usize> {
+    let mut adjusted_ratios: Vec<usize> = Vec::with_capacity(ratios.len());
+    for (&ratio, &max) in ratios.iter().zip(maximums.iter()) {
+        adjusted_ratios.push(if max > 0 { ratio } else { 0 });
+    }
+
+    let mut total_ratio: usize = adjusted_ratios.iter().sum();
+    if total_ratio == 0 {
+        return values.to_vec();
+    }
+
+    let mut total_remaining = total;
+    let mut result: Vec<usize> = Vec::with_capacity(values.len());
+
+    for ((&ratio, &maximum), &value) in adjusted_ratios
+        .iter()
+        .zip(maximums.iter())
+        .zip(values.iter())
+    {
+        if ratio > 0 && total_ratio > 0 {
+            let numer = (ratio as u128) * (total_remaining as u128);
+            let rounded = round_div_bankers(numer, total_ratio as u128);
+            let distributed = rounded.min(maximum);
+            result.push(value.saturating_sub(distributed));
+            total_remaining = total_remaining.saturating_sub(distributed);
+            total_ratio = total_ratio.saturating_sub(ratio);
+        } else {
+            result.push(value);
+        }
+    }
+
+    result
+}
+
+/// Equivalent of `rich._ratio.ratio_distribute` (with optional minimums).
+///
+/// Distributes `total` into parts based on `ratios`. With `minimums`, each slot
+/// will get at least its minimum (and slots with minimum 0 are treated as ratio 0).
+fn ratio_distribute(total: usize, ratios: &[usize], minimums: Option<&[usize]>) -> Vec<usize> {
+    let mut adjusted_ratios: Vec<usize> = Vec::with_capacity(ratios.len());
+    if let Some(minimums) = minimums {
+        for (&ratio, &min) in ratios.iter().zip(minimums.iter()) {
+            adjusted_ratios.push(if min > 0 { ratio } else { 0 });
+        }
+    } else {
+        adjusted_ratios.extend_from_slice(ratios);
+    }
+
+    let mut total_ratio: usize = adjusted_ratios.iter().sum();
+    if total_ratio == 0 {
+        // Mirrors Rich's expectation: ratio_distribute requires sum(ratios) > 0,
+        // but in practice we can just return zeros for robustness.
+        return vec![0; ratios.len()];
+    }
+
+    let mut total_remaining = total;
+    let mut distributed_total: Vec<usize> = Vec::with_capacity(adjusted_ratios.len());
+
+    let mins: Vec<usize> = if let Some(minimums) = minimums {
+        minimums.to_vec()
+    } else {
+        vec![0; adjusted_ratios.len()]
+    };
+
+    for (&ratio, &minimum) in adjusted_ratios.iter().zip(mins.iter()) {
+        let distributed = if total_ratio > 0 {
+            let numer = (ratio as u128) * (total_remaining as u128);
+            div_ceil(numer, total_ratio as u128).max(minimum)
+        } else {
+            total_remaining
+        };
+        distributed_total.push(distributed);
+        total_ratio = total_ratio.saturating_sub(ratio);
+        total_remaining = total_remaining.saturating_sub(distributed);
+    }
+
+    distributed_total
+}
+
+/// Equivalent of `Table._collapse_widths` from Python Rich.
+fn collapse_widths(mut widths: Vec<usize>, wrapable: Vec<bool>, max_width: usize) -> Vec<usize> {
+    let mut total_width: usize = widths.iter().sum();
+    let mut excess_width = total_width.saturating_sub(max_width);
+
+    if wrapable.iter().any(|&w| w) {
+        while total_width > 0 && excess_width > 0 {
+            let max_column = widths
+                .iter()
+                .zip(wrapable.iter())
+                .filter_map(|(width, allow_wrap)| allow_wrap.then_some(*width))
+                .max()
+                .unwrap_or(0);
+
+            let second_max_column = widths
+                .iter()
+                .zip(wrapable.iter())
+                .filter_map(|(width, allow_wrap)| {
+                    if *allow_wrap && *width != max_column {
+                        Some(*width)
+                    } else {
+                        None
+                    }
+                })
+                .max()
+                .unwrap_or(0);
+
+            let column_difference = max_column.saturating_sub(second_max_column);
+            let ratios: Vec<usize> = widths
+                .iter()
+                .zip(wrapable.iter())
+                .map(|(width, allow_wrap)| {
+                    if *allow_wrap && *width == max_column {
+                        1
+                    } else {
+                        0
+                    }
+                })
+                .collect();
+
+            if ratios.iter().all(|&r| r == 0) || column_difference == 0 {
+                break;
+            }
+
+            let max_reduce: Vec<usize> = vec![excess_width.min(column_difference); widths.len()];
+            widths = ratio_reduce(excess_width, &ratios, &max_reduce, &widths);
+
+            total_width = widths.iter().sum();
+            excess_width = total_width.saturating_sub(max_width);
+        }
+    }
+
+    widths
 }
 
 // ============================================================================

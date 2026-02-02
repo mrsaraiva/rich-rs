@@ -1,0 +1,21 @@
+# Rich-rs theme generated from Pygments 'nord' theme
+# Use with Theme::from_file() or Theme::from_reader()
+
+[styles]
+json.brace = rgb(236,239,244)
+json.key = rgb(129,161,193)
+json.number = rgb(180,142,173)
+json.str = rgb(163,190,140)
+repr.attrib_equal = bold rgb(129,161,193)
+repr.attrib_name = rgb(143,188,187)
+repr.brace = rgb(236,239,244)
+repr.call = rgb(136,192,208)
+repr.comma = rgb(236,239,244)
+repr.error = rgb(191,97,106)
+repr.indent = italic rgb(97,110,135)
+repr.number = rgb(180,142,173)
+repr.number_complex = rgb(180,142,173)
+repr.str = rgb(163,190,140)
+repr.tag_end = rgb(236,239,244)
+repr.tag_name = rgb(143,188,187)
+repr.tag_start = rgb(236,239,244)

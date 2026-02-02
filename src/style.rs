@@ -156,11 +156,12 @@ impl Style {
             }
 
             // Handle negation: "not bold", "not italic", etc.
+            // Also handles shorthand: "not b", "not i", "not u", "not s"
             if word_lower == "not" {
                 if let Some(&next_word) = words.peek() {
                     let next_lower = next_word.to_lowercase();
                     match next_lower.as_str() {
-                        "bold" => {
+                        "bold" | "b" => {
                             style.bold = Some(false);
                             words.next();
                             continue;
@@ -170,12 +171,12 @@ impl Style {
                             words.next();
                             continue;
                         }
-                        "italic" => {
+                        "italic" | "i" => {
                             style.italic = Some(false);
                             words.next();
                             continue;
                         }
-                        "underline" => {
+                        "underline" | "u" => {
                             style.underline = Some(false);
                             words.next();
                             continue;
@@ -190,7 +191,7 @@ impl Style {
                             words.next();
                             continue;
                         }
-                        "strike" => {
+                        "strike" | "s" => {
                             style.strike = Some(false);
                             words.next();
                             continue;
@@ -202,15 +203,15 @@ impl Style {
                 continue;
             }
 
-            // Check for attributes
+            // Check for attributes (including shorthand: b, i, u, s)
             match word_lower.as_str() {
-                "bold" => style.bold = Some(true),
+                "bold" | "b" => style.bold = Some(true),
                 "dim" => style.dim = Some(true),
-                "italic" => style.italic = Some(true),
-                "underline" => style.underline = Some(true),
+                "italic" | "i" => style.italic = Some(true),
+                "underline" | "u" => style.underline = Some(true),
                 "blink" => style.blink = Some(true),
                 "reverse" => style.reverse = Some(true),
-                "strike" => style.strike = Some(true),
+                "strike" | "s" => style.strike = Some(true),
                 _ => {
                     // Try to parse as color
                     if let Some(color) = Color::parse(&word_lower) {
@@ -266,6 +267,24 @@ impl Style {
             text.to_string()
         } else {
             format!("\x1b[{}m{}\x1b[0m", attrs, text)
+        }
+    }
+
+    /// Render styled text WITHOUT a trailing reset.
+    ///
+    /// This is used for streaming output where we want to minimize SGR resets
+    /// to avoid visual artifacts (like black hairlines between colored lines).
+    /// The caller is responsible for emitting a reset at the end.
+    pub fn render_open(&self, text: &str, color_system: ColorSystem) -> String {
+        if text.is_empty() {
+            return String::new();
+        }
+
+        let attrs = self.make_ansi_codes(color_system);
+        if attrs.is_empty() {
+            text.to_string()
+        } else {
+            format!("\x1b[{}m{}", attrs, text)
         }
     }
 
@@ -915,5 +934,48 @@ mod tests {
         };
         let rendered = style.render("Hi", ColorSystem::TrueColor);
         assert_eq!(rendered, "\x1b[22mHi\x1b[0m");
+    }
+
+    // --- Shorthand aliases tests ---
+
+    #[test]
+    fn test_parse_shorthand_b_for_bold() {
+        let style = Style::parse("b").unwrap();
+        assert_eq!(style.bold, Some(true));
+    }
+
+    #[test]
+    fn test_parse_shorthand_i_for_italic() {
+        let style = Style::parse("i").unwrap();
+        assert_eq!(style.italic, Some(true));
+    }
+
+    #[test]
+    fn test_parse_shorthand_u_for_underline() {
+        let style = Style::parse("u").unwrap();
+        assert_eq!(style.underline, Some(true));
+    }
+
+    #[test]
+    fn test_parse_shorthand_s_for_strike() {
+        let style = Style::parse("s").unwrap();
+        assert_eq!(style.strike, Some(true));
+    }
+
+    #[test]
+    fn test_parse_shorthand_combined() {
+        let style = Style::parse("b i red").unwrap();
+        assert_eq!(style.bold, Some(true));
+        assert_eq!(style.italic, Some(true));
+        assert_eq!(style.color, Some(Color::Standard(1)));
+    }
+
+    #[test]
+    fn test_parse_shorthand_negation() {
+        let style = Style::parse("not b").unwrap();
+        assert_eq!(style.bold, Some(false));
+
+        let style = Style::parse("not i").unwrap();
+        assert_eq!(style.italic, Some(false));
     }
 }

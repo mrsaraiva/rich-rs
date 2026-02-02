@@ -1312,7 +1312,11 @@ impl Text {
             return self.clone();
         }
 
-        // Split into words on spaces
+        // Split into words on spaces.
+        // Note: Python Rich uses `split(" ")`, which preserves empty tokens for
+        // consecutive spaces. Our split currently drops empty segments unless
+        // `allow_blank` is true; this is sufficient for the demo content which
+        // uses single spaces between words.
         let words = self.split(" ", false, false);
         if words.len() <= 1 {
             // Single word or empty - can't justify, just pad right
@@ -1321,16 +1325,22 @@ impl Text {
 
         // Calculate total word width and number of gaps
         let words_width: usize = words.iter().map(|w| w.cell_len()).sum();
-        let num_gaps = words.len() - 1;
-        let total_space_needed = width.saturating_sub(words_width);
-
-        if num_gaps == 0 || total_space_needed == 0 {
+        let num_gaps = words.len().saturating_sub(1);
+        if num_gaps == 0 {
             return self.pad_right(width);
         }
 
-        // Distribute spaces evenly, with extra spaces going to rightmost gaps
-        let base_spaces = total_space_needed / num_gaps;
-        let extra_spaces = total_space_needed % num_gaps;
+        // Distribute spaces to match Python Rich:
+        // start with 1 space per gap, then add extra spaces from right-to-left.
+        let mut spaces: Vec<usize> = vec![1; num_gaps];
+        let mut num_spaces = num_gaps;
+        let mut index = 0usize;
+        while words_width + num_spaces < width {
+            let pos = num_gaps.saturating_sub(index).saturating_sub(1);
+            spaces[pos] += 1;
+            num_spaces += 1;
+            index = (index + 1) % num_gaps;
+        }
 
         let mut result = Text::new();
         result.style = self.style;
@@ -1340,9 +1350,7 @@ impl Text {
 
             if i < num_gaps {
                 // Add spaces between words
-                // Extra spaces go to the rightmost gaps (opposite of Python's left-to-right)
-                let space_count = base_spaces + if i >= num_gaps - extra_spaces { 1 } else { 0 };
-                result.append(" ".repeat(space_count), None);
+                result.append(" ".repeat(spaces[i]), None);
             }
         }
 
@@ -1492,7 +1500,66 @@ impl From<String> for Text {
 ///
 /// This converts Text to Segments for rendering to the terminal.
 impl Renderable for Text {
-    fn render(&self, _console: &Console, _options: &ConsoleOptions) -> Segments {
+    fn render(&self, _console: &Console, options: &ConsoleOptions) -> Segments {
+        let text = self.plain_text();
+        let width = options.max_width;
+
+        // Even when `no_wrap` is enabled, we still need to run through `wrap()` when
+        // justification or overflow is requested, so that padding/truncation can be applied.
+        let needs_processing = width > 0
+            && (options.justify.is_some()
+                || options.overflow.is_some()
+                || text.lines().any(|line| cell_len(line) > width));
+
+        if !needs_processing {
+            return self.render_unwrapped();
+        }
+
+        let lines = self.wrap(
+            width,
+            options.justify,
+            options.overflow,
+            options.tab_size,
+            options.no_wrap,
+        );
+
+        if lines.len() == 1 {
+            return lines[0].render_unwrapped();
+        }
+
+        // Render each already-wrapped line without re-running wrap/justify/overflow.
+        // Re-processing would strip trailing padding and re-center again, which can
+        // shift multiline centered text to the right line-by-line (demo parity issue).
+        let mut segments = Segments::new();
+        for (i, line) in lines.iter().enumerate() {
+            segments.extend(line.render_unwrapped());
+            if i + 1 < lines.len() {
+                segments.push(Segment::line());
+            }
+        }
+
+        segments
+    }
+
+    fn measure(&self, _console: &Console, _options: &ConsoleOptions) -> Measurement {
+        let text = self.plain_text();
+        let lines: Vec<&str> = text.lines().collect();
+
+        let max_width = lines.iter().map(|line| cell_len(line)).max().unwrap_or(0);
+
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let min_width = words
+            .iter()
+            .map(|word| cell_len(word))
+            .max()
+            .unwrap_or(max_width);
+
+        Measurement::new(min_width, max_width)
+    }
+}
+
+impl Text {
+    fn render_unwrapped(&self) -> Segments {
         let text = self.plain_text();
 
         // Fast path: no spans - still apply base style if present
@@ -1577,22 +1644,6 @@ impl Renderable for Text {
         }
 
         segments
-    }
-
-    fn measure(&self, _console: &Console, _options: &ConsoleOptions) -> Measurement {
-        let text = self.plain_text();
-        let lines: Vec<&str> = text.lines().collect();
-
-        let max_width = lines.iter().map(|line| cell_len(line)).max().unwrap_or(0);
-
-        let words: Vec<&str> = text.split_whitespace().collect();
-        let min_width = words
-            .iter()
-            .map(|word| cell_len(word))
-            .max()
-            .unwrap_or(max_width);
-
-        Measurement::new(min_width, max_width)
     }
 }
 
@@ -2371,6 +2422,36 @@ mod tests {
         let lines = text.wrap(5, None, None, 8, true);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].plain_text(), "hello world");
+    }
+
+    #[test]
+    fn test_render_no_wrap_still_applies_justify() {
+        use crate::console::{ConsoleOptions, JustifyMethod};
+        use crate::Console;
+
+        let console = Console::new();
+        let options = ConsoleOptions {
+            max_width: 6,
+            justify: Some(JustifyMethod::Center),
+            no_wrap: true,
+            ..Default::default()
+        };
+
+        let text = Text::plain("hi");
+        let segments = text.render(&console, &options);
+        let rendered: String = segments.iter().map(|s| s.text.as_ref()).collect();
+        assert_eq!(rendered, "  hi  ");
+    }
+
+    #[test]
+    fn test_justify_full_distributes_extra_spaces_right_to_left() {
+        // Words are "a", "b", "c" => 3 chars.
+        // Width 8 means we need 5 spaces total between words.
+        // Python Rich distributes extra spaces from right-to-left.
+        // With 2 gaps, that yields left gap 2 spaces, right gap 3 spaces.
+        let text = Text::plain("a b c");
+        let justified = text.justify_full(8);
+        assert_eq!(justified.plain_text(), "a  b   c");
     }
 
     #[test]

@@ -28,10 +28,11 @@ use std::io::Stdout;
 
 use crate::cells::cell_len;
 use crate::console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod};
-use crate::highlighter::{repr_highlighter, Highlighter};
+use crate::highlighter::{repr_highlighter, repr_highlighter_with_theme, Highlighter};
 use crate::measure::Measurement;
 use crate::segment::Segments;
 use crate::text::Text;
+use crate::theme::Theme;
 use crate::Renderable;
 
 // ============================================================================
@@ -196,6 +197,8 @@ struct Line {
     /// Whether this is the last item in its parent.
     last: bool,
     /// Whether this is the root node.
+    /// NOTE: Reserved for future use (e.g., special root formatting).
+    #[allow(dead_code)]
     is_root: bool,
 }
 
@@ -975,6 +978,8 @@ pub struct Pretty {
     margin: usize,
     /// Insert a new line if output has multiple lines.
     insert_line: bool,
+    /// Whether an explicit theme was set (if false, use Console's theme).
+    explicit_theme: bool,
 }
 
 impl std::fmt::Debug for Pretty {
@@ -992,6 +997,7 @@ impl std::fmt::Debug for Pretty {
             .field("expand_all", &self.expand_all)
             .field("margin", &self.margin)
             .field("insert_line", &self.insert_line)
+            .field("explicit_theme", &self.explicit_theme)
             .finish_non_exhaustive()
     }
 }
@@ -1026,6 +1032,7 @@ impl Pretty {
             expand_all: false,
             margin: 0,
             insert_line: false,
+            explicit_theme: false,
         }
     }
 
@@ -1047,6 +1054,7 @@ impl Pretty {
             expand_all: false,
             margin: 0,
             insert_line: false,
+            explicit_theme: false,
         }
     }
 
@@ -1089,6 +1097,48 @@ impl Pretty {
     /// Enable or disable indentation guides.
     pub fn with_indent_guides(mut self, guides: bool) -> Self {
         self.indent_guides = guides;
+        self
+    }
+
+    /// Set the theme by name.
+    ///
+    /// Available themes: "default", "dracula", "gruvbox-dark", "nord"
+    ///
+    /// This overrides the Console's theme for this renderable.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::pretty::Pretty;
+    ///
+    /// let data = vec![1, 2, 3];
+    /// let pretty = Pretty::new(&data).with_theme("dracula");
+    /// ```
+    pub fn with_theme(mut self, name: &str) -> Self {
+        if let Some(theme) = Theme::from_name(name) {
+            self.highlighter = Box::new(repr_highlighter_with_theme(theme));
+            self.explicit_theme = true;
+        }
+        self
+    }
+
+    /// Set a custom theme.
+    ///
+    /// This overrides the Console's theme for this renderable.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::pretty::Pretty;
+    /// use rich_rs::Theme;
+    ///
+    /// let theme = Theme::from_name("dracula").unwrap();
+    /// let data = vec![1, 2, 3];
+    /// let pretty = Pretty::new(&data).with_custom_theme(theme);
+    /// ```
+    pub fn with_custom_theme(mut self, theme: Theme) -> Self {
+        self.highlighter = Box::new(repr_highlighter_with_theme(theme));
+        self.explicit_theme = true;
         self
     }
 
@@ -1160,22 +1210,73 @@ impl Renderable for Pretty {
             return dim_text.render(console, options);
         }
 
-        let mut text = Text::plain(&pretty_str);
+        // Apply indent guides if enabled
+        let processed_str: String = if self.indent_guides {
+            let mut result_lines = Vec::new();
+            for line in pretty_str.lines() {
+                let leading_spaces: usize = line.chars().take_while(|c| *c == ' ').count();
+                let num_guides = leading_spaces / self.indent_size;
+
+                if num_guides > 0 {
+                    // Build guide prefix: "│   │   " etc.
+                    let mut guide_prefix = String::new();
+                    for _ in 0..num_guides {
+                        guide_prefix.push('│');
+                        for _ in 0..(self.indent_size - 1) {
+                            guide_prefix.push(' ');
+                        }
+                    }
+                    // Append the rest of the line (after leading spaces)
+                    let remaining = &line[leading_spaces..];
+                    result_lines.push(format!("{}{}", guide_prefix, remaining));
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+            result_lines.join("\n")
+        } else {
+            pretty_str.clone()
+        };
+        let has_newlines = processed_str.contains('\n');
+
+        let mut text = Text::plain(&processed_str);
 
         // Apply highlighting
-        self.highlighter.highlight(&mut text);
+        // If no explicit theme was set, use the Console's theme
+        if !self.explicit_theme && options.theme_name != "default" {
+            // Create a highlighter with the Console's theme
+            if let Some(theme) = Theme::from_name(&options.theme_name) {
+                let console_highlighter = repr_highlighter_with_theme(theme);
+                console_highlighter.highlight(&mut text);
+            } else {
+                self.highlighter.highlight(&mut text);
+            }
+        } else {
+            self.highlighter.highlight(&mut text);
+        }
 
-        // Note: Indentation guides feature not yet available in Text type.
-        // When Text::with_indent_guides() is implemented, enable this:
-        // if self.indent_guides && !options.ascii_only() {
-        //     text = text.with_indent_guides(self.indent_size, None);
-        // }
-        let _ = self.indent_guides; // Suppress unused warning
+        // Apply dim + green style to indent guide characters
+        if self.indent_guides {
+            use crate::color::SimpleColor;
+            let guide_style = crate::style::Style::new()
+                .with_color(SimpleColor::Standard(2)) // green
+                .with_dim(true);
+
+            // Find all │ characters and style them
+            let plain = text.plain_text().to_string();
+            for (idx, ch) in plain.char_indices() {
+                if ch == '│' {
+                    // Style the guide character
+                    let char_idx = plain[..idx].chars().count();
+                    text.stylize(char_idx, char_idx + 1, guide_style);
+                }
+            }
+        }
 
         let mut result = Segments::new();
 
         // Insert line if requested and output has multiple lines
-        if self.insert_line && pretty_str.contains('\n') {
+        if self.insert_line && has_newlines {
             result.push(crate::segment::Segment::line());
         }
 

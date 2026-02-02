@@ -29,6 +29,7 @@ use std::io::Stdout;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+use crate::align::Align;
 use crate::cells::cell_len;
 use crate::console::{Console, ConsoleOptions, JustifyMethod};
 use crate::measure::Measurement;
@@ -63,12 +64,20 @@ mod styles {
         SimpleColor::parse("blue").unwrap_or(SimpleColor::Default)
     }
 
+    fn yellow() -> SimpleColor {
+        SimpleColor::parse("yellow").unwrap_or(SimpleColor::Default)
+    }
+
+    fn black() -> SimpleColor {
+        SimpleColor::parse("black").unwrap_or(SimpleColor::Default)
+    }
+
     pub fn heading1() -> Style {
         Style::new().with_bold(true)
     }
 
     pub fn heading1_border() -> Style {
-        Style::new().with_color(cyan())
+        Style::new()  // Default/white border like Python Rich
     }
 
     pub fn heading2() -> Style {
@@ -100,7 +109,8 @@ mod styles {
     }
 
     pub fn code() -> Style {
-        Style::new().with_color(cyan())
+        // Python Rich uses "bold cyan on black" for inline code
+        Style::new().with_bold(true).with_color(cyan()).with_bgcolor(black())
     }
 
     pub fn block_quote() -> Style {
@@ -124,7 +134,7 @@ mod styles {
     }
 
     pub fn item_bullet() -> Style {
-        Style::new().with_color(cyan()).with_bold(true)
+        Style::new().with_color(yellow()).with_bold(true)
     }
 
     pub fn item_number() -> Style {
@@ -235,10 +245,11 @@ impl BlockElement {
 
                 match level {
                     HeadingLevel::H1 => {
-                        // H1 gets wrapped in a Panel with heavy border
+                        // H1 gets wrapped in a Panel with heavy border, text centered
                         let mut styled = text.clone();
                         styled.stylize(0, styled.len(), styles::heading1());
-                        let panel = Panel::new(Box::new(styled))
+                        let centered = Align::center(Box::new(styled));
+                        let panel = Panel::new(Box::new(centered))
                             .with_box(HEAVY)
                             .with_border_style(styles::heading1_border());
                         result = panel.render(console, options);
@@ -349,7 +360,8 @@ impl BlockElement {
                         let num = start_usize.saturating_add(i);
                         format!("{:>width$}. ", num, width = num_width)
                     } else {
-                        "• ".to_string()
+                        // Python Rich uses " • " (space-bullet-space) for unordered lists
+                        " • ".to_string()
                     };
 
                     let bullet_style = if *ordered {
@@ -841,10 +853,24 @@ impl Renderable for Markdown {
 
         let mut result = Segments::new();
 
-        for block in blocks {
+        for (idx, block) in blocks.iter().enumerate() {
             let block_segs = block.render(console, options, &context);
             for seg in block_segs {
                 result.push(seg);
+            }
+
+            // Preserve the visual blank line separation between markdown blocks (as in Python Rich).
+            // Most block renderers already end with a newline; we add one more newline between blocks
+            // unless there is already a trailing blank line.
+            if idx + 1 < blocks.len() {
+                let has_trailing_blank = (&result)
+                    .into_iter()
+                    .rev()
+                    .take(2)
+                    .all(|s| s.control.is_none() && s.text.as_ref() == "\n");
+                if !has_trailing_blank {
+                    result.push(Segment::line());
+                }
             }
         }
 
@@ -852,9 +878,17 @@ impl Renderable for Markdown {
     }
 
     fn measure(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
-        // Default implementation: render and measure
+        // Markdown renders multiple lines. `Measurement::from_segments` assumes single-line
+        // content, so split into lines and take the union.
         let segments = self.render(console, options);
-        Measurement::from_segments(&segments)
+        let lines = Segment::split_lines(segments);
+
+        let mut measurement = Measurement::new(0, 0);
+        for line in lines {
+            let line_segments: Segments = line.into();
+            measurement = measurement.union(&Measurement::from_segments(&line_segments));
+        }
+        measurement
     }
 }
 
@@ -895,6 +929,18 @@ mod tests {
     }
 
     #[test]
+    fn test_markdown_measure_is_multiline_safe() {
+        let md = Markdown::new("# Title\n\n- Item 1\n- Item 2");
+        let console = Console::new();
+        let options = ConsoleOptions::default();
+        let measurement = md.measure(&console, &options);
+
+        // Must be within the console width, and not the (much larger) total width of all lines.
+        assert!(measurement.maximum <= options.max_width);
+        assert!(measurement.minimum <= measurement.maximum);
+    }
+
+    #[test]
     fn test_markdown_bold() {
         let md = Markdown::new("This is **bold** text");
         let output = render_to_string(&md);
@@ -913,6 +959,23 @@ mod tests {
         let md = Markdown::new("Use `println!` macro");
         let output = render_to_string(&md);
         assert!(output.contains("println!"));
+    }
+
+    #[test]
+    fn test_markdown_code_inline_style() {
+        // Verify that inline code gets bold + cyan + black background styling
+        let console = Console::new();
+        let options = ConsoleOptions::default();
+        let md = Markdown::new("Use `code` here");
+        let segments = md.render(&console, &options);
+
+        let code_seg = segments.iter().find(|s| s.text.contains("code"));
+        assert!(code_seg.is_some(), "Should find 'code' segment");
+        let seg = code_seg.unwrap();
+        let style = seg.style.unwrap_or_default();
+        assert_eq!(style.bold, Some(true), "Code should be bold");
+        assert!(style.color.is_some(), "Code should have a color (cyan)");
+        assert!(style.bgcolor.is_some(), "Code should have bgcolor (black)");
     }
 
     #[test]

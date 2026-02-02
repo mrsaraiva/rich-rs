@@ -1,0 +1,111 @@
+{
+  "name": "gruvbox-dark",
+  "background_color": "#282828",
+  "highlight_color": "#ebdbb2",
+  "line_number_color": "inherit",
+  "line_number_background_color": "transparent",
+  "styles": {
+    "Token": {
+      "color": "#dddddd"
+    },
+    "Comment": {
+      "italic": true,
+      "color": "#928374"
+    },
+    "Comment.PreProc": {
+      "color": "#8ec07c"
+    },
+    "Comment.Special": {
+      "bold": true,
+      "italic": true,
+      "color": "#ebdbb2"
+    },
+    "Keyword": {
+      "color": "#fb4934"
+    },
+    "Operator.Word": {
+      "color": "#fb4934"
+    },
+    "Literal.String": {
+      "color": "#b8bb26"
+    },
+    "Literal.String.Escape": {
+      "color": "#fe8019"
+    },
+    "Literal.Number": {
+      "color": "#d3869b"
+    },
+    "Name.Builtin": {
+      "color": "#fe8019"
+    },
+    "Name.Variable": {
+      "color": "#83a598"
+    },
+    "Name.Constant": {
+      "color": "#d3869b"
+    },
+    "Name.Class": {
+      "color": "#8ec07c"
+    },
+    "Name.Function": {
+      "color": "#8ec07c"
+    },
+    "Name.Namespace": {
+      "color": "#8ec07c"
+    },
+    "Name.Exception": {
+      "color": "#fb4934"
+    },
+    "Name.Tag": {
+      "color": "#8ec07c"
+    },
+    "Name.Attribute": {
+      "color": "#fabd2f"
+    },
+    "Name.Decorator": {
+      "color": "#fb4934"
+    },
+    "Generic.Heading": {
+      "bold": true,
+      "color": "#ebdbb2"
+    },
+    "Generic.Subheading": {
+      "underline": true,
+      "color": "#ebdbb2"
+    },
+    "Generic.Deleted": {
+      "bgcolor": "#fb4934",
+      "color": "#282828"
+    },
+    "Generic.Inserted": {
+      "bgcolor": "#b8bb26",
+      "color": "#282828"
+    },
+    "Generic.Error": {
+      "color": "#fb4934"
+    },
+    "Generic.Emph": {
+      "italic": true
+    },
+    "Generic.Strong": {
+      "bold": true
+    },
+    "Generic.EmphStrong": {
+      "bold": true,
+      "italic": true
+    },
+    "Generic.Prompt": {
+      "color": "#a89984"
+    },
+    "Generic.Output": {
+      "color": "#f2e5bc"
+    },
+    "Generic.Traceback": {
+      "color": "#fb4934"
+    },
+    "Error": {
+      "bgcolor": "#fb4934",
+      "color": "#282828"
+    }
+  }
+}
