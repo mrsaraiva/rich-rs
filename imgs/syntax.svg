@@ -2,43 +2,43 @@
     <!-- Generated with Rich-rs https://github.com/Textualize/rich -->
     <style>
 
-    @font-face {{
+    @font-face {
         font-family: "Fira Code";
         src: local("FiraCode-Regular"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Regular.woff2") format("woff2"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Regular.woff") format("woff");
         font-style: normal;
         font-weight: 400;
-    }}
-    @font-face {{
+    }
+    @font-face {
         font-family: "Fira Code";
         src: local("FiraCode-Bold"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Bold.woff2") format("woff2"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Bold.woff") format("woff");
         font-style: bold;
         font-weight: 700;
-    }}
+    }
 
-    .terminal-488294771-matrix {{
+    .terminal-488294771-matrix {
         font-family: Fira Code, monospace;
         font-size: 20px;
         line-height: 24.4px;
         font-variant-east-asian: full-width;
-    }}
+    }
 
-    .terminal-488294771-title {{
+    .terminal-488294771-title {
         font-size: 18px;
         font-weight: bold;
         font-family: arial;
-    }}
+    }
 
-    .terminal-488294771-r5 { fill: #8fa1b3 }
-.terminal-488294771-r2 { fill: #656660 }
-.terminal-488294771-r7 { fill: #a3be8c }
-.terminal-488294771-r4 { fill: #c0c5ce }
+    .terminal-488294771-r7 { fill: #a3be8c }
 .terminal-488294771-r6 { fill: #d9d9d9 }
-.terminal-488294771-r1 { fill: #d9d9d9;font-weight: bold }
+.terminal-488294771-r2 { fill: #656660 }
 .terminal-488294771-r8 { fill: #d08770 }
+.terminal-488294771-r5 { fill: #8fa1b3 }
+.terminal-488294771-r4 { fill: #c0c5ce }
+.terminal-488294771-r1 { fill: #d9d9d9;font-weight: bold }
 .terminal-488294771-r3 { fill: #b48ead }
     </style>
 

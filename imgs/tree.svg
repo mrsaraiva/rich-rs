@@ -2,42 +2,42 @@
     <!-- Generated with Rich-rs https://github.com/Textualize/rich -->
     <style>
 
-    @font-face {{
+    @font-face {
         font-family: "Fira Code";
         src: local("FiraCode-Regular"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Regular.woff2") format("woff2"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Regular.woff") format("woff");
         font-style: normal;
         font-weight: 400;
-    }}
-    @font-face {{
+    }
+    @font-face {
         font-family: "Fira Code";
         src: local("FiraCode-Bold"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Bold.woff2") format("woff2"),
                 url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Bold.woff") format("woff");
         font-style: bold;
         font-weight: 700;
-    }}
+    }
 
-    .terminal-2154827691-matrix {{
+    .terminal-2154827691-matrix {
         font-family: Fira Code, monospace;
         font-size: 20px;
         line-height: 24.4px;
         font-variant-east-asian: full-width;
-    }}
+    }
 
-    .terminal-2154827691-title {{
+    .terminal-2154827691-title {
         font-size: 18px;
         font-weight: bold;
         font-family: arial;
-    }}
+    }
 
-    .terminal-2154827691-r6 { fill: #58d1eb }
-.terminal-2154827691-r1 { fill: #d9d9d9;font-weight: bold }
-.terminal-2154827691-r3 { fill: #9d65ff }
-.terminal-2154827691-r4 { fill: #98e024 }
-.terminal-2154827691-r5 { fill: #fd971f }
+    .terminal-2154827691-r5 { fill: #fd971f }
 .terminal-2154827691-r2 { fill: #d9d9d9 }
+.terminal-2154827691-r4 { fill: #98e024 }
+.terminal-2154827691-r3 { fill: #9d65ff }
+.terminal-2154827691-r1 { fill: #d9d9d9;font-weight: bold }
+.terminal-2154827691-r6 { fill: #58d1eb }
     </style>
 
     <defs>
@@ -83,21 +83,21 @@
     <g transform="translate(9, 41)" clip-path="url(#terminal-2154827691-clip-terminal)">
     
     <g class="terminal-2154827691-matrix">
-    <text class="terminal-2154827691-r1" x="0" y="20" textLength="146.4" clip-path="url(#terminal-2154827691-line-0)">📂&#160;Project</text>
-<text class="terminal-2154827691-r2" x="0" y="44.4" textLength="122" clip-path="url(#terminal-2154827691-line-1)">├──&#160;</text>
-<text class="terminal-2154827691-r3" x="48.8" y="44.4" textLength="97.6" clip-path="url(#terminal-2154827691-line-1)">📂&#160;src</text>
-<text class="terminal-2154827691-r2" x="0" y="68.8" textLength="195.2" clip-path="url(#terminal-2154827691-line-2)">│&#160;&#160;&#160;├──&#160;</text>
-<text class="terminal-2154827691-r4" x="97.6" y="68.8" textLength="146.4" clip-path="url(#terminal-2154827691-line-2)">📄&#160;main.rs</text>
-<text class="terminal-2154827691-r2" x="0" y="93.2" textLength="195.2" clip-path="url(#terminal-2154827691-line-3)">│&#160;&#160;&#160;└──&#160;</text>
-<text class="terminal-2154827691-r4" x="97.6" y="93.2" textLength="134.2" clip-path="url(#terminal-2154827691-line-3)">📄&#160;lib.rs</text>
-<text class="terminal-2154827691-r2" x="0" y="117.6" textLength="122" clip-path="url(#terminal-2154827691-line-4)">├──&#160;</text>
-<text class="terminal-2154827691-r3" x="48.8" y="117.6" textLength="122" clip-path="url(#terminal-2154827691-line-4)">📂&#160;tests</text>
-<text class="terminal-2154827691-r2" x="0" y="142" textLength="195.2" clip-path="url(#terminal-2154827691-line-5)">│&#160;&#160;&#160;└──&#160;</text>
-<text class="terminal-2154827691-r4" x="97.6" y="142" textLength="292.8" clip-path="url(#terminal-2154827691-line-5)">📄&#160;integration_test.rs</text>
-<text class="terminal-2154827691-r2" x="0" y="166.4" textLength="122" clip-path="url(#terminal-2154827691-line-6)">├──&#160;</text>
-<text class="terminal-2154827691-r5" x="48.8" y="166.4" textLength="183" clip-path="url(#terminal-2154827691-line-6)">📄&#160;Cargo.toml</text>
-<text class="terminal-2154827691-r2" x="0" y="190.8" textLength="122" clip-path="url(#terminal-2154827691-line-7)">└──&#160;</text>
-<text class="terminal-2154827691-r6" x="48.8" y="190.8" textLength="170.8" clip-path="url(#terminal-2154827691-line-7)">📄&#160;README.md</text>
+    <text class="terminal-2154827691-r1" x="0" y="20" textLength="122" clip-path="url(#terminal-2154827691-line-0)">📂&#160;Project</text>
+<text class="terminal-2154827691-r2" x="0" y="44.4" textLength="48.8" clip-path="url(#terminal-2154827691-line-1)">├──&#160;</text>
+<text class="terminal-2154827691-r3" x="48.8" y="44.4" textLength="73.2" clip-path="url(#terminal-2154827691-line-1)">📂&#160;src</text>
+<text class="terminal-2154827691-r2" x="0" y="68.8" textLength="97.6" clip-path="url(#terminal-2154827691-line-2)">│&#160;&#160;&#160;├──&#160;</text>
+<text class="terminal-2154827691-r4" x="97.6" y="68.8" textLength="122" clip-path="url(#terminal-2154827691-line-2)">📄&#160;main.rs</text>
+<text class="terminal-2154827691-r2" x="0" y="93.2" textLength="97.6" clip-path="url(#terminal-2154827691-line-3)">│&#160;&#160;&#160;└──&#160;</text>
+<text class="terminal-2154827691-r4" x="97.6" y="93.2" textLength="109.8" clip-path="url(#terminal-2154827691-line-3)">📄&#160;lib.rs</text>
+<text class="terminal-2154827691-r2" x="0" y="117.6" textLength="48.8" clip-path="url(#terminal-2154827691-line-4)">├──&#160;</text>
+<text class="terminal-2154827691-r3" x="48.8" y="117.6" textLength="97.6" clip-path="url(#terminal-2154827691-line-4)">📂&#160;tests</text>
+<text class="terminal-2154827691-r2" x="0" y="142" textLength="97.6" clip-path="url(#terminal-2154827691-line-5)">│&#160;&#160;&#160;└──&#160;</text>
+<text class="terminal-2154827691-r4" x="97.6" y="142" textLength="268.4" clip-path="url(#terminal-2154827691-line-5)">📄&#160;integration_test.rs</text>
+<text class="terminal-2154827691-r2" x="0" y="166.4" textLength="48.8" clip-path="url(#terminal-2154827691-line-6)">├──&#160;</text>
+<text class="terminal-2154827691-r5" x="48.8" y="166.4" textLength="158.6" clip-path="url(#terminal-2154827691-line-6)">📄&#160;Cargo.toml</text>
+<text class="terminal-2154827691-r2" x="0" y="190.8" textLength="48.8" clip-path="url(#terminal-2154827691-line-7)">└──&#160;</text>
+<text class="terminal-2154827691-r6" x="48.8" y="190.8" textLength="146.4" clip-path="url(#terminal-2154827691-line-7)">📄&#160;README.md</text>
     </g>
     </g>
 </svg>
