@@ -12,6 +12,7 @@ This directory contains equivalent Python and Rust programs that exercise the sa
 Run all tests for a phase:
 ```bash
 ./run_parity.sh phase1
+./run_parity.sh phase5
 ```
 
 Run a specific module:
@@ -21,6 +22,12 @@ Run a specific module:
 ./run_parity.sh phase1 style
 ./run_parity.sh phase1 segment
 ./run_parity.sh phase1 measure
+```
+
+Phase 5 modules:
+```bash
+./run_parity.sh phase5 ansi
+./run_parity.sh phase5 progress
 ```
 
 ## Output
@@ -58,3 +65,7 @@ tests/parity/
 2. **Deterministic**: No random IDs, timestamps, or terminal detection
 3. **Self-contained**: Each test file exercises one module
 4. **Diffable**: Output is designed for easy `diff` comparison
+
+## Module discovery
+
+The runner discovers modules by scanning `tests/parity/<phase>/python/test_*.py`.

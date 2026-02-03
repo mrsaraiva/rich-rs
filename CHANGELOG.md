@@ -5,11 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-02-03
+
+### Highlights
+
+**rich-rs reaches feature parity with Python Rich's core rendering capabilities.**
+
+This release includes complete implementations of all major Rich features:
+- Full color system (16/256/TrueColor)
+- Text rendering with markup, wrapping, and justification
+- Tables, Panels, Trees, and all standard renderables
+- Syntax highlighting via syntect
+- Markdown rendering via pulldown-cmark
+- Progress bars with multi-task support
+- Live display with real-time updates
+- Beautiful panic tracebacks
 
 ### Added
+
+#### Live Display & Progress (Phase 5.1-5.2)
+- `Live` struct for real-time updating displays
+  - Background refresh thread with configurable refresh rate
+  - Transient mode (clear output on exit)
+  - Alt-screen mode support
+  - Vertical overflow handling (crop, ellipsis, visible)
+  - Thread-safe updates via `update()` method
+  - Nested Live display support
+- `Progress` struct for multi-task progress tracking
+  - `TaskID` newtype for task identification
+  - `ProgressTask` with timing, speed calculation, and ETA
+  - `ProgressColumn` trait for custom columns
+  - Built-in columns: `TextColumn`, `BarColumn`, `SpinnerColumn`, `TimeElapsedColumn`, `TimeRemainingColumn`, `MofNCompleteColumn`, `DownloadColumn`, `TransferSpeedColumn`
+  - `Progress::track()` iterator for easy progress tracking
+  - `ProgressIteratorExt` trait for `.progress()` on any iterator
+- `ProgressBar` renderable for standalone progress bars
+  - Configurable width, completed/total ratio
+  - Pulse animation for indeterminate progress
+  - Style customization (background, complete, finished, pulse)
+- `Spinner` renderable with 80+ animation styles
+  - All spinner definitions from cli-spinners
+  - Configurable speed and style
+  - Text label support
+- `Control` renderable for terminal escape sequences
+  - Cursor positioning, show/hide
+  - Screen clear, line erase
+  - Alt screen enter/leave
+  - Bell, carriage return, home
+
+#### Utilities
+- `filesize` module for human-readable file sizes
+  - `decimal()` - SI units (kB, MB, GB)
+  - `binary()` - Binary units (KiB, MiB, GiB)
+  - `pick_unit_and_suffix()` for custom formatting
+- `loop_helpers` module with iterator utilities
+  - `loop_first()` - yields `(is_first, item)` tuples
+  - `loop_last()` - yields `(is_last, item)` tuples
+  - `loop_first_last()` - yields `(is_first, is_last, item)` tuples
+- `Styled` wrapper renderable for applying styles to any renderable
+- `Constrain` wrapper renderable for width constraints
+- `AnsiDecoder` for parsing ANSI escape sequences back to styled text
+- `Text::from_ansi()` for converting ANSI-styled strings to Text
+
+#### Demo & Examples
+- `cargo run --example demo` - Full feature showcase matching `python -m rich`
+- `cargo run --example progress` - Progress bar demonstrations
+- `cargo run --example live_stress` - Live display stress test
+- `cargo run --example live_alt_screen` - Alt-screen mode example
+
+#### Previous Releases (included in 1.0.0)
 - Demo example (Phase 6.1):
-  - `cargo run --example demo` showcasing all rich-rs features
   - ColorBox renderable with HLS→RGB TrueColor gradient
   - Colors, Styles, Text, Asian language support sections
   - Markup with BBCode and emoji display
@@ -60,80 +124,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Proportional padding collapse when padding exceeds available width
 - Full Box module (Phase 3.1):
   - `Box` struct with 28 character fields for table borders (8-row structure)
-  - All 19 box constants matching Python Rich (ASCII, ASCII2, ASCII_DOUBLE_HEAD, SQUARE, SQUARE_DOUBLE_HEAD, MINIMAL, MINIMAL_HEAVY_HEAD, MINIMAL_DOUBLE_HEAD, SIMPLE, SIMPLE_HEAD, SIMPLE_HEAVY, HORIZONTALS, ROUNDED, HEAVY, HEAVY_EDGE, HEAVY_HEAD, DOUBLE, DOUBLE_EDGE, MARKDOWN)
+  - All 19 box constants matching Python Rich
   - `RowLevel` enum (Head, Row, Foot, Mid) for row separator types
   - `Box::substitute()` - platform-safe substitution (legacy Windows, ASCII-only)
   - `Box::get_plain_headed_box()` - header character substitution
   - `Box::get_top()`, `get_row()`, `get_bottom()` - table border generation
-  - Backward-compatible `BoxChars` type alias (deprecated)
 - `Emoji` struct with 3608 emoji entries and `:name:` replacement
 - `Highlighter` trait for regex-based text highlighting
 - `RegexHighlighter`, `NullHighlighter` implementations
 - Factory functions: `repr_highlighter()`, `json_highlighter()`, `iso8601_highlighter()`
-- `NoEmoji` error variant for unknown emoji names
 - Full Console module (Phase 2.3):
   - `Theme` struct with style registry and INI config parsing
   - `ThemeStack` for nested theme contexts
-  - 100+ default styles matching Python Rich (info, warning, error, repr.*, etc.)
+  - 100+ default styles matching Python Rich
   - `JustifyMethod` enum (Left, Center, Right, Full)
   - `OverflowMethod` enum (Fold, Crop, Ellipsis, Ignore)
-  - Expanded `ConsoleOptions` with all Python Rich fields (16+ fields)
   - `Console<W: Write>` generic over writer for testability
   - Color system detection from TERM/COLORTERM/NO_COLOR environment
-  - `Console::render()` - core render method returning Segments
-  - `Console::render_lines()` - render to cropped line grid
-  - `Console::render_str()` - convert string to Text with markup/emoji/highlight
-  - `Console::print()` - full-featured print with style, justify, highlight options
-  - `Console::capture()` - capture output for testing
-  - Alt screen support via crossterm (`Console::set_alt_screen()`)
-- Wrap module (Phase 2.3):
-  - `divide_line()` - find word wrap offsets for text wrapping
-  - `Words` iterator for tokenizing text into words/whitespace
-- Text wrapping methods (Phase 2.3):
-  - `Text::pad_left()`, `pad_right()`, `center()` - alignment padding
-  - `Text::expand_tabs()` - expand tabs with configurable width
-  - `Text::rstrip()`, `rstrip_end()` - trailing whitespace removal
-  - `Text::truncate()` - truncate to width with optional ellipsis/pad
-  - `Text::split()` - split on separator string
-  - `Text::wrap()` - full word wrapping with justify and overflow support
-- Full Text module (Phase 2.2):
-  - `Span::split()` - split span at offset into two parts
-  - `Span::move_by()` - shift span by offset (supports negative)
-  - `Span::right_crop()` - crop span at offset
-  - `Span::extend()` - extend span end by cells
-  - `Text::from_markup()` - parse BBCode markup into styled Text
-  - `Text::assemble()` - build Text from mixed parts (str, Text, (str, Style))
-  - `TextPart` enum for flexible assembly
-  - `Text::stylize_range()` - apply style with negative index support
-  - `Text::stylize_before()` - apply style at lower priority
-  - `Text::highlight_regex()` - highlight regex matches with style
-  - `Text::highlight_words()` - highlight word occurrences (case-insensitive option)
-  - `Text::divide()` - split text at offsets preserving spans
-  - `Text::append_text()` - append Text preserving base style and spans
-  - `Text::join()` - join multiple Text objects with separator
-  - `Text::copy()`, `blank_copy()` - copying utilities
-  - `impl Renderable for Text` - render to Segments with style combination
-  - `impl Measurable for Text` - calculate min/max width
-- Full markup parser (Phase 2.1):
-  - `Tag` struct with name and optional parameters
-  - `parse()` function - regex-based tokenizer yielding `(position, text, tag)` tuples
-  - `escape()` function - escape text for safe inclusion in markup
-  - `render()` function - render markup to `Text` with styled spans
-  - `render_with_style()` function - render with base style applied
-  - Link syntax: `[link=url]text[/link]` (styled as underlined cyan)
-  - Metadata syntax: `[@handler=params]text[/@handler]`
-  - Nested tag support with style stacking
-  - Emoji code replacement integration (`:smile:` → emoji)
-  - Escaped bracket support (`\[` → `[`)
-  - Implicit close tags (`[/]` closes most recent)
-
-### Changed
-- `markup::render()` now returns `Result<Text>` with proper error handling
-- Markup module completely rewritten to match Python Rich behavior
+  - Alt screen support via crossterm
+- Full Text module with markup, wrapping, and span manipulation
+- Full markup parser with BBCode-like syntax
 
 ### Dependencies
+- `crossterm` 0.28 - Terminal abstraction
+- `unicode-width` 0.2 - Cell width calculation
+- `atty` 0.2 - Terminal detection
+- `smallvec` 1.13 - Stack-allocated vectors
+- `thiserror` 2.0 - Error type derivation
+- `once_cell` 1.19 - Lazy static initialization
 - `phf` 0.11 - Compile-time perfect hash map for emoji lookup
-- `regex` 1.x - Regular expression support for highlighters and markup parsing
+- `regex` 1.x - Regular expression support
+- `syntect` 5.x - Syntax highlighting
+- `pulldown-cmark` 0.12 - Markdown parsing
 
 ## [0.1.0] - 2026-01-16
 
@@ -153,52 +175,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Text` struct with styled spans
 - `Measurement` struct with `from_segments()` default measurement
 - `Console` struct with basic terminal detection
-- `cell_len()` function wrapping unicode-width
-- `char_width()` function for single character width
-- `set_cell_size()` function for padding/truncating text to exact cell width
-- `chop_cells()` function for splitting text into lines by cell width
-- `NULL_STYLE` constant for empty style
-- `Style::is_null()` method to check for empty styles
+- Cell width utilities: `cell_len()`, `char_width()`, `set_cell_size()`, `chop_cells()`
+- `NULL_STYLE` constant and `Style::is_null()` method
 - `Style::render()` method for ANSI escape code generation
 - `Style::get_html_style()` method for CSS style generation
-- `SimpleColor::downgrade()` method for color system downgrading
-- `SimpleColor::get_hex()` method for hex color strings
-- `Segment::split_cells()` method for splitting at cell boundaries
-- `Segment::split_lines()` for splitting segments on newlines
-- `Segment::split_and_crop_lines()` for layout rendering (split + crop to width)
-- `Segment::adjust_line_length()` for cropping/padding lines to exact width
-- `Segment::simplify()` for merging adjacent same-style segments
-- `Segment::divide()` for splitting at multiple cell positions
-- `Segment::apply_style()`, `filter_control()`, `strip_styles()` utilities
-- `Segment::get_line_length()`, `get_shape()`, `set_shape()` for layout
-- `Measurement::normalize()`, `with_maximum()`, `with_minimum()`, `clamp_bounds()`
-- `measure_renderables()` function for combining measurements
-- BBCode-like markup parser (basic implementation)
-- Box drawing character sets (ASCII, ROUNDED, HEAVY, DOUBLE, SQUARE)
+- Segment utilities for splitting, cropping, measuring, and layout
+- `Measurement` methods for normalization and clamping
 - `Renderable` trait with `Send + Sync` requirement and default `measure()` method
 - `RichCast` trait with associated type (avoids Box allocation)
 - Development roadmap at `docs/devel/ROADMAP.md`
 
 ### Changed
-- `Renderable::render()` now returns `Segments` instead of `Vec<Segment>`
+- `Renderable::render()` returns `Segments` instead of `Vec<Segment>`
 - Merged `Measurable` trait into `Renderable` as default method
-- `Segment.text` now uses `Cow<'static, str>` for efficiency
-- `Measurement::clamp()` renamed to `clamp_width()` to avoid confusion with new `clamp_bounds()`
-- `ParseError` now implements `Clone`, `PartialEq`, `Eq` and is `#[non_exhaustive]`
-- `Segment::divide()` now always yields a trailing partition (matches Python Rich behavior)
+- `Segment.text` uses `Cow<'static, str>` for efficiency
 
 ### Fixed
-- Color downgrade to Windows palette now works correctly (was incorrectly skipped)
-- `chop_cells()` no longer creates leading empty lines when first char exceeds width
-- Style parsing now supports negation ("not bold", "not italic", etc.)
-- Style ANSI codes now emit proper SGR reset codes (22-29) for `Some(false)` attributes
-- `Style::get_html_style()` combines underline and strike into single `text-decoration` property
-- Removed incorrect `unsafe impl Send/Sync` on Segment/Segments (now derived automatically)
-
-### Dependencies
-- `crossterm` 0.28 - Terminal abstraction
-- `unicode-width` 0.2 - Cell width calculation
-- `atty` 0.2 - Terminal detection
-- `smallvec` 1.13 - Stack-allocated vectors
-- `thiserror` 2.0 - Error type derivation
-- `once_cell` 1.19 - Lazy static initialization
+- Color downgrade to Windows palette
+- `chop_cells()` edge cases
+- Style parsing negation support
+- Style ANSI codes emit proper SGR reset codes

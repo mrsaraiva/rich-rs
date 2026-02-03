@@ -29,6 +29,8 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Cursor};
 use std::path::Path;
 
+use once_cell::sync::Lazy;
+
 use crate::color::SimpleColor as Color;
 use crate::style::Style;
 
@@ -910,6 +912,15 @@ pub fn default_styles() -> HashMap<String, Style> {
     add!("iso8601.timezone", Style::color(Color::Standard(3)));
 
     styles
+}
+
+static DEFAULT_STYLES_MAP: Lazy<HashMap<String, Style>> = Lazy::new(default_styles);
+
+/// Get a style from the built-in default styles by name.
+///
+/// This supports Rich's convention of style names such as `"progress.percentage"`.
+pub fn get_default_style(name: &str) -> Option<Style> {
+    DEFAULT_STYLES_MAP.get(name).copied()
 }
 
 #[cfg(test)]

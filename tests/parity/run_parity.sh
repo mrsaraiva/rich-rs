@@ -24,8 +24,21 @@ fi
 
 # Build Rust crate once
 echo -e "${CYAN}Building Rust parity crate...${NC}"
-(cd "$PHASE_DIR/rust" && cargo build --release --quiet)
-RUST_BIN="$PHASE_DIR/rust/target/release/parity-phase1"
+(cd "$PHASE_DIR/rust" && {
+    if [ "${PARITY_OFFLINE:-0}" = "1" ]; then
+        cargo build --release --quiet --offline
+    else
+        cargo build --release --quiet || cargo build --release --quiet --offline
+    fi
+})
+RUST_BIN="$PHASE_DIR/rust/target/release/parity-${PHASE}"
+
+if [ ! -x "$RUST_BIN" ]; then
+    # Backward compatibility for older phases that hard-coded the binary name.
+    if [ -x "$PHASE_DIR/rust/target/release/parity-phase1" ]; then
+        RUST_BIN="$PHASE_DIR/rust/target/release/parity-phase1"
+    fi
+fi
 
 run_test() {
     local module="$1"
@@ -73,7 +86,25 @@ run_test() {
 
 # Run tests
 if [ "$MODULE" = "all" ]; then
-    for mod in color cells style segment measure; do
+    modules=()
+    for python_file in "$PHASE_DIR/python"/test_*.py; do
+        if [ ! -f "$python_file" ]; then
+            continue
+        fi
+        base="$(basename "$python_file")"
+        mod="${base#test_}"
+        mod="${mod%.py}"
+        modules+=("$mod")
+    done
+
+    if [ "${#modules[@]}" -eq 0 ]; then
+        echo -e "${YELLOW}[SKIP] No Python tests found under $PHASE_DIR/python${NC}"
+        exit 0
+    fi
+
+    IFS=$'\n' sorted=($(printf "%s\n" "${modules[@]}" | sort))
+    unset IFS
+    for mod in "${sorted[@]}"; do
         run_test "$mod"
     done
 else

@@ -34,13 +34,14 @@ use crate::cells::cell_len;
 use crate::console::{Console, ConsoleOptions, JustifyMethod};
 use crate::measure::Measurement;
 use crate::panel::Panel;
+use crate::padding::{Padding, PaddingDimensions};
 use crate::rule::Rule;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
 use crate::syntax::Syntax;
 use crate::table::{Column, Table};
 use crate::text::Text;
-use crate::r#box::HEAVY;
+use crate::r#box::DOUBLE;
 use crate::Renderable;
 
 // ============================================================================
@@ -164,13 +165,21 @@ struct MarkdownContext {
     inline_code_lexer: Option<String>,
     /// Code theme for syntax highlighting.
     code_theme: String,
+    /// Optional padding to apply to code blocks (Rich CLI uses (0, 4)).
+    code_block_padding: Option<PaddingDimensions>,
     /// Text justification.
     #[allow(dead_code)]
     justify: Option<JustifyMethod>,
 }
 
 impl MarkdownContext {
-    fn new(hyperlinks: bool, inline_code_lexer: Option<String>, code_theme: String, justify: Option<JustifyMethod>) -> Self {
+    fn new(
+        hyperlinks: bool,
+        inline_code_lexer: Option<String>,
+        code_theme: String,
+        code_block_padding: Option<PaddingDimensions>,
+        justify: Option<JustifyMethod>,
+    ) -> Self {
         Self {
             style_stack: vec![Style::default()],
             in_link: false,
@@ -178,6 +187,7 @@ impl MarkdownContext {
             hyperlinks,
             inline_code_lexer,
             code_theme,
+            code_block_padding,
             justify,
         }
     }
@@ -245,12 +255,12 @@ impl BlockElement {
 
                 match level {
                     HeadingLevel::H1 => {
-                        // H1 gets wrapped in a Panel with heavy border, text centered
+                        // H1 gets wrapped in a Panel with a double border, text centered (Python Rich parity)
                         let mut styled = text.clone();
                         styled.stylize(0, styled.len(), styles::heading1());
                         let centered = Align::center(Box::new(styled));
                         let panel = Panel::new(Box::new(centered))
-                            .with_box(HEAVY)
+                            .with_box(DOUBLE)
                             .with_border_style(styles::heading1_border());
                         result = panel.render(console, options);
                     }
@@ -311,7 +321,13 @@ impl BlockElement {
                 let syntax = Syntax::new(code, lexer)
                     .with_theme(&context.code_theme)
                     .with_line_numbers(false);
-                let mut result = syntax.render(console, options);
+                let mut result = if let Some(pad) = context.code_block_padding {
+                    Padding::new(Box::new(syntax), pad)
+                        .with_expand(false)
+                        .render(console, options)
+                } else {
+                    syntax.render(console, options)
+                };
                 result.push(Segment::line());
                 result
             }
@@ -783,6 +799,8 @@ pub struct Markdown {
     inline_code_lexer: Option<String>,
     /// Code theme for syntax highlighting.
     code_theme: String,
+    /// Optional padding to apply around fenced code blocks.
+    code_block_padding: Option<PaddingDimensions>,
     /// Text justification for paragraphs.
     justify: Option<JustifyMethod>,
 }
@@ -795,6 +813,7 @@ impl Markdown {
             hyperlinks: false,
             inline_code_lexer: None,
             code_theme: crate::syntax::DEFAULT_THEME.to_string(),
+            code_block_padding: None,
             justify: None,
         }
     }
@@ -817,6 +836,14 @@ impl Markdown {
         self
     }
 
+    /// Set padding applied around code blocks.
+    ///
+    /// This is useful for matching Rich CLI's Markdown rendering, which indents fenced code blocks.
+    pub fn with_code_block_padding(mut self, padding: impl Into<PaddingDimensions>) -> Self {
+        self.code_block_padding = Some(padding.into());
+        self
+    }
+
     /// Set text justification for paragraphs.
     pub fn with_justify(mut self, justify: JustifyMethod) -> Self {
         self.justify = Some(justify);
@@ -829,6 +856,7 @@ impl Markdown {
             self.hyperlinks,
             self.inline_code_lexer.clone(),
             self.code_theme.clone(),
+            self.code_block_padding,
             self.justify,
         );
 

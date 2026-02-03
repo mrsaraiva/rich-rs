@@ -150,6 +150,13 @@ impl Style {
         while let Some(word) = words.next() {
             let word_lower = word.to_lowercase();
 
+            // Support Rich-style named styles from the default theme, e.g. "progress.percentage".
+            // If a token matches a default style name, merge it into the current style.
+            if let Some(named) = crate::theme::get_default_style(&word_lower) {
+                style = style.combine(&named);
+                continue;
+            }
+
             if word_lower == "on" {
                 on_background = true;
                 continue;

@@ -9,6 +9,7 @@
 
 use std::env;
 use std::io::{self, Stdout, Write};
+use std::collections::HashMap;
 
 use crossterm::terminal::{self, ClearType};
 use crossterm::{cursor, execute, terminal as ct};
@@ -17,7 +18,7 @@ use crate::Renderable;
 use crate::color::ColorSystem;
 use crate::emoji::Emoji;
 use crate::highlighter::Highlighter;
-use crate::segment::{Segment, Segments};
+use crate::segment::{ControlType, Segment, Segments};
 use crate::style::Style;
 use crate::text::Text;
 use crate::theme::{Theme, ThemeStack};
@@ -369,6 +370,38 @@ pub struct Console<W: Write = Stdout> {
     quiet: bool,
     /// Tab size for tab expansion.
     tab_size: usize,
+    /// Live display manager (Live/Progress).
+    live: LiveManager,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveVerticalOverflow {
+    Crop,
+    Ellipsis,
+    Visible,
+}
+
+impl From<crate::live::VerticalOverflowMethod> for LiveVerticalOverflow {
+    fn from(v: crate::live::VerticalOverflowMethod) -> Self {
+        match v {
+            crate::live::VerticalOverflowMethod::Crop => Self::Crop,
+            crate::live::VerticalOverflowMethod::Ellipsis => Self::Ellipsis,
+            crate::live::VerticalOverflowMethod::Visible => Self::Visible,
+        }
+    }
+}
+
+struct LiveEntry {
+    renderable: Box<dyn crate::Renderable + Send + Sync>,
+    vertical_overflow: LiveVerticalOverflow,
+}
+
+#[derive(Default)]
+struct LiveManager {
+    next_id: usize,
+    stack: Vec<usize>,
+    entries: HashMap<usize, LiveEntry>,
+    shape: Option<(usize, usize)>,
 }
 
 impl Console<Stdout> {
@@ -391,6 +424,7 @@ impl Console<Stdout> {
             is_alt_screen: false,
             quiet: false,
             tab_size: 8,
+            live: LiveManager::default(),
         }
     }
 
@@ -441,6 +475,7 @@ impl Console<Stdout> {
             quiet: false,
             // Store the options
             options,
+            live: LiveManager::default(),
         }
     }
 
@@ -577,6 +612,7 @@ impl<W: Write> Console<W> {
             quiet: false,
             // Store the options
             options,
+            live: LiveManager::default(),
         }
     }
 
@@ -663,6 +699,17 @@ impl<W: Write> Console<W> {
     /// Check if the console is writing to a terminal.
     pub fn is_terminal(&self) -> bool {
         self.force_terminal.unwrap_or(self.options.is_terminal)
+    }
+
+    /// Check if the terminal is considered "dumb" (no cursor control).
+    pub fn is_dumb_terminal(&self) -> bool {
+        match env::var("TERM") {
+            Ok(term) => {
+                let t = term.to_lowercase();
+                t == "dumb" || t == "unknown"
+            }
+            Err(_) => false,
+        }
     }
 
     /// Force terminal mode on or off.
@@ -928,6 +975,9 @@ impl<W: Write> Console<W> {
         if self.quiet {
             return Ok(());
         }
+        if self.is_terminal() && !self.is_dumb_terminal() && self.has_live() {
+            return self.print(&Text::plain(text), None, None, None, false, "\n");
+        }
         writeln!(self.writer, "{}", text)?;
         self.writer.flush()
     }
@@ -936,6 +986,9 @@ impl<W: Write> Console<W> {
     pub fn print_styled(&mut self, text: &str, style: Style) -> io::Result<()> {
         if self.quiet {
             return Ok(());
+        }
+        if self.is_terminal() && !self.is_dumb_terminal() && self.has_live() {
+            return self.print(&Text::styled(text, style), None, None, None, false, "\n");
         }
         // Only apply ANSI styling if color system is available
         if let Some(color_system) = self.color_system {
@@ -1087,6 +1140,38 @@ impl<W: Write> Console<W> {
         let mut used_sgr = false;
 
         for segment in segments.iter() {
+            if let Some(control) = &segment.control {
+                // Emit terminal controls regardless of style state.
+                // Control sequences generally do not alter SGR state.
+                match control {
+                    ControlType::Bell => write!(self.writer, "\x07")?,
+                    ControlType::CarriageReturn => write!(self.writer, "\r")?,
+                    ControlType::Home => write!(self.writer, "\x1b[H")?,
+                    ControlType::Clear => write!(self.writer, "\x1b[2J\x1b[H")?,
+                    ControlType::ShowCursor => write!(self.writer, "\x1b[?25h")?,
+                    ControlType::HideCursor => write!(self.writer, "\x1b[?25l")?,
+                    ControlType::EnableAltScreen => write!(self.writer, "\x1b[?1049h")?,
+                    ControlType::DisableAltScreen => write!(self.writer, "\x1b[?1049l")?,
+                    ControlType::SetTitle => {
+                        // Not representable without a payload; ignore.
+                    }
+                    ControlType::CursorUp(n) => write!(self.writer, "\x1b[{}A", n)?,
+                    ControlType::CursorDown(n) => write!(self.writer, "\x1b[{}B", n)?,
+                    ControlType::CursorForward(n) => write!(self.writer, "\x1b[{}C", n)?,
+                    ControlType::CursorBackward(n) => write!(self.writer, "\x1b[{}D", n)?,
+                    ControlType::EraseInLine(mode) => write!(self.writer, "\x1b[{}K", mode)?,
+                    ControlType::HyperlinkStart { url, id } => {
+                        if let Some(id) = id.as_deref() {
+                            write!(self.writer, "\x1b]8;id={};{}\x1b\\", id, url)?;
+                        } else {
+                            write!(self.writer, "\x1b]8;;{}\x1b\\", url)?;
+                        }
+                    }
+                    ControlType::HyperlinkEnd => write!(self.writer, "\x1b]8;;\x1b\\")?,
+                }
+                continue;
+            }
+
             if let Some(color_system) = self.color_system {
                 let target = StyleState::from_style(segment.style);
                 let diff = current.sgr_diff(target, color_system);
@@ -1156,11 +1241,35 @@ impl<W: Write> Console<W> {
         let segments = renderable.render(&temp_console, &options);
 
         // Apply style if provided
-        let segments = if let Some(s) = style {
+        let mut segments = if let Some(s) = style {
             Segment::apply_style_to_segments(segments, Some(s), None)
         } else {
             segments
         };
+
+        let live_active = self.is_terminal() && !self.is_dumb_terminal() && self.has_live();
+        let mut end_to_write = end;
+        if live_active {
+            // When Live is active, the trailing newline belongs to the *printed* content,
+            // and the live render must be re-drawn after it (Rich behavior).
+            if !end.is_empty() {
+                segments.push(Segment::new(end.to_string()));
+            }
+            end_to_write = "";
+
+            let mut wrapped = Segments::new();
+            for seg in self.live_position_cursor().iter() {
+                wrapped.push(seg.clone());
+            }
+            for seg in segments.into_iter() {
+                wrapped.push(seg);
+            }
+            let live_segments = self.render_live_segments(&temp_console, &options);
+            for seg in live_segments.into_iter() {
+                wrapped.push(seg);
+            }
+            segments = wrapped;
+        }
 
         let should_disable_wrap = self.options.disable_line_wrap && atty::is(atty::Stream::Stdout);
         if should_disable_wrap {
@@ -1174,8 +1283,8 @@ impl<W: Write> Console<W> {
             self.print_segments(&segments)?;
 
             // Print end string
-            if !end.is_empty() {
-                write!(self.writer, "{}", end)?;
+            if !end_to_write.is_empty() {
+                write!(self.writer, "{}", end_to_write)?;
             }
 
             self.writer.flush()
@@ -1215,6 +1324,13 @@ impl<W: Write> Console<W> {
     /// Print new line(s).
     pub fn line(&mut self, count: usize) -> io::Result<()> {
         if self.quiet {
+            return Ok(());
+        }
+
+        if self.is_terminal() && !self.is_dumb_terminal() && self.has_live() {
+            for _ in 0..count {
+                self.print(&Text::plain(""), None, None, None, false, "\n")?;
+            }
             return Ok(());
         }
 
@@ -1278,10 +1394,7 @@ impl<W: Write> Console<W> {
         if !self.is_terminal() || self.legacy_windows {
             return Ok(false);
         }
-        execute!(self.writer, ct::EnterAlternateScreen)?;
-        self.is_alt_screen = true;
-        self.writer.flush()?;
-        Ok(true)
+        self.set_alt_screen(true)
     }
 
     /// Leave alternate screen mode.
@@ -1289,15 +1402,37 @@ impl<W: Write> Console<W> {
         if !self.is_terminal() || !self.is_alt_screen {
             return Ok(false);
         }
-        execute!(self.writer, ct::LeaveAlternateScreen)?;
-        self.is_alt_screen = false;
-        self.writer.flush()?;
-        Ok(true)
+        self.set_alt_screen(false)
     }
 
     /// Check if alternate screen mode is active.
     pub fn is_alt_screen(&self) -> bool {
         self.is_alt_screen
+    }
+
+    /// Enable or disable alternate screen mode (Rich parity).
+    ///
+    /// When enabling, Rich emits `ENABLE_ALT_SCREEN` followed by `HOME`.
+    /// When disabling, Rich emits `DISABLE_ALT_SCREEN`.
+    pub fn set_alt_screen(&mut self, enable: bool) -> io::Result<bool> {
+        if !self.is_terminal() || self.legacy_windows {
+            return Ok(false);
+        }
+        if enable == self.is_alt_screen {
+            return Ok(false);
+        }
+
+        let mut segs = Segments::new();
+        if enable {
+            segs.push(Segment::control(ControlType::EnableAltScreen));
+            segs.push(Segment::control(ControlType::Home));
+            self.is_alt_screen = true;
+        } else {
+            segs.push(Segment::control(ControlType::DisableAltScreen));
+            self.is_alt_screen = false;
+        }
+        self.print_segments(&segs)?;
+        Ok(true)
     }
 
     /// Set the window title.
@@ -1314,6 +1449,165 @@ impl<W: Write> Console<W> {
     pub fn bell(&mut self) -> io::Result<()> {
         write!(self.writer, "\x07")?;
         self.writer.flush()
+    }
+
+    // ========================================================================
+    // Live display integration (used by Live / Progress)
+    // ========================================================================
+
+    pub fn live_start(
+        &mut self,
+        renderable: Box<dyn crate::Renderable + Send + Sync>,
+        vertical_overflow: crate::live::VerticalOverflowMethod,
+    ) -> (usize, bool) {
+        let is_root = self.live.stack.is_empty();
+        let id = self.live.next_id;
+        self.live.next_id += 1;
+
+        self.live.entries.insert(
+            id,
+            LiveEntry {
+                renderable,
+                vertical_overflow: vertical_overflow.into(),
+            },
+        );
+        self.live.stack.push(id);
+        (id, is_root)
+    }
+
+    pub fn live_update(&mut self, id: usize, renderable: Box<dyn crate::Renderable + Send + Sync>) {
+        if let Some(entry) = self.live.entries.get_mut(&id) {
+            entry.renderable = renderable;
+        }
+    }
+
+    pub fn live_set_vertical_overflow(
+        &mut self,
+        id: usize,
+        vertical_overflow: crate::live::VerticalOverflowMethod,
+    ) {
+        if let Some(entry) = self.live.entries.get_mut(&id) {
+            entry.vertical_overflow = vertical_overflow.into();
+        }
+    }
+
+    pub fn live_stop(&mut self, id: usize) -> Option<Box<dyn crate::Renderable + Send + Sync>> {
+        self.live.stack.retain(|&x| x != id);
+        let entry = self.live.entries.remove(&id);
+        if self.live.stack.is_empty() {
+            self.live.shape = None;
+        }
+        entry.map(|e| e.renderable)
+    }
+
+    pub fn live_clear(&mut self) {
+        self.live.stack.clear();
+        self.live.entries.clear();
+        self.live.shape = None;
+    }
+
+    fn has_live(&self) -> bool {
+        !self.live.stack.is_empty()
+    }
+
+    fn live_root(&self) -> Option<&LiveEntry> {
+        let id = *self.live.stack.first()?;
+        self.live.entries.get(&id)
+    }
+
+    pub(crate) fn live_position_cursor(&self) -> Segments {
+        let Some((_, height)) = self.live.shape else {
+            return Segments::new();
+        };
+        if height == 0 {
+            return Segments::new();
+        }
+        let mut controls = Vec::new();
+        controls.push(Segment::control(ControlType::CarriageReturn));
+        controls.push(Segment::control(ControlType::EraseInLine(2)));
+        for _ in 0..height.saturating_sub(1) {
+            controls.push(Segment::control(ControlType::CursorUp(1)));
+            controls.push(Segment::control(ControlType::CarriageReturn));
+            controls.push(Segment::control(ControlType::EraseInLine(2)));
+        }
+        Segments::from_iter(controls)
+    }
+
+    pub(crate) fn live_restore_cursor(&self) -> Segments {
+        let Some((_, height)) = self.live.shape else {
+            return Segments::new();
+        };
+        if height == 0 {
+            return Segments::new();
+        }
+        let mut controls = Vec::new();
+        controls.push(Segment::control(ControlType::CarriageReturn));
+        for _ in 0..height {
+            controls.push(Segment::control(ControlType::CursorUp(1)));
+            controls.push(Segment::control(ControlType::CarriageReturn));
+            controls.push(Segment::control(ControlType::EraseInLine(2)));
+        }
+        Segments::from_iter(controls)
+    }
+
+    fn render_live_segments(
+        &mut self,
+        temp_console: &Console<Stdout>,
+        options: &ConsoleOptions,
+    ) -> Segments {
+        let root = match self.live_root() {
+            Some(root) => root,
+            None => return Segments::new(),
+        };
+
+        let mut lines: Vec<Vec<Segment>> = Vec::new();
+        for id in self.live.stack.iter() {
+            if let Some(entry) = self.live.entries.get(id) {
+                let mut rendered = temp_console.render_lines(
+                    entry.renderable.as_ref(),
+                    Some(options),
+                    None,
+                    false,
+                    false,
+                );
+                lines.append(&mut rendered);
+            }
+        }
+
+        let max_height = options.size.1;
+        if max_height > 0 && lines.len() > max_height {
+            match root.vertical_overflow {
+                LiveVerticalOverflow::Visible => {}
+                LiveVerticalOverflow::Crop => {
+                    lines.truncate(max_height);
+                }
+                LiveVerticalOverflow::Ellipsis => {
+                    lines.truncate(max_height.saturating_sub(1));
+                    let style = options.get_style("live.ellipsis").unwrap_or_default();
+                    let ellipsis = Text::styled("...", style).center(options.max_width);
+                    let ellipsis_lines =
+                        temp_console.render_lines(&ellipsis, Some(options), None, false, false);
+                    if let Some(first) = ellipsis_lines.into_iter().next() {
+                        lines.push(first);
+                    }
+                }
+            }
+        }
+
+        let shape = Segment::get_shape(&lines);
+        self.live.shape = Some(shape);
+
+        let mut out = Segments::new();
+        let new_line = Segment::line();
+        for (i, line) in lines.into_iter().enumerate() {
+            for seg in line {
+                out.push(seg);
+            }
+            if i + 1 < shape.1 {
+                out.push(new_line.clone());
+            }
+        }
+        out
     }
 
     // ========================================================================
@@ -1508,6 +1802,55 @@ mod tests {
         console.print_text("Test").unwrap();
         let bytes = console.get_captured_bytes();
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_live_wrap_emits_cursor_controls_after_first_render() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            // Live wrapping is disabled in dumb terminals.
+            return;
+        }
+
+        let (_id, _is_root) =
+            console.live_start(Box::new(Text::plain("LIVE")), crate::live::VerticalOverflowMethod::Ellipsis);
+
+        // First render establishes the live shape but does not emit cursor positioning.
+        console.print(&Text::plain("A"), None, None, None, false, "\n").unwrap();
+        console.clear_captured();
+
+        // Second render should reposition (erase line) before drawing.
+        console.print(&Text::plain("B"), None, None, None, false, "\n").unwrap();
+        let out = console.get_captured();
+        assert!(out.contains("\x1b[2K"));
+    }
+
+    #[test]
+    fn test_set_alt_screen_emits_enable_and_home() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            // Alt screen isn't meaningful on dumb terminals.
+            return;
+        }
+
+        console.set_alt_screen(true).unwrap();
+        let out = console.get_captured();
+        assert!(out.contains("\x1b[?1049h"));
+        assert!(out.contains("\x1b[H"));
     }
 
     // ==================== Console configuration tests ====================

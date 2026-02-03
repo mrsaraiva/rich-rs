@@ -7,9 +7,10 @@ use std::borrow::Cow;
 
 use crate::cells::{cell_len, char_width, set_cell_size};
 use crate::style::Style;
+use std::sync::Arc;
 
 /// Control codes that can be embedded in output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlType {
     /// Ring the terminal bell.
     Bell,
@@ -39,6 +40,10 @@ pub enum ControlType {
     CursorBackward(u16),
     /// Erase in line (0=cursor to end, 1=start to cursor, 2=entire line).
     EraseInLine(u8),
+    /// Start an OSC 8 hyperlink.
+    HyperlinkStart { url: Arc<str>, id: Option<Arc<str>> },
+    /// End an OSC 8 hyperlink.
+    HyperlinkEnd,
 }
 
 /// A segment of text with optional style and control codes.
@@ -110,7 +115,7 @@ impl Segment {
                 Some(existing) => existing.combine(style),
                 None => *style,
             }),
-            control: self.control,
+            control: self.control.clone(),
         }
     }
 
@@ -140,7 +145,7 @@ impl Segment {
     pub fn split_cells(&self, cut: usize) -> (Segment, Segment) {
         let text = &self.text;
         let style = self.style;
-        let control = self.control;
+        let control = self.control.clone();
 
         // Control segments have no visual width
         if control.is_some() {
@@ -174,7 +179,7 @@ impl Segment {
             let before = &text[..cut];
             let after = &text[cut..];
             return (
-                Segment::new_with_style_control(before.to_string(), style, control),
+                Segment::new_with_style_control(before.to_string(), style, control.clone()),
                 Segment::new_with_style_control(after.to_string(), style, control),
             );
         }
@@ -190,7 +195,7 @@ impl Segment {
                 let before = &text[..byte_idx];
                 let after = &text[byte_idx..];
                 return (
-                    Segment::new_with_style_control(before.to_string(), style, control),
+                    Segment::new_with_style_control(before.to_string(), style, control.clone()),
                     Segment::new_with_style_control(after.to_string(), style, control),
                 );
             }
@@ -207,7 +212,7 @@ impl Segment {
                 let after_with_space = format!(" {}", after);
 
                 return (
-                    Segment::new_with_style_control(before_with_space, style, control),
+                    Segment::new_with_style_control(before_with_space, style, control.clone()),
                     Segment::new_with_style_control(after_with_space, style, control),
                 );
             }
@@ -401,10 +406,19 @@ impl Segment {
                         }
                         seg.style
                     });
+                // Padding should extend *background* colors to avoid hairlines, but should not
+                // inherit decoration attributes like underline/bold/dim from the preceding text.
                 let padding_style = match (style, end_style) {
-                    (Some(base), Some(end)) => Some(base.combine(&end)),
+                    (Some(mut base), Some(end)) => {
+                        if base.bgcolor.is_none() {
+                            if let Some(bg) = end.bgcolor {
+                                base.bgcolor = Some(bg);
+                            }
+                        }
+                        Some(base)
+                    }
                     (Some(base), None) => Some(base),
-                    (None, Some(end)) => Some(end),
+                    (None, Some(end)) => end.bgcolor.map(|bg| Style::new().with_bgcolor(bg)),
                     (None, None) => None,
                 };
                 new_line.push(Segment::new_with_style_control(padding, padding_style, None));
