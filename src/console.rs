@@ -1168,6 +1168,10 @@ impl<W: Write> Console<W> {
                         }
                     }
                     ControlType::HyperlinkEnd => write!(self.writer, "\x1b]8;;\x1b\\")?,
+                    ControlType::MoveTo { x, y } => {
+                        // CSI row;col H (1-based)
+                        write!(self.writer, "\x1b[{};{}H", (*y as usize) + 1, (*x as usize) + 1)?
+                    }
                 }
                 continue;
             }
@@ -1771,6 +1775,34 @@ impl Console<Stdout> {
         options: &ConsoleOptions,
     ) -> Segments {
         renderable.render(self, options)
+    }
+
+    /// Update rendered lines at an offset on the alternate screen.
+    ///
+    /// This is the Rust equivalent of Rich's `Console.update_screen_lines`.
+    pub fn update_screen_lines(
+        &mut self,
+        lines: &[Vec<Segment>],
+        x: u16,
+        y: u16,
+    ) -> io::Result<()> {
+        if !self.is_alt_screen() {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Alt screen must be enabled to call update_screen_lines",
+            ));
+        }
+
+        let mut segments = Segments::new();
+        for (offset, line) in lines.iter().enumerate() {
+            segments.push(Segment::control(ControlType::MoveTo {
+                x,
+                y: y.saturating_add(offset as u16),
+            }));
+            segments.extend(line.iter().cloned());
+        }
+        self.print_segments(&segments)?;
+        Ok(())
     }
 }
 

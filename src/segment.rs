@@ -44,6 +44,8 @@ pub enum ControlType {
     HyperlinkStart { url: Arc<str>, id: Option<Arc<str>> },
     /// End an OSC 8 hyperlink.
     HyperlinkEnd,
+    /// Move the cursor to an absolute position (x, y), 0-based.
+    MoveTo { x: u16, y: u16 },
 }
 
 /// A segment of text with optional style and control codes.

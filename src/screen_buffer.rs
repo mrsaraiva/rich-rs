@@ -202,6 +202,124 @@ impl ScreenBuffer {
         }
     }
 
+    fn write_line_at(&mut self, y: usize, start_x: usize, max_width: usize, line: &[Segment]) {
+        if y >= self.height {
+            return;
+        }
+        if start_x >= self.width || max_width == 0 {
+            return;
+        }
+
+        let mut x: usize = start_x;
+        let max_x = (start_x + max_width).min(self.width);
+        let mut last_non_zero: Option<(usize, usize)> = None; // (x, width)
+
+        for seg in line {
+            if seg.control.is_some() {
+                continue;
+            }
+            let style = seg.style;
+            for ch in seg.text.chars() {
+                let w = char_width(ch);
+
+                if w == 0 {
+                    if let Some((prev_x, prev_w)) = last_non_zero {
+                        // Only if the previous cell is still inside the region.
+                        if prev_x >= start_x && prev_x < max_x {
+                            let cell = self.get_mut(prev_x, y);
+                            cell.text.push(ch);
+                            cell.style = style;
+                            last_non_zero = Some((prev_x, prev_w));
+                        }
+                    }
+                    continue;
+                }
+
+                if x >= max_x {
+                    return;
+                }
+
+                if w == 2 && x + 1 >= max_x {
+                    // Can't place a wide glyph at the end of the region; fall back to a space.
+                    *self.get_mut(x, y) = Cell::blank(style);
+                    x += 1;
+                    last_non_zero = Some((x.saturating_sub(1), 1));
+                    continue;
+                }
+
+                *self.get_mut(x, y) = Cell {
+                    text: ch.to_string(),
+                    style,
+                    continuation: false,
+                };
+                last_non_zero = Some((x, w));
+
+                if w == 2 {
+                    *self.get_mut(x + 1, y) = Cell::continuation(style);
+                    x += 2;
+                } else {
+                    x += 1;
+                }
+            }
+        }
+    }
+
+    /// Blit pre-rendered lines into the buffer at an offset.
+    ///
+    /// Lines should be padded/cropped to the region width. This method will clip to the
+    /// screen bounds.
+    pub fn blit_lines(&mut self, x: usize, y: usize, width: usize, lines: &[Vec<Segment>]) {
+        if width == 0 {
+            return;
+        }
+        for (row, line) in lines.iter().enumerate() {
+            let yy = y + row;
+            if yy >= self.height {
+                break;
+            }
+            self.write_line_at(yy, x, width, line);
+        }
+    }
+
+    /// Convert the buffer to styled lines (no newlines).
+    pub fn to_styled_lines(&self) -> Vec<Vec<Segment>> {
+        let mut lines: Vec<Vec<Segment>> = Vec::with_capacity(self.height);
+
+        for y in 0..self.height {
+            let mut line: Vec<Segment> = Vec::new();
+            let mut current_style: Option<Style> = None;
+            let mut run = String::new();
+
+            let flush = |line: &mut Vec<Segment>, run: &mut String, style: Option<Style>| {
+                if run.is_empty() {
+                    return;
+                }
+                let mut seg = Segment::new(std::mem::take(run));
+                seg.style = style;
+                line.push(seg);
+            };
+
+            for x in 0..self.width {
+                let cell = self.get(x, y);
+                if cell.continuation {
+                    continue;
+                }
+                let text = if cell.text.is_empty() { " " } else { cell.text.as_str() };
+                if cell.style == current_style {
+                    run.push_str(text);
+                } else {
+                    flush(&mut line, &mut run, current_style);
+                    current_style = cell.style;
+                    run.push_str(text);
+                }
+            }
+            flush(&mut line, &mut run, current_style);
+            lines.push(line);
+        }
+
+        lines
+    }
+
     fn cell_span_width(&self, x: usize, y: usize) -> usize {
         let cell = self.get(x, y);
         if cell.continuation {
