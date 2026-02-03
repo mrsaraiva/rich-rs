@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{self, Stdout, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crossterm::terminal::{self, ClearType};
 use crossterm::{cursor, execute, terminal as ct};
@@ -21,11 +20,9 @@ use crate::color::ColorSystem;
 use crate::emoji::Emoji;
 use crate::highlighter::Highlighter;
 use crate::segment::{ControlType, Segment, Segments};
-use crate::style::{Style, StyleMeta};
+use crate::style::Style;
 use crate::text::Text;
 use crate::theme::{Theme, ThemeStack};
-
-static LINK_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ============================================================================
 // JustifyMethod
@@ -376,6 +373,10 @@ pub struct Console<W: Write = Stdout> {
     tab_size: usize,
     /// Live display manager (Live/Progress).
     live: LiveManager,
+    /// Stable hyperlink id registry (per-console).
+    link_ids: HashMap<Arc<str>, Arc<str>>,
+    /// Next id counter for generated hyperlinks.
+    next_link_id: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,6 +430,8 @@ impl Console<Stdout> {
             quiet: false,
             tab_size: 8,
             live: LiveManager::default(),
+            link_ids: HashMap::new(),
+            next_link_id: 1,
         }
     }
 
@@ -480,6 +483,8 @@ impl Console<Stdout> {
             // Store the options
             options,
             live: LiveManager::default(),
+            link_ids: HashMap::new(),
+            next_link_id: 1,
         }
     }
 
@@ -594,6 +599,16 @@ impl Console<Vec<u8>> {
 }
 
 impl<W: Write> Console<W> {
+    fn link_id_for_url(&mut self, url: &Arc<str>) -> Arc<str> {
+        if let Some(existing) = self.link_ids.get(url) {
+            return existing.clone();
+        }
+        let id: Arc<str> = Arc::from(format!("richrs-{}", self.next_link_id));
+        self.next_link_id = self.next_link_id.saturating_add(1);
+        self.link_ids.insert(url.clone(), id.clone());
+        id
+    }
+
     /// Create a console with a custom writer.
     ///
     /// Console state fields are initialized from the provided options,
@@ -617,6 +632,8 @@ impl<W: Write> Console<W> {
             // Store the options
             options,
             live: LiveManager::default(),
+            link_ids: HashMap::new(),
+            next_link_id: 1,
         }
     }
 
@@ -1144,7 +1161,7 @@ impl<W: Write> Console<W> {
         let mut used_sgr = false;
         let hyperlinks_enabled = self.is_terminal() && !self.is_dumb_terminal();
         let mut current_link: Option<(Arc<str>, Option<Arc<str>>)> = None;
-        let mut generated_link_ids: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+        let mut hyperlink_manual = false;
 
         for segment in segments.iter() {
             if let Some(control) = &segment.control {
@@ -1175,12 +1192,14 @@ impl<W: Write> Console<W> {
                                 write!(self.writer, "\x1b]8;;{}\x1b\\", url)?;
                             }
                             current_link = Some((url.clone(), id.clone()));
+                            hyperlink_manual = true;
                         }
                     }
                     ControlType::HyperlinkEnd => {
                         if hyperlinks_enabled {
                             write!(self.writer, "\x1b]8;;\x1b\\")?;
                             current_link = None;
+                            hyperlink_manual = false;
                         }
                     }
                     ControlType::MoveTo { x, y } => {
@@ -1196,23 +1215,18 @@ impl<W: Write> Console<W> {
                 continue;
             }
 
-            if hyperlinks_enabled {
-                let desired_link: Option<(Arc<str>, Option<Arc<str>>)> =
-                    segment.meta.as_ref().and_then(|meta: &StyleMeta| {
-                        meta.link.as_ref().map(|url| {
-                            let url = url.clone();
-                            let id = meta.link_id.clone().or_else(|| {
-                                if let Some(existing) = generated_link_ids.get(&url) {
-                                    return Some(existing.clone());
-                                }
-                                let next = LINK_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-                                let new_id: Arc<str> = Arc::from(format!("richrs-{}", next));
-                                generated_link_ids.insert(url.clone(), new_id.clone());
-                                Some(new_id)
-                            });
-                            (url, id)
-                        })
-                    });
+            if hyperlinks_enabled && !hyperlink_manual {
+                let mut desired_link: Option<(Arc<str>, Option<Arc<str>>)> = None;
+                if let Some(meta) = segment.meta.as_ref() {
+                    if let Some(url) = meta.link.as_ref() {
+                        let url = url.clone();
+                        let id = meta
+                            .link_id
+                            .clone()
+                            .or_else(|| Some(self.link_id_for_url(&url)));
+                        desired_link = Some((url, id));
+                    }
+                }
 
                 if desired_link != current_link {
                     // Close any previous link.
@@ -2020,6 +2034,7 @@ impl Console<Stdout> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::StyleMeta;
 
     // ==================== JustifyMethod tests ====================
 
@@ -2254,6 +2269,36 @@ mod tests {
         assert!(out.contains("\x1b]8;"));
         assert!(out.contains("https://example.com"));
         assert!(out.contains("\x1b]8;;\x1b\\"));
+    }
+
+    #[test]
+    fn test_print_segments_osc8_link_id_stable_per_console() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            return;
+        }
+
+        let mut segments = Segments::new();
+        segments.push(Segment::new_with_meta(
+            "X",
+            StyleMeta::with_link("https://example.com"),
+        ));
+
+        console.print_segments(&segments).unwrap();
+        let out1 = console.get_captured();
+        assert!(out1.contains("id=richrs-1;https://example.com"));
+
+        console.clear_captured();
+        console.print_segments(&segments).unwrap();
+        let out2 = console.get_captured();
+        assert!(out2.contains("id=richrs-1;https://example.com"));
     }
 
     // ==================== Console configuration tests ====================
