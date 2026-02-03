@@ -3,8 +3,10 @@
 //! Port of Python Rich's `progress.py` (subset).
 
 use std::collections::{HashMap, VecDeque};
-use std::io;
+use std::fs::File;
 use std::io::Stdout;
+use std::io::{self, BufRead, Read, Seek, SeekFrom};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -1206,6 +1208,363 @@ impl Renderable for Progress {
     }
 }
 
+// =============================================================================
+// ProgressReader: File I/O Progress Tracking
+// =============================================================================
+
+/// A reader that tracks progress as bytes are read.
+///
+/// This wraps any type implementing `Read` and updates a progress task
+/// as data is read. Similar to Python Rich's `_Reader` class.
+///
+/// # Example
+///
+/// ```ignore
+/// use std::fs::File;
+/// use std::io::Read;
+/// use rich_rs::progress::{Progress, LiveOptions};
+/// use rich_rs::live::LiveOptions;
+///
+/// let mut progress = Progress::new_default(LiveOptions::default(), false, false, false);
+/// progress.start().unwrap();
+///
+/// let mut reader = progress.open("large_file.bin", "Reading...").unwrap();
+/// let mut buffer = Vec::new();
+/// reader.read_to_end(&mut buffer).unwrap();
+///
+/// progress.stop().unwrap();
+/// ```
+pub struct ProgressReader<'a, R: Read> {
+    inner: R,
+    progress: &'a Progress,
+    task_id: TaskID,
+    /// Whether the wrapper "owns" the handle (for API compatibility with Python Rich).
+    /// In Rust, ownership is handled by the type system, so this is primarily for
+    /// documentation and potential future use (e.g., logging when handles are closed).
+    #[allow(dead_code)]
+    close_handle: bool,
+}
+
+impl<'a, R: Read> ProgressReader<'a, R> {
+    /// Create a new `ProgressReader` wrapping the given reader.
+    ///
+    /// The `close_handle` parameter controls whether the inner reader
+    /// should be dropped when this wrapper is dropped (for owned handles).
+    pub fn new(inner: R, progress: &'a Progress, task_id: TaskID, close_handle: bool) -> Self {
+        Self {
+            inner,
+            progress,
+            task_id,
+            close_handle,
+        }
+    }
+
+    /// Returns the task ID associated with this reader.
+    pub fn task_id(&self) -> TaskID {
+        self.task_id
+    }
+
+    /// Returns a reference to the inner reader.
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
+    /// Returns a mutable reference to the inner reader.
+    pub fn inner_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
+
+    /// Consumes the wrapper, returning the inner reader.
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+}
+
+impl<R: Read> Read for ProgressReader<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.progress.advance(self.task_id, n as f64);
+        Ok(n)
+    }
+}
+
+impl<R: Read + BufRead> BufRead for ProgressReader<'_, R> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        self.inner.fill_buf()
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.inner.consume(amt);
+        self.progress.advance(self.task_id, amt as f64);
+    }
+}
+
+impl<R: Read + Seek> Seek for ProgressReader<'_, R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let new_pos = self.inner.seek(pos)?;
+        // Update completed position to match seek position (like Python Rich).
+        self.progress.update(
+            self.task_id,
+            None,
+            Some(new_pos as f64),
+            None,
+            None,
+            None,
+            false,
+            None,
+        );
+        Ok(new_pos)
+    }
+}
+
+/// Builder for creating a `ProgressReader` with optional configuration.
+///
+/// # Example
+///
+/// ```ignore
+/// use std::fs::File;
+/// use std::io::Read;
+/// use rich_rs::{Progress, WrapFileBuilder};
+/// use rich_rs::live::LiveOptions;
+///
+/// let progress = Progress::new_default(LiveOptions::default(), false, false, false);
+/// let file = File::open("data.bin").unwrap();
+///
+/// let reader = WrapFileBuilder::new(&progress, file)
+///     .total(1024)
+///     .description("Processing...")
+///     .build();
+/// ```
+pub struct WrapFileBuilder<'a, R: Read> {
+    progress: &'a Progress,
+    reader: R,
+    total: Option<u64>,
+    task_id: Option<TaskID>,
+    description: String,
+    close_handle: bool,
+}
+
+impl<'a, R: Read> WrapFileBuilder<'a, R> {
+    /// Create a new builder with the given progress and reader.
+    pub fn new(progress: &'a Progress, reader: R) -> Self {
+        Self {
+            progress,
+            reader,
+            total: None,
+            task_id: None,
+            description: "Reading...".to_string(),
+            close_handle: false,
+        }
+    }
+
+    /// Set the total number of bytes expected to be read.
+    pub fn total(mut self, total: u64) -> Self {
+        self.total = Some(total);
+        self
+    }
+
+    /// Set an optional total (None for indeterminate progress).
+    pub fn total_opt(mut self, total: Option<u64>) -> Self {
+        self.total = total;
+        self
+    }
+
+    /// Use an existing task instead of creating a new one.
+    pub fn task_id(mut self, task_id: TaskID) -> Self {
+        self.task_id = Some(task_id);
+        self
+    }
+
+    /// Set the description for the task (used when creating a new task).
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    /// Set whether the inner handle should be considered "owned" and closed.
+    pub fn close_handle(mut self, close: bool) -> Self {
+        self.close_handle = close;
+        self
+    }
+
+    /// Build the `ProgressReader`.
+    ///
+    /// If no `task_id` was provided, a new task is created with the
+    /// configured description and total.
+    pub fn build(self) -> ProgressReader<'a, R> {
+        let task_id = if let Some(id) = self.task_id {
+            // Update existing task with total if provided.
+            if let Some(total) = self.total {
+                self.progress.update(
+                    id,
+                    Some(Some(total as f64)),
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                    None,
+                );
+            }
+            id
+        } else {
+            // Create a new task.
+            self.progress.add_task(
+                &self.description,
+                true,
+                self.total.map(|t| t as f64),
+                0.0,
+                true,
+            )
+        };
+
+        ProgressReader::new(self.reader, self.progress, task_id, self.close_handle)
+    }
+}
+
+impl Progress {
+    /// Wrap a reader to track progress while reading.
+    ///
+    /// This creates a new task and wraps the reader to automatically update
+    /// progress as data is read.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The reader to wrap (any type implementing `Read`).
+    /// * `total` - Total number of bytes expected. Pass `None` for indeterminate.
+    /// * `description` - Description shown next to the progress bar.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::fs::File;
+    /// use std::io::Read;
+    /// use rich_rs::Progress;
+    /// use rich_rs::live::LiveOptions;
+    ///
+    /// let progress = Progress::new_default(LiveOptions::default(), false, false, false);
+    /// let file = File::open("data.bin").unwrap();
+    ///
+    /// let mut reader = progress.wrap_file(file, Some(1024), "Reading data");
+    /// let mut buf = Vec::new();
+    /// reader.read_to_end(&mut buf).unwrap();
+    /// ```
+    pub fn wrap_file<'a, R: Read>(
+        &'a self,
+        reader: R,
+        total: Option<u64>,
+        description: &str,
+    ) -> ProgressReader<'a, R> {
+        WrapFileBuilder::new(self, reader)
+            .total_opt(total)
+            .description(description)
+            .close_handle(false)
+            .build()
+    }
+
+    /// Wrap a reader with an existing task.
+    ///
+    /// Similar to `wrap_file`, but uses an existing task instead of creating
+    /// a new one. Optionally updates the task's total.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The reader to wrap.
+    /// * `task_id` - The existing task to update.
+    /// * `total` - Optional total to set on the task.
+    pub fn wrap_file_with_task<'a, R: Read>(
+        &'a self,
+        reader: R,
+        task_id: TaskID,
+        total: Option<u64>,
+    ) -> ProgressReader<'a, R> {
+        WrapFileBuilder::new(self, reader)
+            .task_id(task_id)
+            .total_opt(total)
+            .close_handle(false)
+            .build()
+    }
+
+    /// Open a file with progress tracking.
+    ///
+    /// This is a convenience method that opens a file, determines its size,
+    /// creates a progress task, and returns a wrapped reader.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the file to open.
+    /// * `description` - Description shown next to the progress bar.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or its metadata cannot
+    /// be read.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::io::Read;
+    /// use rich_rs::Progress;
+    /// use rich_rs::live::LiveOptions;
+    ///
+    /// let mut progress = Progress::new_default(LiveOptions::default(), false, false, false);
+    /// progress.start().unwrap();
+    ///
+    /// let mut reader = progress.open("large_file.bin", "Processing file").unwrap();
+    /// let mut contents = Vec::new();
+    /// reader.read_to_end(&mut contents).unwrap();
+    ///
+    /// progress.stop().unwrap();
+    /// ```
+    pub fn open<'a, P: AsRef<Path>>(
+        &'a self,
+        path: P,
+        description: &str,
+    ) -> io::Result<ProgressReader<'a, File>> {
+        let path = path.as_ref();
+        let file = File::open(path)?;
+        let metadata = file.metadata()?;
+        let total = metadata.len();
+
+        Ok(WrapFileBuilder::new(self, file)
+            .total(total)
+            .description(description)
+            .close_handle(true)
+            .build())
+    }
+
+    /// Open a file with progress tracking using an existing task.
+    ///
+    /// Similar to `open`, but uses an existing task instead of creating a
+    /// new one. The task's total will be updated to the file size.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the file to open.
+    /// * `task_id` - The existing task to update.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or its metadata cannot
+    /// be read.
+    pub fn open_with_task<'a, P: AsRef<Path>>(
+        &'a self,
+        path: P,
+        task_id: TaskID,
+    ) -> io::Result<ProgressReader<'a, File>> {
+        let path = path.as_ref();
+        let file = File::open(path)?;
+        let metadata = file.metadata()?;
+        let total = metadata.len();
+
+        Ok(WrapFileBuilder::new(self, file)
+            .task_id(task_id)
+            .total(total)
+            .close_handle(true)
+            .build())
+    }
+}
+
 pub struct ProgressIterator<'a, I> {
     iter: I,
     progress: &'a Progress,
@@ -1774,5 +2133,189 @@ mod tests {
             .expect("progress state mutex poisoned");
         let task = state.tasks.get(&task_id).unwrap();
         assert_eq!(task.total, None);
+    }
+
+    #[test]
+    fn test_progress_reader_advances_on_read() {
+        use std::io::Cursor;
+
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+
+        let data = b"Hello, World!";
+        let cursor = Cursor::new(data.to_vec());
+
+        let mut reader = progress.wrap_file(cursor, Some(data.len() as u64), "Reading");
+        let task_id = reader.task_id();
+
+        // Verify initial state.
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, 0.0);
+            assert_eq!(task.total, Some(data.len() as f64));
+        }
+
+        // Read some data.
+        let mut buf = [0u8; 5];
+        let n = reader.read(&mut buf).unwrap();
+        assert_eq!(n, 5);
+
+        // Verify progress was advanced.
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, 5.0);
+        }
+
+        // Read the rest.
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf).unwrap();
+
+        // Verify completed.
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, data.len() as f64);
+        }
+    }
+
+    #[test]
+    fn test_progress_reader_with_existing_task() {
+        use std::io::Cursor;
+
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+
+        // Create a task manually.
+        let task_id = progress.add_task("Existing task", true, None, 0.0, true);
+
+        let data = b"Test data";
+        let cursor = Cursor::new(data.to_vec());
+
+        // Wrap with existing task.
+        let mut reader = progress.wrap_file_with_task(cursor, task_id, Some(data.len() as u64));
+
+        // Verify the task was updated with the total.
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.total, Some(data.len() as f64));
+        }
+
+        // Read all data.
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf).unwrap();
+
+        // Verify completed.
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, data.len() as f64);
+        }
+    }
+
+    #[test]
+    fn test_progress_reader_seek_updates_completed() {
+        use std::io::Cursor;
+
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+
+        let data = b"0123456789";
+        let cursor = Cursor::new(data.to_vec());
+
+        let mut reader = progress.wrap_file(cursor, Some(data.len() as u64), "Seeking");
+        let task_id = reader.task_id();
+
+        // Read some data first.
+        let mut buf = [0u8; 3];
+        reader.read(&mut buf).unwrap();
+
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, 3.0);
+        }
+
+        // Seek to position 7.
+        reader.seek(SeekFrom::Start(7)).unwrap();
+
+        // Completed should now reflect the seek position.
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, 7.0);
+        }
+    }
+
+    #[test]
+    fn test_wrap_file_builder() {
+        use std::io::Cursor;
+
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+
+        let data = b"Builder test";
+        let cursor = Cursor::new(data.to_vec());
+
+        let reader = WrapFileBuilder::new(&progress, cursor)
+            .total(data.len() as u64)
+            .description("Custom description")
+            .build();
+
+        let task_id = reader.task_id();
+
+        let state = progress.state.lock().expect("mutex poisoned");
+        let task = state.tasks.get(&task_id).unwrap();
+        assert_eq!(task.description, "Custom description");
+        assert_eq!(task.total, Some(data.len() as f64));
+    }
+
+    #[test]
+    fn test_progress_reader_indeterminate() {
+        use std::io::Cursor;
+
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+
+        let data = b"Unknown size stream";
+        let cursor = Cursor::new(data.to_vec());
+
+        // No total provided (indeterminate progress).
+        let mut reader = progress.wrap_file(cursor, None, "Streaming");
+        let task_id = reader.task_id();
+
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.total, None);
+        }
+
+        // Read all data.
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf).unwrap();
+
+        // Completed should still track bytes read.
+        {
+            let state = progress.state.lock().expect("mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, data.len() as f64);
+        }
     }
 }
