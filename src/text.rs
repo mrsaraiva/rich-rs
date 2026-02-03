@@ -253,6 +253,21 @@ impl Text {
         crate::markup::render(markup, emoji)
     }
 
+    /// Create a Text object from a string containing ANSI escape codes.
+    ///
+    /// This is a port of Python Rich's `Text.from_ansi`, backed by `AnsiDecoder`.
+    /// The decoder is lenient and will ignore unknown / malformed escape sequences.
+    ///
+    /// Style state may persist across lines, matching Rich behavior.
+    pub fn from_ansi(ansi_text: &str) -> Text {
+        let mut decoder = crate::ansi::AnsiDecoder::new();
+        // Match Python Rich: `Text.from_ansi` constructs a joiner Text with an explicit (possibly empty)
+        // base style. In rich-rs, using `Some(NULL_STYLE)` preserves that API-visible base-style
+        // without affecting rendering (null styles are ignored when generating spans).
+        let joiner = Text::styled("\n", Style::new());
+        joiner.join(decoder.decode(ansi_text))
+    }
+
     /// Assemble text from multiple parts.
     ///
     /// Each part can be:

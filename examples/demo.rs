@@ -5,13 +5,17 @@
 //! This demonstrates the major features of rich-rs, mirroring the Python Rich demo.
 
 use std::io::Stdout;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::time::Instant;
 
 use rich_rs::r#box::SIMPLE;
 use rich_rs::markdown::Markdown;
 use rich_rs::{
     Column, Console, ConsoleOptions, JustifyMethod, Measurement, Panel, Pretty, Row,
-    Segment, Segments, SimpleColor, Style, Syntax, Table, Text, Renderable, VerticalAlignMethod,
+    ControlType, Renderable, Segment, Segments, SimpleColor, Style, Syntax, Table, Text,
+    VerticalAlignMethod,
 };
 
 // ============================================================================
@@ -95,6 +99,108 @@ impl Renderable for ColorBox {
 
     fn measure(&self, _console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
         Measurement::new(1, options.max_width)
+    }
+}
+
+// ============================================================================
+// OSC 8 Hyperlinks (used in the footer panel)
+// ============================================================================
+
+#[derive(Debug, Clone)]
+struct Hyperlink {
+    id: Arc<str>,
+    url: Arc<str>,
+    text: Arc<str>,
+    style: Option<Style>,
+}
+
+impl Hyperlink {
+    fn next_id() -> Arc<str> {
+        static NEXT: once_cell::sync::Lazy<AtomicU32> = once_cell::sync::Lazy::new(|| {
+            let seed = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_micros();
+            AtomicU32::new(seed % 1_000_000)
+        });
+
+        let id = NEXT.fetch_add(1, Ordering::Relaxed) % 1_000_000;
+        Arc::<str>::from(id.to_string())
+    }
+
+    fn new(url: impl Into<Arc<str>>, text: impl Into<Arc<str>>, style: Option<Style>) -> Self {
+        Self {
+            id: Self::next_id(),
+            url: url.into(),
+            text: text.into(),
+            style,
+        }
+    }
+}
+
+impl Renderable for Hyperlink {
+    fn render(&self, console: &Console<Stdout>, _options: &ConsoleOptions) -> Segments {
+        if !console.is_terminal() || console.is_dumb_terminal() {
+            if let Some(style) = self.style {
+                return Segments::from(Segment::styled(self.text.to_string(), style));
+            }
+            return Segments::from(Segment::new(self.text.to_string()));
+        }
+
+        let mut segments = Segments::new();
+        segments.push(Segment::control(ControlType::HyperlinkStart {
+            url: self.url.clone(),
+            id: Some(self.id.clone()),
+        }));
+        if let Some(style) = self.style {
+            segments.push(Segment::styled(self.text.to_string(), style));
+        } else {
+            segments.push(Segment::new(self.text.to_string()));
+        }
+        segments.push(Segment::control(ControlType::HyperlinkEnd));
+        segments
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ThanksIntro;
+
+impl Renderable for ThanksIntro {
+    fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
+        let mut segments = Segments::new();
+
+        segments.push(Segment::new("We hope you enjoy using Rich!"));
+        segments.push(Segment::line());
+        segments.push(Segment::line());
+
+        segments.push(Segment::new("Rich is maintained with "));
+        let heart = Text::from_markup("[red]:heart:[/]", true).unwrap();
+        segments.extend(heart.render(console, options));
+        segments.push(Segment::new(" by "));
+
+        let textualize = Hyperlink::new("https://www.textualize.io", "Textualize.io", None);
+        segments.extend(textualize.render(console, options));
+
+        segments.push(Segment::line());
+        segments.push(Segment::line());
+        segments.push(Segment::new("- Will McGugan"));
+
+        segments
+    }
+
+    fn measure(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
+        // Default `Measurement::from_segments` assumes single-line, so compute a
+        // multi-line measurement by splitting and taking the union.
+        let lines = Segment::split_lines(self.render(console, options).into_iter());
+
+        let mut measurement = Measurement::new(0, 0);
+        for line in lines {
+            let mut segs = Segments::new();
+            segs.extend(line);
+            measurement = measurement.union(&Measurement::from_segments(&segs));
+        }
+
+        measurement
     }
 }
 
@@ -514,21 +620,56 @@ fn main() {
 
     let _ = console.print(&timing_cold, None, None, None, false, "\n");
     let _ = console.print(&timing_warm, None, None, None, false, "\n");
-    let _ = console.line(1);
 
-    // Sponsor panel
-    let sponsor_text = Text::from_markup(
-        "[b magenta]Hope you enjoy using Rich![/]\n\n\
-         Please consider sponsoring me if you get value from my work.\n\n\
-         Even the price of a ☕ can brighten my day!\n\n\
-         https://github.com/sponsors/willmcgugan",
-        true,
-    )
-    .unwrap();
+    // "Thanks" panel (mirrors Python Rich demo output).
+    let mut sponsor_message = Table::grid().with_padding(1, 1);
+    sponsor_message.add_column(
+        Column::new()
+            .style(Style::new().with_color(SimpleColor::Standard(2))) // green
+            .justify(JustifyMethod::Right),
+    );
+    sponsor_message.add_column(Column::new().no_wrap(true));
 
-    let panel = Panel::fit(Box::new(sponsor_text))
-        .with_border_style(Style::new().with_color(SimpleColor::Standard(1))) // red
-        .with_title("Help ensure Rich is maintained");
+    let underline_blue = Style::parse("underline blue").unwrap_or_else(Style::new);
+    let textualize_link = Hyperlink::new(
+        "https://github.com/textualize",
+        "https://github.com/textualize",
+        Some(underline_blue),
+    );
+    let twitter_link = Hyperlink::new(
+        "https://twitter.com/willmcgugan",
+        "https://twitter.com/willmcgugan",
+        Some(underline_blue),
+    );
 
-    let _ = console.print(&panel, None, None, None, false, "\n");
+    sponsor_message.add_row(Row::new(vec![
+        Box::new(Text::plain("Textualize")) as Box<dyn Renderable + Send + Sync>,
+        Box::new(textualize_link),
+    ]));
+    sponsor_message.add_row_strs(&["", ""]);
+    sponsor_message.add_row(Row::new(vec![
+        Box::new(Text::plain("Twitter")) as Box<dyn Renderable + Send + Sync>,
+        Box::new(twitter_link),
+    ]));
+
+    let intro_message = ThanksIntro;
+
+    let mut message = Table::grid().with_padding(2, 2);
+    message.add_column(Column::new());
+    message.add_column(Column::new().no_wrap(true));
+    message.add_row(Row::new(vec![
+        Box::new(intro_message) as Box<dyn Renderable + Send + Sync>,
+        Box::new(sponsor_message),
+    ]));
+
+    let title = Text::from_markup("[b red]Thanks for trying out Rich!", false).unwrap();
+
+    let panel = Panel::fit(Box::new(message))
+        .with_box(rich_rs::r#box::ROUNDED)
+        .with_padding((1, 2))
+        .with_title_text(title)
+        .with_border_style(Style::parse("bright_blue").unwrap_or_else(Style::new));
+
+    let centered = rich_rs::Align::center(Box::new(panel));
+    let _ = console.print(&centered, None, None, None, false, "\n");
 }

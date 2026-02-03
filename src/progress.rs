@@ -1,0 +1,1664 @@
+//! Progress: task tracking with live-updating progress bars.
+//!
+//! Port of Python Rich's `progress.py` (subset).
+
+use std::collections::{HashMap, VecDeque};
+use std::io;
+use std::io::Stdout;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::console::ConsoleOptions;
+use crate::filesize;
+use crate::live::{Live, LiveOptions};
+use crate::progress_bar::ProgressBar;
+use crate::spinner::Spinner;
+use crate::table::{Column, Row, Table};
+use crate::text::Text;
+use crate::{Console, JustifyMethod, Renderable, Segments};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TaskID(pub usize);
+
+#[derive(Debug, Clone)]
+struct ProgressSample {
+    timestamp: f64,
+    completed: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProgressTask {
+    pub id: TaskID,
+    pub description: String,
+    pub total: Option<f64>,
+    pub completed: f64,
+    pub visible: bool,
+    pub fields: HashMap<String, String>,
+
+    pub finished_time: Option<f64>,
+    pub finished_speed: Option<f64>,
+
+    start_time: Option<f64>,
+    stop_time: Option<f64>,
+    progress: VecDeque<ProgressSample>,
+}
+
+impl ProgressTask {
+    fn started(&self) -> bool {
+        self.start_time.is_some()
+    }
+
+    fn finished(&self) -> bool {
+        self.finished_time.is_some()
+    }
+
+    fn remaining(&self) -> Option<f64> {
+        self.total.map(|t| t - self.completed)
+    }
+
+    fn elapsed(&self, now: f64) -> Option<f64> {
+        let start = self.start_time?;
+        if let Some(stop) = self.stop_time {
+            return Some(stop - start);
+        }
+        Some(now - start)
+    }
+
+    fn percentage(&self) -> f64 {
+        let Some(total) = self.total else { return 0.0 };
+        if total <= 0.0 {
+            return 0.0;
+        }
+        ((self.completed / total) * 100.0).clamp(0.0, 100.0)
+    }
+
+    fn speed(&self) -> Option<f64> {
+        if !self.started() {
+            return None;
+        }
+        let first = self.progress.front()?;
+        let last = self.progress.back()?;
+        let total_time = last.timestamp - first.timestamp;
+        if total_time == 0.0 {
+            return None;
+        }
+        // Skip the first sample (which is usually the initial state) like Rich does.
+        let total_completed: f64 = self.progress.iter().skip(1).map(|s| s.completed).sum();
+        Some(total_completed / total_time)
+    }
+
+    fn time_remaining(&self) -> Option<f64> {
+        if self.finished() {
+            return Some(0.0);
+        }
+        let speed = self.speed()?;
+        if speed <= 0.0 {
+            return None;
+        }
+        let remaining = self.remaining()?;
+        if remaining <= 0.0 {
+            return Some(0.0);
+        }
+        Some((remaining / speed).ceil())
+    }
+}
+
+pub trait ProgressColumn: Send + Sync {
+    fn table_column(&self) -> Column;
+    fn render(&self, task: &ProgressTask, now: f64, options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync>;
+    fn max_refresh(&self) -> Option<Duration> {
+        None
+    }
+}
+
+#[derive(Debug)]
+pub struct SpinnerColumn {
+    spinner: Spinner,
+    finished_text: Text,
+    start_time: Mutex<Option<f64>>,
+    style_name: String,
+}
+
+impl SpinnerColumn {
+    pub fn new() -> Self {
+        Self::with_spinner("dots")
+    }
+
+    pub fn with_spinner(name: &str) -> Self {
+        let spinner = Spinner::new(name).unwrap_or_else(|_| Spinner::new("dots").unwrap());
+        Self {
+            spinner,
+            finished_text: Text::plain(" "),
+            start_time: Mutex::new(None),
+            style_name: "progress.spinner".to_string(),
+        }
+    }
+
+    pub fn with_style_name(mut self, style: &str) -> Self {
+        self.style_name = style.to_string();
+        self
+    }
+}
+
+impl ProgressColumn for SpinnerColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(&self, task: &ProgressTask, now: f64, options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        if task.finished() {
+            return Box::new(self.finished_text.clone());
+        }
+        let mut start = self.start_time.lock().expect("spinner start mutex poisoned");
+        let start_time = *start.get_or_insert(now);
+        let style = options.get_style(&self.style_name);
+        Box::new(self.spinner.render_at(now, Some(start_time), style))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TextColumn {
+    text_format: String,
+    style_name: String,
+    justify: JustifyMethod,
+    markup: bool,
+}
+
+impl TextColumn {
+    pub fn new(text_format: &str) -> Self {
+        Self {
+            text_format: text_format.to_string(),
+            style_name: "none".to_string(),
+            justify: JustifyMethod::Left,
+            markup: true,
+        }
+    }
+
+    pub fn with_style_name(mut self, style: &str) -> Self {
+        self.style_name = style.to_string();
+        self
+    }
+
+    pub fn with_justify(mut self, justify: JustifyMethod) -> Self {
+        self.justify = justify;
+        self
+    }
+
+    pub fn with_markup(mut self, markup: bool) -> Self {
+        self.markup = markup;
+        self
+    }
+}
+
+impl ProgressColumn for TextColumn {
+    fn table_column(&self) -> Column {
+        // Match Rich: TextColumn uses a no-wrap column by default.
+        Column::new().no_wrap(true).justify(self.justify)
+    }
+
+    fn render(&self, task: &ProgressTask, now: f64, options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let formatted = format_task_template(&self.text_format, task, now);
+        let mut text = if self.markup {
+            Text::from_markup(&formatted, true).unwrap_or_else(|_| Text::plain(&formatted))
+        } else {
+            Text::plain(&formatted)
+        };
+        if self.style_name != "none" {
+            if let Some(style) = options.get_style(&self.style_name) {
+                text.stylize_before(style, 0, None);
+            }
+        }
+        Box::new(text)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BarColumn {
+    bar_width: Option<usize>,
+    style: String,
+    complete_style: String,
+    finished_style: String,
+    pulse_style: String,
+}
+
+impl BarColumn {
+    pub fn new() -> Self {
+        Self {
+            // Match Rich: default bar width is 40 cells.
+            bar_width: Some(40),
+            style: "bar.back".to_string(),
+            complete_style: "bar.complete".to_string(),
+            finished_style: "bar.finished".to_string(),
+            pulse_style: "bar.pulse".to_string(),
+        }
+    }
+
+    pub fn with_bar_width(mut self, width: Option<usize>) -> Self {
+        self.bar_width = width;
+        self
+    }
+}
+
+impl ProgressColumn for BarColumn {
+    fn table_column(&self) -> Column {
+        Column::new()
+    }
+
+    fn render(&self, task: &ProgressTask, now: f64, _options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let mut bar = ProgressBar::new();
+        bar.total = task.total.map(|t| t.max(0.0));
+        bar.completed = task.completed.max(0.0);
+        bar.width = self.bar_width.map(|w| w.max(1));
+        bar.pulse = !task.started();
+        bar.animation_time = Some(now);
+        bar.style = self.style.clone();
+        bar.complete_style = self.complete_style.clone();
+        bar.finished_style = self.finished_style.clone();
+        bar.pulse_style = self.pulse_style.clone();
+        Box::new(bar)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskProgressColumn {
+    show_speed: bool,
+}
+
+impl TaskProgressColumn {
+    pub fn new(show_speed: bool) -> Self {
+        Self { show_speed }
+    }
+
+    fn render_speed(speed: Option<f64>) -> Text {
+        let Some(speed) = speed else {
+            return Text::plain("");
+        };
+        let speed = speed.max(0.0);
+        let (unit, suffix) = filesize::pick_unit_and_suffix(
+            speed as u64,
+            &["", "×10³", "×10⁶", "×10⁹", "×10¹²"],
+            1000,
+        );
+        let data_speed = speed / unit as f64;
+        Text::from_markup(
+            &format!("[progress.percentage]{data_speed:.1}{suffix} it/s"),
+            true,
+        )
+        .unwrap_or_else(|_| Text::plain(format!("{data_speed:.1}{suffix} it/s")))
+    }
+}
+
+impl ProgressColumn for TaskProgressColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(
+        &self,
+        task: &ProgressTask,
+        _now: f64,
+        _options: &ConsoleOptions,
+    ) -> Box<dyn Renderable + Send + Sync> {
+        // Match Rich: if total is unknown, show an empty cell unless show_speed is enabled.
+        if task.total.is_none() {
+            if self.show_speed {
+                return Box::new(Self::render_speed(task.finished_speed.or_else(|| task.speed())));
+            }
+            return Box::new(Text::plain(""));
+        }
+        let percent = task.percentage();
+        Box::new(
+            Text::from_markup(&format!("[progress.percentage]{percent:>3.0}%"), true)
+                .unwrap_or_else(|_| Text::plain(format!("{percent:>3.0}%"))),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TimeRemainingColumn {
+    pub compact: bool,
+    pub elapsed_when_finished: bool,
+}
+
+impl TimeRemainingColumn {
+    pub fn new(elapsed_when_finished: bool) -> Self {
+        Self {
+            compact: false,
+            elapsed_when_finished,
+        }
+    }
+
+    pub fn with_compact(mut self, compact: bool) -> Self {
+        self.compact = compact;
+        self
+    }
+}
+
+impl ProgressColumn for TimeRemainingColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn max_refresh(&self) -> Option<Duration> {
+        // Match Rich: only refresh twice a second to prevent jitter.
+        Some(Duration::from_secs_f64(0.5))
+    }
+
+    fn render(
+        &self,
+        task: &ProgressTask,
+        _now: f64,
+        _options: &ConsoleOptions,
+    ) -> Box<dyn Renderable + Send + Sync> {
+        let (task_time, style) = if task.finished() && self.elapsed_when_finished {
+            (task.finished_time, "progress.elapsed")
+        } else {
+            (task.time_remaining(), "progress.remaining")
+        };
+
+        if task.total.is_none() {
+            return Box::new(Text::plain(""));
+        }
+
+        let placeholder = if self.compact { "--:--" } else { "-:--:--" };
+        let Some(task_time) = task_time else {
+            return Box::new(
+                Text::from_markup(&format!("[{style}]{placeholder}"), true)
+                    .unwrap_or_else(|_| Text::plain(placeholder)),
+            );
+        };
+
+        let secs = task_time.max(0.0) as u64;
+        let minutes_total = secs / 60;
+        let seconds = secs % 60;
+        let hours = minutes_total / 60;
+        let minutes = minutes_total % 60;
+
+        let formatted = if self.compact && hours == 0 {
+            format!("{minutes:02}:{seconds:02}")
+        } else {
+            format!("{hours}:{minutes:02}:{seconds:02}")
+        };
+
+        Box::new(
+            Text::from_markup(&format!("[{style}]{formatted}"), true)
+                .unwrap_or_else(|_| Text::plain(formatted)),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TimeElapsedColumn;
+
+impl TimeElapsedColumn {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ProgressColumn for TimeElapsedColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(&self, task: &ProgressTask, now: f64, _options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let elapsed = if task.finished() {
+            task.finished_time
+        } else {
+            task.elapsed(now)
+        };
+        let Some(elapsed) = elapsed else {
+            return Box::new(
+                Text::from_markup("[progress.elapsed]-:--:--", true)
+                    .unwrap_or_else(|_| Text::plain("-:--:--")),
+            );
+        };
+        let secs = elapsed.max(0.0) as u64;
+        let hours = secs / 3600;
+        let minutes = (secs % 3600) / 60;
+        let seconds = secs % 60;
+        Box::new(
+            Text::from_markup(
+                &format!("[progress.elapsed]{hours}:{minutes:02}:{seconds:02}"),
+                true,
+            )
+            .unwrap_or_else(|_| Text::plain(format!("{hours}:{minutes:02}:{seconds:02}"))),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FileSizeColumn;
+
+impl FileSizeColumn {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ProgressColumn for FileSizeColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(&self, task: &ProgressTask, _now: f64, _options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let data_size = filesize::decimal(task.completed.max(0.0) as u64);
+        Box::new(
+            Text::from_markup(&format!("[progress.filesize]{data_size}"), true)
+                .unwrap_or_else(|_| Text::plain(data_size)),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TotalFileSizeColumn;
+
+impl TotalFileSizeColumn {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ProgressColumn for TotalFileSizeColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(&self, task: &ProgressTask, _now: f64, _options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let data_size = task
+            .total
+            .map(|t| filesize::decimal(t.max(0.0) as u64))
+            .unwrap_or_default();
+        Box::new(
+            Text::from_markup(&format!("[progress.filesize.total]{data_size}"), true)
+                .unwrap_or_else(|_| Text::plain(data_size)),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MofNCompleteColumn {
+    separator: String,
+}
+
+impl MofNCompleteColumn {
+    pub fn new() -> Self {
+        Self {
+            separator: "/".to_string(),
+        }
+    }
+
+    pub fn with_separator(mut self, separator: &str) -> Self {
+        self.separator = separator.to_string();
+        self
+    }
+}
+
+impl ProgressColumn for MofNCompleteColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(&self, task: &ProgressTask, _now: f64, _options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let completed = task.completed.max(0.0) as u64;
+        let total = task.total.map(|t| t.max(0.0) as u64);
+        let total_str = total.map(|t| t.to_string()).unwrap_or_else(|| "?".to_string());
+        let total_width = total_str.len();
+        let completed_str = format!("{completed:width$}", width = total_width);
+        let text = format!("{completed_str}{}{}", self.separator, total_str);
+        Box::new(
+            Text::from_markup(&format!("[progress.download]{text}"), true)
+                .unwrap_or_else(|_| Text::plain(text)),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadColumn {
+    pub binary_units: bool,
+}
+
+impl DownloadColumn {
+    pub fn new() -> Self {
+        Self { binary_units: false }
+    }
+
+    pub fn with_binary_units(mut self, binary_units: bool) -> Self {
+        self.binary_units = binary_units;
+        self
+    }
+}
+
+impl ProgressColumn for DownloadColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(&self, task: &ProgressTask, _now: f64, _options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let completed = task.completed.max(0.0) as u64;
+        let calc_base = task.total.map(|t| t.max(0.0) as u64).unwrap_or(completed);
+        let (unit, suffix) = if self.binary_units {
+            filesize::pick_unit_and_suffix(
+                calc_base,
+                &["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"],
+                1024,
+            )
+        } else {
+            filesize::pick_unit_and_suffix(
+                calc_base,
+                &["bytes", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"],
+                1000,
+            )
+        };
+        let precision = if unit == 1 { 0 } else { 1 };
+        let completed_ratio = completed as f64 / unit as f64;
+        let completed_str = if precision == 0 {
+            format!("{completed_ratio:.0}")
+        } else {
+            format!("{completed_ratio:.1}")
+        };
+
+        let total_str = if let Some(total) = task.total {
+            let total = total.max(0.0) as u64;
+            let total_ratio = total as f64 / unit as f64;
+            if precision == 0 {
+                format!("{total_ratio:.0}")
+            } else {
+                format!("{total_ratio:.1}")
+            }
+        } else {
+            "?".to_string()
+        };
+
+        let download_status = format!("{completed_str}/{total_str} {suffix}");
+        Box::new(
+            Text::from_markup(&format!("[progress.download]{download_status}"), true)
+                .unwrap_or_else(|_| Text::plain(download_status)),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TransferSpeedColumn;
+
+impl TransferSpeedColumn {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ProgressColumn for TransferSpeedColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(true)
+    }
+
+    fn render(&self, task: &ProgressTask, _now: f64, _options: &ConsoleOptions) -> Box<dyn Renderable + Send + Sync> {
+        let speed = task.finished_speed.or_else(|| task.speed());
+        let Some(speed) = speed else {
+            return Box::new(
+                Text::from_markup("[progress.data.speed]?", true).unwrap_or_else(|_| Text::plain("?")),
+            );
+        };
+        let data_speed = filesize::decimal(speed.max(0.0) as u64);
+        Box::new(
+            Text::from_markup(&format!("[progress.data.speed]{data_speed}/s"), true)
+                .unwrap_or_else(|_| Text::plain(format!("{data_speed}/s"))),
+        )
+    }
+}
+
+struct ProgressState {
+    start: Instant,
+    tasks: HashMap<TaskID, ProgressTask>,
+    order: Vec<TaskID>,
+    next_id: usize,
+    speed_estimate_period: f64,
+    expand: bool,
+    // Cache for columns with max_refresh, keyed by (task_id, column_index).
+    cell_cache: HashMap<(TaskID, usize), (f64, Segments)>,
+}
+
+impl ProgressState {
+    fn now(&self) -> f64 {
+        self.start.elapsed().as_secs_f64()
+    }
+}
+
+#[derive(Clone)]
+struct ProgressRenderable {
+    state: Arc<Mutex<ProgressState>>,
+    columns: Arc<Vec<Box<dyn ProgressColumn>>>,
+}
+
+impl Renderable for ProgressRenderable {
+    fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
+        let (tasks, now, expand, cache_snapshot) = {
+            let state = self.state.lock().expect("progress state mutex poisoned");
+            let now = state.now();
+            let tasks: Vec<ProgressTask> = state
+                .order
+                .iter()
+                .filter_map(|id| state.tasks.get(id).cloned())
+                .collect();
+            (tasks, now, state.expand, state.cell_cache.clone())
+        };
+
+        let mut table = Table::grid().with_padding(1, 1).with_expand(expand);
+        for col in self.columns.iter() {
+            table.add_column(col.table_column());
+        }
+
+        let mut new_cache: HashMap<(TaskID, usize), (f64, Segments)> = cache_snapshot;
+
+        for task in tasks.iter().filter(|t| t.visible) {
+            let mut row_cells: Vec<Box<dyn Renderable + Send + Sync>> = Vec::with_capacity(self.columns.len());
+            for (col_index, col) in self.columns.iter().enumerate() {
+                let segs = if let Some(max_refresh) = col.max_refresh() {
+                    let key = (task.id, col_index);
+                    if let Some((last_ts, cached)) = new_cache.get(&key) {
+                        if now - *last_ts < max_refresh.as_secs_f64() {
+                            cached.clone()
+                        } else {
+                            let renderable = col.render(task, now, options);
+                            let segs = renderable.render(console, options);
+                            new_cache.insert(key, (now, segs.clone()));
+                            segs
+                        }
+                    } else {
+                        let renderable = col.render(task, now, options);
+                        let segs = renderable.render(console, options);
+                        new_cache.insert(key, (now, segs.clone()));
+                        segs
+                    }
+                } else {
+                    let renderable = col.render(task, now, options);
+                    renderable.render(console, options)
+                };
+                row_cells.push(Box::new(SegmentsCell::new(segs)));
+            }
+            table.add_row(Row::new(row_cells));
+        }
+
+        // Persist cache updates.
+        {
+            let mut state = self.state.lock().expect("progress state mutex poisoned");
+            state.cell_cache = new_cache;
+        }
+
+        table.render(console, options)
+    }
+}
+
+#[derive(Clone)]
+struct SegmentsCell {
+    segments: Segments,
+}
+
+impl SegmentsCell {
+    fn new(segments: Segments) -> Self {
+        Self { segments }
+    }
+}
+
+impl Renderable for SegmentsCell {
+    fn render(&self, _console: &Console, _options: &ConsoleOptions) -> Segments {
+        self.segments.clone()
+    }
+
+    fn measure(&self, _console: &Console, _options: &ConsoleOptions) -> crate::Measurement {
+        // Derive width from the pre-rendered segments.
+        let mut max_width: usize = 0;
+        let mut current_width: usize = 0;
+        for seg in self.segments.iter() {
+            if seg.text.as_ref() == "\n" {
+                max_width = max_width.max(current_width);
+                current_width = 0;
+                continue;
+            }
+            current_width += seg.cell_len();
+        }
+        max_width = max_width.max(current_width);
+        crate::Measurement::new(max_width, max_width)
+    }
+}
+
+pub struct Progress {
+    state: Arc<Mutex<ProgressState>>,
+    columns: Arc<Vec<Box<dyn ProgressColumn>>>,
+    live: Live,
+    disable: bool,
+    auto_refresh: bool,
+}
+
+impl Progress {
+    pub fn new(
+        columns: Vec<Box<dyn ProgressColumn>>,
+        live_options: LiveOptions,
+        disable: bool,
+        expand: bool,
+    ) -> Self {
+        Self::with_console(columns, Console::new(), live_options, disable, expand)
+    }
+
+    pub fn with_console(
+        columns: Vec<Box<dyn ProgressColumn>>,
+        console: Console<Stdout>,
+        live_options: LiveOptions,
+        disable: bool,
+        expand: bool,
+    ) -> Self {
+        let auto_refresh = live_options.auto_refresh;
+        let state = Arc::new(Mutex::new(ProgressState {
+            start: Instant::now(),
+            tasks: HashMap::new(),
+            order: Vec::new(),
+            next_id: 0,
+            speed_estimate_period: 30.0,
+            expand,
+            cell_cache: HashMap::new(),
+        }));
+        let columns = Arc::new(columns);
+        let renderable = ProgressRenderable {
+            state: state.clone(),
+            columns: columns.clone(),
+        };
+        let live = Live::with_console(Box::new(renderable), console, live_options);
+        Self {
+            state,
+            columns,
+            live,
+            disable,
+            auto_refresh,
+        }
+    }
+
+    /// A convenience constructor matching Rich's default `track()` columns:
+    /// description, bar, percentage, and time remaining.
+    pub fn new_default(live_options: LiveOptions, disable: bool, expand: bool, show_speed: bool) -> Self {
+        let columns: Vec<Box<dyn ProgressColumn>> = vec![
+            Box::new(TextColumn::new("[progress.description]{task.description}")),
+            Box::new(BarColumn::new()),
+            Box::new(TaskProgressColumn::new(show_speed)),
+            Box::new(TimeRemainingColumn::new(false)),
+        ];
+        Self::new(columns, live_options, disable, expand)
+    }
+
+    pub fn start(&mut self) -> io::Result<()> {
+        if self.disable {
+            return Ok(());
+        }
+        self.live.start(true)
+    }
+
+    pub fn stop(&mut self) -> io::Result<()> {
+        if self.disable {
+            return Ok(());
+        }
+        self.live.stop()
+    }
+
+    pub fn refresh(&self) -> io::Result<()> {
+        if self.disable {
+            return Ok(());
+        }
+        self.live.refresh()
+    }
+
+    pub fn add_task(
+        &self,
+        description: &str,
+        start: bool,
+        total: Option<f64>,
+        completed: f64,
+        visible: bool,
+    ) -> TaskID {
+        let id = {
+            let mut state = self.state.lock().expect("progress state mutex poisoned");
+            let id = TaskID(state.next_id);
+            state.next_id += 1;
+
+            let task = ProgressTask {
+                id,
+                description: description.to_string(),
+                total,
+                completed,
+                visible,
+                fields: HashMap::new(),
+                finished_time: None,
+                finished_speed: None,
+                start_time: None,
+                stop_time: None,
+                progress: VecDeque::with_capacity(1000),
+            };
+
+            state.order.push(id);
+            state.tasks.insert(id, task);
+            id
+        };
+        if start {
+            self.start_task(id);
+        }
+        let _ = self.refresh();
+        id
+    }
+
+    pub fn remove_task(&self, task_id: TaskID) {
+        let mut state = self.state.lock().expect("progress state mutex poisoned");
+        state.tasks.remove(&task_id);
+        state.order.retain(|&id| id != task_id);
+        state.cell_cache.retain(|(id, _), _| *id != task_id);
+    }
+
+    pub fn start_task(&self, task_id: TaskID) {
+        let mut state = self.state.lock().expect("progress state mutex poisoned");
+        let now = state.now();
+        if let Some(task) = state.tasks.get_mut(&task_id) {
+            if task.start_time.is_none() {
+                task.start_time = Some(now);
+            }
+        }
+    }
+
+    pub fn stop_task(&self, task_id: TaskID) {
+        let mut state = self.state.lock().expect("progress state mutex poisoned");
+        let now = state.now();
+        if let Some(task) = state.tasks.get_mut(&task_id) {
+            if task.start_time.is_none() {
+                task.start_time = Some(now);
+            }
+            task.stop_time = Some(now);
+        }
+    }
+
+    pub fn advance(&self, task_id: TaskID, advance: f64) {
+        let mut state = self.state.lock().expect("progress state mutex poisoned");
+        let now = state.now();
+        let speed_estimate_period = state.speed_estimate_period;
+        let Some(task) = state.tasks.get_mut(&task_id) else { return };
+
+        let completed_start = task.completed;
+        task.completed += advance;
+        let update_completed = task.completed - completed_start;
+
+        let old_sample_time = now - speed_estimate_period;
+        while let Some(front) = task.progress.front() {
+            if front.timestamp < old_sample_time {
+                task.progress.pop_front();
+            } else {
+                break;
+            }
+        }
+        while task.progress.len() > 1000 {
+            task.progress.pop_front();
+        }
+        task.progress.push_back(ProgressSample {
+            timestamp: now,
+            completed: update_completed,
+        });
+
+        if let Some(total) = task.total {
+            if task.completed >= total && task.finished_time.is_none() {
+                task.finished_time = task.elapsed(now);
+                task.finished_speed = task.speed();
+            }
+        }
+    }
+
+    pub fn update(
+        &self,
+        task_id: TaskID,
+        total: Option<Option<f64>>,
+        completed: Option<f64>,
+        advance: Option<f64>,
+        description: Option<String>,
+        visible: Option<bool>,
+        refresh: bool,
+        fields: Option<HashMap<String, String>>,
+    ) {
+        let mut state = self.state.lock().expect("progress state mutex poisoned");
+        let now = state.now();
+        let speed_estimate_period = state.speed_estimate_period;
+        let Some(task) = state.tasks.get_mut(&task_id) else { return };
+        let completed_start = task.completed;
+
+        if let Some(total) = total {
+            if task.total != total {
+                task.total = total;
+                task.progress.clear();
+                task.finished_time = None;
+                task.finished_speed = None;
+            }
+        }
+        if let Some(advance) = advance {
+            task.completed += advance;
+        }
+        if let Some(completed) = completed {
+            task.completed = completed;
+        }
+        if let Some(description) = description {
+            task.description = description;
+        }
+        if let Some(visible) = visible {
+            task.visible = visible;
+        }
+        if let Some(fields) = fields {
+            task.fields.extend(fields);
+        }
+
+        let update_completed = task.completed - completed_start;
+        let old_sample_time = now - speed_estimate_period;
+        while let Some(front) = task.progress.front() {
+            if front.timestamp < old_sample_time {
+                task.progress.pop_front();
+            } else {
+                break;
+            }
+        }
+        while task.progress.len() > 1000 {
+            task.progress.pop_front();
+        }
+        if update_completed > 0.0 {
+            task.progress.push_back(ProgressSample {
+                timestamp: now,
+                completed: update_completed,
+            });
+        }
+
+        if let Some(total) = task.total {
+            if task.completed >= total && task.finished_time.is_none() {
+                task.finished_time = task.elapsed(now);
+            }
+        }
+        drop(state);
+        if refresh {
+            let _ = self.refresh();
+        }
+    }
+
+    pub fn update_task(
+        &self,
+        task_id: TaskID,
+        total: Option<Option<f64>>,
+        completed: Option<f64>,
+        description: Option<String>,
+        visible: Option<bool>,
+    ) {
+        self.update(task_id, total, completed, None, description, visible, false, None);
+    }
+
+    pub fn reset(
+        &self,
+        task_id: TaskID,
+        start: bool,
+        total: Option<Option<f64>>,
+        completed: f64,
+        visible: Option<bool>,
+        description: Option<String>,
+        fields: Option<HashMap<String, String>>,
+    ) {
+        let mut state = self.state.lock().expect("progress state mutex poisoned");
+        let now = state.now();
+        let Some(task) = state.tasks.get_mut(&task_id) else { return };
+        task.progress.clear();
+        task.finished_time = None;
+        task.finished_speed = None;
+        task.start_time = if start { Some(now) } else { None };
+        if let Some(total) = total {
+            task.total = total;
+        }
+        task.completed = completed;
+        if let Some(visible) = visible {
+            task.visible = visible;
+        }
+        if let Some(fields) = fields {
+            task.fields = fields;
+        }
+        if let Some(description) = description {
+            task.description = description;
+        }
+        task.finished_time = None;
+        drop(state);
+        let _ = self.refresh();
+    }
+
+    pub fn track<'a, I>(
+        &'a self,
+        iter: I,
+        task_id: TaskID,
+        update_period: Duration,
+    ) -> ProgressIterator<'a, I::IntoIter>
+    where
+        I: IntoIterator,
+    {
+        ProgressIterator {
+            iter: iter.into_iter(),
+            progress: self,
+            task_id,
+            track_thread: TrackThread::new(
+                self.auto_refresh && !self.disable,
+                self.state.clone(),
+                self.live.started_flag(),
+                task_id,
+                update_period,
+            ),
+            pending_increment: false,
+        }
+    }
+
+    /// Create a task and return an iterator that advances it.
+    pub fn track_iter<'a, I>(
+        &'a self,
+        iter: I,
+        description: &str,
+        total: Option<f64>,
+        completed: f64,
+        update_period: Duration,
+    ) -> ProgressIterator<'a, I::IntoIter>
+    where
+        I: IntoIterator,
+    {
+        let task_id = self.add_task(description, true, total, completed, true);
+        self.track(iter, task_id, update_period)
+    }
+
+    pub fn track_sequence<'a, I>(
+        &'a self,
+        sequence: I,
+        config: TrackConfig,
+    ) -> ProgressIterator<'a, I::IntoIter>
+    where
+        I: IntoIterator,
+    {
+        let iter = sequence.into_iter();
+        let inferred_total = config.total.or_else(|| {
+            let (lower, upper) = iter.size_hint();
+            let hint = upper.or(Some(lower)).unwrap_or(0);
+            if hint == 0 {
+                None
+            } else {
+                Some(hint as f64)
+            }
+        });
+
+        let task_id = if let Some(task_id) = config.task_id {
+            self.update(
+                task_id,
+                // Match Rich: explicitly set total (including to None) for existing tasks.
+                Some(inferred_total),
+                Some(config.completed),
+                None,
+                None,
+                None,
+                false,
+                None,
+            );
+            task_id
+        } else {
+            self.add_task(&config.description, true, inferred_total, config.completed, true)
+        };
+
+        self.track(iter, task_id, config.update_period)
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
+}
+
+impl Renderable for Progress {
+    fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
+        // Mirror Python Rich: Progress itself is renderable and produces the tasks table.
+        let renderable = ProgressRenderable {
+            state: self.state.clone(),
+            columns: self.columns.clone(),
+        };
+        renderable.render(console, options)
+    }
+}
+
+pub struct ProgressIterator<'a, I> {
+    iter: I,
+    progress: &'a Progress,
+    task_id: TaskID,
+    track_thread: TrackThread,
+    pending_increment: bool,
+}
+
+struct TrackThread {
+    enabled: bool,
+    completed: Arc<AtomicUsize>,
+    done: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl TrackThread {
+    fn new(
+        enabled: bool,
+        state: Arc<Mutex<ProgressState>>,
+        live_started: Arc<AtomicBool>,
+        task_id: TaskID,
+        update_period: Duration,
+    ) -> Self {
+        if !enabled {
+            return Self {
+                enabled: false,
+                completed: Arc::new(AtomicUsize::new(0)),
+                done: Arc::new(AtomicBool::new(false)),
+                handle: None,
+            };
+        }
+
+        let update_period = update_period.max(Duration::from_millis(1));
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let done = Arc::new(AtomicBool::new(false));
+        let completed_thread = completed.clone();
+        let done_thread = done.clone();
+
+        let handle = thread::spawn(move || {
+            let mut last_completed: usize = 0;
+            while !done_thread.load(Ordering::SeqCst) && live_started.load(Ordering::SeqCst) {
+                thread::sleep(update_period);
+                if done_thread.load(Ordering::SeqCst) || !live_started.load(Ordering::SeqCst) {
+                    break;
+                }
+                let current = completed_thread.load(Ordering::SeqCst);
+                if current != last_completed {
+                    let delta = (current - last_completed) as f64;
+                    last_completed = current;
+                    advance_state(&state, task_id, delta);
+                }
+            }
+        });
+
+        Self {
+            enabled: true,
+            completed,
+            done,
+            handle: Some(handle),
+        }
+    }
+
+    fn increment(&self) {
+        if self.enabled {
+            self.completed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn take_completed(&self) -> usize {
+        self.completed.load(Ordering::SeqCst)
+    }
+
+    fn stop(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        self.done.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for TrackThread {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+impl<'a, I> Iterator for ProgressIterator<'a, I>
+where
+    I: Iterator,
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.progress.disable && self.pending_increment {
+            if self.progress.auto_refresh {
+                self.track_thread.increment();
+            } else {
+                self.progress.advance(self.task_id, 1.0);
+                let _ = self.progress.refresh();
+            }
+        }
+
+        let item = self.iter.next();
+        self.pending_increment = item.is_some();
+        item
+    }
+}
+
+impl<'a, I> Drop for ProgressIterator<'a, I> {
+    fn drop(&mut self) {
+        if self.progress.disable {
+            return;
+        }
+        if self.progress.auto_refresh {
+            let completed = self.track_thread.take_completed() as f64;
+            self.track_thread.stop();
+            self.progress.update(
+                self.task_id,
+                None,
+                Some(completed),
+                None,
+                None,
+                None,
+                true,
+                None,
+            );
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TrackConfig {
+    pub total: Option<f64>,
+    pub completed: f64,
+    pub task_id: Option<TaskID>,
+    pub description: String,
+    pub update_period: Duration,
+}
+
+impl TrackConfig {
+    pub fn new(description: impl Into<String>) -> Self {
+        Self {
+            total: None,
+            completed: 0.0,
+            task_id: None,
+            description: description.into(),
+            update_period: Duration::from_millis(100),
+        }
+    }
+
+    pub fn with_total(mut self, total: Option<f64>) -> Self {
+        self.total = total;
+        self
+    }
+
+    pub fn with_completed(mut self, completed: f64) -> Self {
+        self.completed = completed;
+        self
+    }
+
+    pub fn with_task_id(mut self, task_id: TaskID) -> Self {
+        self.task_id = Some(task_id);
+        self
+    }
+
+    pub fn with_update_period(mut self, update_period: Duration) -> Self {
+        self.update_period = update_period;
+        self
+    }
+}
+
+fn advance_state(state: &Arc<Mutex<ProgressState>>, task_id: TaskID, advance: f64) {
+    let mut state = state.lock().expect("progress state mutex poisoned");
+    let now = state.now();
+    let speed_estimate_period = state.speed_estimate_period;
+    let Some(task) = state.tasks.get_mut(&task_id) else { return };
+
+    let completed_start = task.completed;
+    task.completed += advance;
+    let update_completed = task.completed - completed_start;
+
+    let old_sample_time = now - speed_estimate_period;
+    while let Some(front) = task.progress.front() {
+        if front.timestamp < old_sample_time {
+            task.progress.pop_front();
+        } else {
+            break;
+        }
+    }
+    while task.progress.len() > 1000 {
+        task.progress.pop_front();
+    }
+    task.progress.push_back(ProgressSample {
+        timestamp: now,
+        completed: update_completed,
+    });
+
+    if let Some(total) = task.total {
+        if task.completed >= total && task.finished_time.is_none() {
+            task.finished_time = task.elapsed(now);
+            task.finished_speed = task.speed();
+        }
+    }
+}
+
+fn format_task_template(template: &str, task: &ProgressTask, now: f64) -> String {
+    // Subset of Python Rich's `str.format(task=task)` support.
+    // Supports fields in the form:
+    //   {task.description}
+    //   {task.percentage:>3.0f}
+    //   {task.completed}
+    //   {task.total}
+    //   {task.elapsed}
+    //   {task.remaining}
+    //   {task.speed}
+    //   {task.time_remaining}
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(start) = rest.find("{task.") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 6..];
+        let Some(end) = after.find('}') else {
+            out.push_str(rest);
+            return out;
+        };
+        let inside = &after[..end];
+        let (field, spec) = inside.split_once(':').unwrap_or((inside, ""));
+        let formatted = format_task_field(field, spec, task, now);
+        out.push_str(&formatted);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct FormatSpec {
+    align: Option<char>,
+    width: Option<usize>,
+    precision: Option<usize>,
+    ty: Option<char>,
+}
+
+fn parse_format_spec(spec: &str) -> FormatSpec {
+    let mut s = spec;
+    let mut out = FormatSpec::default();
+
+    if let Some(first) = s.chars().next() {
+        if matches!(first, '<' | '>' | '^') {
+            out.align = Some(first);
+            s = &s[first.len_utf8()..];
+        }
+    }
+
+    // width digits
+    let mut width_end = 0;
+    for (i, ch) in s.char_indices() {
+        if ch.is_ascii_digit() {
+            width_end = i + 1;
+        } else {
+            break;
+        }
+    }
+    if width_end > 0 {
+        if let Ok(w) = s[..width_end].parse::<usize>() {
+            out.width = Some(w);
+        }
+        s = &s[width_end..];
+    }
+
+    // precision .digits
+    if let Some(rest) = s.strip_prefix('.') {
+        let mut prec_end = 0;
+        for (i, ch) in rest.char_indices() {
+            if ch.is_ascii_digit() {
+                prec_end = i + 1;
+            } else {
+                break;
+            }
+        }
+        if prec_end > 0 {
+            if let Ok(p) = rest[..prec_end].parse::<usize>() {
+                out.precision = Some(p);
+            }
+            s = &rest[prec_end..];
+        }
+    }
+
+    // type (f, d)
+    if let Some(last) = s.chars().next() {
+        if matches!(last, 'f' | 'd') {
+            out.ty = Some(last);
+        }
+    }
+
+    out
+}
+
+fn pad_aligned(text: &str, width: usize, align: char) -> String {
+    let current = crate::cells::cell_len(text);
+    if current >= width {
+        return text.to_string();
+    }
+    let pad = width - current;
+    match align {
+        '<' => format!("{text}{}", " ".repeat(pad)),
+        '^' => {
+            let left = pad / 2;
+            let right = pad - left;
+            format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
+        }
+        _ => format!("{}{}", " ".repeat(pad), text),
+    }
+}
+
+fn apply_format_spec_value(text: String, spec: &FormatSpec) -> String {
+    let Some(width) = spec.width else {
+        return text;
+    };
+    let align = spec.align.unwrap_or('>');
+    pad_aligned(&text, width, align)
+}
+
+fn format_task_field(field: &str, spec: &str, task: &ProgressTask, now: f64) -> String {
+    let spec = parse_format_spec(spec);
+
+    let value = match field {
+        "description" => return apply_format_spec_value(task.description.clone(), &spec),
+        "percentage" => Some(task.percentage()),
+        "completed" => Some(task.completed),
+        "total" => task.total,
+        "elapsed" => task.elapsed(now),
+        "remaining" => task.remaining(),
+        "speed" => task.speed(),
+        "time_remaining" => task.time_remaining(),
+        _ => None,
+    };
+
+    let Some(value) = value else {
+        return apply_format_spec_value(String::new(), &spec);
+    };
+
+    let rendered = match spec.ty {
+        Some('d') => format!("{}", value as i64),
+        Some('f') => {
+            let precision = spec.precision.unwrap_or(0);
+            format!("{value:.precision$}", precision = precision)
+        }
+        _ => {
+            if let Some(precision) = spec.precision {
+                format!("{value:.precision$}", precision = precision)
+            } else {
+                // Default formatting resembles Python's float -> string for simple cases.
+                if value.fract() == 0.0 {
+                    format!("{:.0}", value)
+                } else {
+                    format!("{value}")
+                }
+            }
+        }
+    };
+
+    apply_format_spec_value(rendered, &spec)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_task_template_description() {
+        let task = ProgressTask {
+            id: TaskID(1),
+            description: "Hello".to_string(),
+            total: Some(10.0),
+            completed: 3.0,
+            visible: true,
+            fields: HashMap::new(),
+            finished_time: None,
+            finished_speed: None,
+            start_time: Some(0.0),
+            stop_time: None,
+            progress: VecDeque::new(),
+        };
+
+        let s = format_task_template("x {task.description} y", &task, 1.0);
+        assert_eq!(s, "x Hello y");
+    }
+
+    #[test]
+    fn test_apply_format_spec_right_align() {
+        let spec = parse_format_spec(">3");
+        assert_eq!(apply_format_spec_value("7".to_string(), &spec), "  7");
+        assert_eq!(apply_format_spec_value("1234".to_string(), &spec), "1234");
+    }
+
+    #[test]
+    fn test_progress_update_appends_samples_only_on_positive_change() {
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+
+        let task_id = progress.add_task("t", true, Some(10.0), 0.0, true);
+
+        {
+            let state = progress.state.lock().expect("progress state mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.progress.len(), 0);
+        }
+
+        progress.update(task_id, None, None, Some(1.0), None, None, false, None);
+        {
+            let state = progress.state.lock().expect("progress state mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.completed, 1.0);
+            assert_eq!(task.progress.len(), 1);
+        }
+
+        // No change -> no new sample.
+        progress.update(task_id, None, Some(1.0), None, None, None, false, None);
+        {
+            let state = progress.state.lock().expect("progress state mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.progress.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_progress_update_total_change_resets_speed_samples() {
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+
+        let task_id = progress.add_task("t", true, Some(10.0), 0.0, true);
+        progress.update(task_id, None, None, Some(2.0), None, None, false, None);
+        {
+            let state = progress.state.lock().expect("progress state mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.progress.len(), 1);
+        }
+
+        // Changing total clears progress samples like Rich.
+        progress.update(task_id, Some(Some(20.0)), None, None, None, None, false, None);
+        {
+            let state = progress.state.lock().expect("progress state mutex poisoned");
+            let task = state.tasks.get(&task_id).unwrap();
+            assert_eq!(task.total, Some(20.0));
+            assert_eq!(task.progress.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_text_column_defaults_to_no_wrap() {
+        let col = TextColumn::new("{task.description}").table_column();
+        assert!(col.no_wrap);
+    }
+
+    #[test]
+    fn test_task_progress_column_empty_when_total_unknown() {
+        let task = ProgressTask {
+            id: TaskID(0),
+            description: "t".to_string(),
+            total: None,
+            completed: 0.0,
+            visible: true,
+            fields: HashMap::new(),
+            finished_time: None,
+            finished_speed: None,
+            start_time: Some(0.0),
+            stop_time: None,
+            progress: VecDeque::new(),
+        };
+
+        let console = Console::new();
+        let options = ConsoleOptions::default();
+        let col = TaskProgressColumn::new(false);
+        let rendered = col.render(&task, 0.0, &options);
+        let segs = rendered.render(&console, &options);
+        let text: String = segs.iter().map(|s| s.text.as_ref()).collect();
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn test_bar_column_defaults_to_width_40() {
+        let task = ProgressTask {
+            id: TaskID(0),
+            description: "t".to_string(),
+            total: Some(100.0),
+            completed: 50.0,
+            visible: true,
+            fields: HashMap::new(),
+            finished_time: None,
+            finished_speed: None,
+            start_time: Some(0.0),
+            stop_time: None,
+            progress: VecDeque::new(),
+        };
+
+        let console = Console::new();
+        let options = ConsoleOptions {
+            max_width: 120,
+            ..ConsoleOptions::default()
+        };
+        let col = BarColumn::new();
+        let rendered = col.render(&task, 0.0, &options);
+        let measurement = rendered.measure(&console, &options);
+        assert_eq!(measurement.minimum, 40);
+        assert_eq!(measurement.maximum, 40);
+    }
+
+    #[test]
+    fn test_track_sequence_updates_total_to_none_for_existing_task() {
+        let live_options = LiveOptions {
+            auto_refresh: true,
+            ..Default::default()
+        };
+        let progress = Progress::new_default(live_options, true, false, false);
+        let task_id = progress.add_task("t", true, Some(10.0), 0.0, true);
+
+        let config = TrackConfig {
+            total: None,
+            completed: 0.0,
+            task_id: Some(task_id),
+            description: "t".to_string(),
+            update_period: Duration::from_millis(10),
+        };
+
+        let _iter = progress.track_sequence(std::iter::empty::<usize>(), config);
+        let state = progress.state.lock().expect("progress state mutex poisoned");
+        let task = state.tasks.get(&task_id).unwrap();
+        assert_eq!(task.total, None);
+    }
+}

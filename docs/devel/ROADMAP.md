@@ -318,25 +318,79 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 ## Phase 5: Advanced Features (Optional)
 
+## Final Parity Tasks (Remaining)
+
+The demo and core features are now visually matched to Python Rich. To reach **1:1 terminal parity** (behavior + API),
+the remaining work is focused on regression-proofing (parity tests) and completing key utility modules Rich relies on.
+
+### Task 1 — Phase 5 Parity Test Suite
+
+**Goal:** Prevent regressions and lock in behavioral parity for Live + Progress.
+
+- Add `tests/parity/phase5/` with deterministic snapshots for Progress rendering (fixed width, fixed task state).
+- Add targeted Live parity tests for cursor / erase controls and nesting correctness.
+- Add a documented “parity matrix” checklist for Live/Progress behaviors covered by tests (TTY, dumb terminals, nested Live, transient mode, alt-screen).
+
+### Task 2 — ANSI Decoder + `Text::from_ansi()`
+
+**Goal:** Parse ANSI output back into structured `Text`/`Segments` for robust interop and better parity testing.
+
+- Implement `AnsiDecoder` (`ansi.py:AnsiDecoder` parity) to parse:
+  - SGR attribute toggles + resets (including tri-state semantics like dim on/off)
+  - 8/16 colors, 256 colors, TrueColor
+  - cursor / erase controls as `ControlType` where applicable
+- Implement `Text::from_ansi()` using `AnsiDecoder` and existing style/segment models.
+
+### Task 3 — Spinner Catalog Parity
+
+**Goal:** Ensure spinner names/frames/intervals match Python Rich.
+
+- Port Rich’s `_spinners.py` definitions (frames + interval).
+- Ensure `Spinner::new(name)` recognizes all Rich spinner names.
+- Add tests for a small sample of spinner names (including multi-cell frames).
+
+### Task 4 — `Styled` Wrapper
+
+**Goal:** Rich-compatible “apply style to any renderable” adapter.
+
+- Implement `Styled` renderable (`styled.py` parity): wraps a renderable and combines a style over all segments.
+- Ensure style composition matches Rich semantics (outer style combines with inner).
+- Add tests to verify style layering and reset behavior.
+
+### Task 5 — `Constrain` Wrapper
+
+**Goal:** Rich-compatible width constraints to match layout edge cases.
+
+- Implement `Constrain` renderable (`constrain.py` parity): clamps rendered output to a maximum width.
+- Use existing measurement + crop/pad helpers to match Rich behavior.
+- Add tests that assert exact cell widths and cropping.
+
+### Task 6 — Loop Helpers
+
+**Goal:** Utility iterator helpers used across Rich internals.
+
+- Implement `loop_first`, `loop_last`, `loop_first_last` (`_loop.py` parity).
+- Add unit tests for edge cases (empty iterator, singleton, multi-item).
+
 ### 5.1 Progress System
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `TaskID` newtype | `progress.py:TaskID` | Task identifier |
-| Todo | `ProgressTask` struct | `progress.py:ProgressTask` | Task state |
-| Todo | `ProgressColumn` trait | `progress.py:ProgressColumn` | Abstract column |
-| Todo | `BarColumn`, `TextColumn`, `SpinnerColumn` | `progress.py` | Column types |
-| Todo | `Progress` struct | `progress.py:Progress` | Task management |
-| Todo | `Progress::track()` - iterate with progress | `progress.py:Progress.track` | Common pattern |
-| Todo | Live updating (requires Live) | `progress.py` + `live.py` | Threading/async |
+| Done | `TaskID` newtype | `progress.py:TaskID` | Task identifier |
+| Done | `ProgressTask` struct | `progress.py:ProgressTask` | Task state |
+| Done | `ProgressColumn` trait | `progress.py:ProgressColumn` | Abstract column |
+| Done | `BarColumn`, `TextColumn`, `SpinnerColumn` | `progress.py` | Column types |
+| Done | `Progress` struct | `progress.py:Progress` | Task management |
+| Done | `Progress::track()` - iterate with progress | `progress.py:Progress.track` | Common pattern |
+| Done | Live updating (requires Live) | `progress.py` + `live.py` | Threading/async |
 
 ### 5.2 Live Display
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Live` struct | `live.py:Live` | Real-time updates |
-| Todo | Refresh loop (async or threaded) | `live.py:Live._refresh_thread` | Background updates |
-| Todo | Transient mode | `live.py:Live` | Clear on exit |
+| Done | `Live` struct | `live.py:Live` | Real-time updates |
+| Done | Refresh loop (async or threaded) | `live.py:Live._refresh_thread` | Background updates |
+| Done | Transient mode | `live.py:Live` | Clear on exit |
 
 ### 5.3 Syntax Highlighting
 
@@ -428,16 +482,91 @@ The `Renderable::render()` trait method takes `&Console<Stdout>`, but our generi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `loop_first`, `loop_last`, `loop_first_last` | `_loop.py` | Iterator helpers |
-| Todo | `ratio_distribute`, `ratio_reduce` | `_ratio.py` | Width distribution |
-| Todo | `Constrain` wrapper | `constrain.py` | Width constraint |
-| Todo | `Styled` wrapper | `styled.py` | Apply style to renderable |
-| Todo | `Control` for escape sequences | `control.py` | Terminal control codes |
-| Todo | `Spinner` animations | `spinner.py` + `_spinners.py` | Animation frames |
-| Todo | `ProgressBar` visual bar | `progress_bar.py` | Bar rendering |
-| Todo | `filesize` formatting | `filesize.py` | Human-readable sizes |
+| Done | `loop_first`, `loop_last`, `loop_first_last` | `_loop.py` | Iterator helpers |
+| Done | `ratio_distribute`, `ratio_reduce` | `_ratio.py` | Width distribution |
+| Done | `Constrain` wrapper | `constrain.py` | Width constraint |
+| Done | `Styled` wrapper | `styled.py` | Apply style to renderable |
+| Done | `Control` for escape sequences | `control.py` | Terminal control codes |
+| Done | `Spinner` animations | `spinner.py` + `_spinners.py` | Animation frames |
+| Done | `ProgressBar` visual bar | `progress_bar.py` | Bar rendering |
+| Done | `filesize` formatting | `filesize.py` | Human-readable sizes |
 | Todo | `AnsiDecoder` struct | `ansi.py:AnsiDecoder` | Parse ANSI escape sequences |
 | Todo | `Text::from_ansi()` | `text.py:Text.from_ansi` | Uses AnsiDecoder (lower priority) |
+
+---
+
+## Phase 7: Screen & Region (Foundation for Textual)
+
+Textual-style TUIs require a screen model (a 2D grid of “cells” with style) and robust region math.
+Python Rich provides these building blocks; for a Rust port of Textual, these are core, not optional.
+
+### 7.1 Region
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | `Region` struct (x, y, width, height) | `rich/region.py` | Core rectangle math |
+| Todo | Intersection / union / contains / crop | `rich/region.py` | Required for clipping and layout |
+| Todo | Region tests | `rich/region.py` | Deterministic unit tests |
+
+### 7.2 Screen Buffer
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | `Screen` / buffer type (Cell grid) | `rich/screen.py` | Stores (char, style) per cell |
+| Todo | Render Segments → Screen (wrapping + clipping) | `rich/screen.py` | Convert renderables to a buffer for diffing |
+| Todo | Diff Screen → terminal updates | `rich/live_render.py` + `rich/console.py` | Minimizes redraw; cursor correctness |
+| Todo | Screen parity tests (golden captures) | `rich/screen.py` | Validate stable rendering across widths |
+
+### 7.3 Console integration
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | `Console.screen()` API parity | `rich/console.py` | Context / lifecycle API; integrates with Live |
+| Todo | `LiveRender` equivalent | `rich/live_render.py` | Owns render region and update logic |
+
+---
+
+## Phase 8: Layout System (TUI Composition)
+
+Rich’s `Layout` is a general-purpose way to split the terminal into regions and render different content
+into each region. Textual has its own layout engine, but Rich Layout is still valuable as a stepping stone
+and compatibility layer for Rich-based TUIs.
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | `Layout` tree (name, children, ratio, minimum_size) | `rich/layout.py` | Node-based composition |
+| Todo | `split_row` / `split_column` | `rich/layout.py` | Primary API for region partitioning |
+| Todo | Region assignment / refresh | `rich/layout.py` | Recompute regions on size changes |
+| Todo | Render Layout → Screen | `rich/layout.py` + `rich/screen.py` | Requires Phase 7 |
+| Todo | Layout parity tests | `rich/layout.py` | Snapshot tests + dimension cases |
+
+---
+
+## Phase 9: Interactive Utilities (Optional)
+
+These are user-facing terminal UX features. They’re useful for end-user CLI apps, but not strictly required
+for the rendering engine; decide based on product goals.
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | `Prompt` / `Confirm` equivalents | `rich/prompt.py` | Interactive stdin; validation |
+| Todo | `Pager` equivalent | `rich/pager.py` | Less-style paging; often platform-specific |
+| Todo | Stdout proxy during Live | `rich/file_proxy.py` | Prevent external prints from corrupting live region |
+
+---
+
+## Phase 10: Nice-to-haves (Post Parity)
+
+These items are not required for demo parity, but would improve compatibility with real-world Rich apps.
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | `Style.link` + `Style.meta` | `rich/style.py` | Carry hyperlink + metadata at the style level |
+| Todo | OSC8 hyperlinks via style pipeline | `rich/style.py:Style.render()` | Emit `\x1b]8;id=...;url\x1b\\` around styled text (not demo-only controls) |
+| Todo | `link_id` generation + combine semantics | `rich/style.py` | Preserve link ids across style composition; needed for robust Live/Progress redraws |
+| Todo | Markup link tags | `rich/markup.py` | Parse `[link=...]...[/]` into `Style.link` |
+| Todo | Markup metadata handlers | `rich/markup.py` | Support `[@handler=params]` (currently parsed but ignored) |
+| Todo | Mouse / hyperlink tests in TTY captures | `rich/console.py` | Add parity tests that assert OSC8 sequences (where supported) |
 
 ---
 

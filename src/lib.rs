@@ -19,10 +19,14 @@
 // Core modules
 mod cells;
 mod color;
+mod filesize;
 mod emoji;
+mod ansi;
+pub mod styled;
 pub mod error;
 mod measure;
 mod segment;
+mod control;
 mod style;
 mod theme;
 
@@ -49,6 +53,12 @@ pub mod table;
 pub mod traceback;
 pub mod tree;
 pub mod markdown;
+pub mod live;
+pub mod spinner;
+pub mod progress_bar;
+pub mod progress;
+pub mod constrain;
+pub mod loop_helpers;
 
 // Builtin renderables
 mod renderables;
@@ -63,6 +73,7 @@ pub use console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod};
 pub use error::{ParseError, Result as ParseResult};
 pub use measure::{Measurement, measure_renderables};
 pub use segment::{ControlType, Segment, Segments};
+pub use control::Control;
 pub use style::{NULL_STYLE, Style, StyleMeta};
 pub use text::{Span, Text, TextPart};
 pub use theme::{Theme, ThemeError, ThemeStack, default_styles};
@@ -70,6 +81,9 @@ pub use wrap::divide_line;
 
 // Emoji re-exports
 pub use emoji::{EMOJI, Emoji, EmojiVariant};
+pub use ansi::AnsiDecoder;
+pub use filesize::{decimal as filesize_decimal, pick_unit_and_suffix};
+pub use loop_helpers::{loop_first, loop_first_last, loop_last};
 
 // Highlighter re-exports
 pub use highlighter::{
@@ -83,6 +97,8 @@ pub use columns::Columns;
 pub use padding::{Padding, PaddingDimensions};
 pub use panel::Panel;
 pub use rule::{AlignMethod, Rule};
+pub use styled::Styled;
+pub use constrain::Constrain;
 pub use table::{Column, Row, Table};
 pub use tree::{ASCII_GUIDES, TREE_GUIDES, Tree, TreeGuides};
 
@@ -97,6 +113,14 @@ pub use scope::{ScopeRenderable, render_scope};
 
 // Traceback re-exports
 pub use traceback::{Frame, Stack, SyntaxErrorInfo, Trace, Traceback, TracebackBuilder};
+pub use live::{Live, LiveOptions, VerticalOverflowMethod};
+pub use progress_bar::ProgressBar;
+pub use spinner::Spinner;
+pub use progress::{
+    BarColumn, DownloadColumn, FileSizeColumn, MofNCompleteColumn, Progress, ProgressColumn,
+    ProgressTask, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn,
+    TimeRemainingColumn, TrackConfig, TransferSpeedColumn, TotalFileSizeColumn,
+};
 
 /// A type that can be rendered to the console.
 ///

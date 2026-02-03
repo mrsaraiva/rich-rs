@@ -1085,8 +1085,12 @@ impl Renderable for Table {
                     .last()
                     .and_then(|line| Segment::get_last_style(line));
                 while cells.len() < max_height {
+                    // When padding vertically, preserve only the **background** of the last rendered
+                    // line to avoid visible hairlines in block backgrounds, but don't let decoration
+                    // attributes (underline/dim/etc.) bleed into the padding.
                     let pad_style = hint_style
-                        .map(|hint| col_style.combine(&hint))
+                        .and_then(|hint| hint.bgcolor.map(|bg| Style::new().with_bgcolor(bg)))
+                        .map(|bg_style| col_style.combine(&bg_style))
                         .unwrap_or(col_style);
                     let blank = Segment::adjust_line_length(&[], widths[i], Some(pad_style), true);
                     cells.push(blank);
@@ -1165,8 +1169,10 @@ impl Renderable for Table {
                 let hint_style = cells
                     .last()
                     .and_then(|line| Segment::get_last_style(line));
+                // Preserve only background from the last rendered line (see header comment).
                 let pad_style = hint_style
-                    .map(|hint| col_style.combine(&hint))
+                    .and_then(|hint| hint.bgcolor.map(|bg| Style::new().with_bgcolor(bg)))
+                    .map(|bg_style| col_style.combine(&bg_style))
                     .unwrap_or(col_style);
                 let blank = Segment::adjust_line_length(&[], widths[i], Some(pad_style), true);
 
@@ -1297,8 +1303,10 @@ impl Renderable for Table {
                     .last()
                     .and_then(|line| Segment::get_last_style(line));
                 while cells.len() < max_height {
+                    // Preserve only background from the last rendered line (see header comment).
                     let pad_style = hint_style
-                        .map(|hint| col_style.combine(&hint))
+                        .and_then(|hint| hint.bgcolor.map(|bg| Style::new().with_bgcolor(bg)))
+                        .map(|bg_style| col_style.combine(&bg_style))
                         .unwrap_or(col_style);
                     let blank = Segment::adjust_line_length(&[], widths[i], Some(pad_style), true);
                     cells.push(blank);
