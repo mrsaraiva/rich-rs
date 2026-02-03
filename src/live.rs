@@ -80,7 +80,10 @@ impl Live {
         Self::with_console(renderable, Console::new(), LiveOptions::default())
     }
 
-    pub fn with_options(renderable: Box<dyn Renderable + Send + Sync>, options: LiveOptions) -> Self {
+    pub fn with_options(
+        renderable: Box<dyn Renderable + Send + Sync>,
+        options: LiveOptions,
+    ) -> Self {
         Self::with_console(renderable, Console::new(), options)
     }
 
@@ -94,8 +97,15 @@ impl Live {
             "refresh_per_second must be > 0"
         );
 
-        let transient = if options.screen { true } else { options.transient };
-        let options = LiveOptions { transient, ..options };
+        let transient = if options.screen {
+            true
+        } else {
+            options.transient
+        };
+        let options = LiveOptions {
+            transient,
+            ..options
+        };
         let state = LiveState {
             options,
             started: false,
@@ -148,10 +158,7 @@ impl Live {
             .take()
             .unwrap_or_else(|| Box::new(Text::plain("")));
 
-        let (id, is_root) = console.live_start(
-            renderable,
-            state.options.vertical_overflow,
-        );
+        let (id, is_root) = console.live_start(renderable, state.options.vertical_overflow);
         state.live_id = Some(id);
         state.is_root = is_root;
         state.started = true;
@@ -271,7 +278,11 @@ impl Live {
         Ok(())
     }
 
-    pub fn update(&self, renderable: Box<dyn Renderable + Send + Sync>, refresh: bool) -> io::Result<()> {
+    pub fn update(
+        &self,
+        renderable: Box<dyn Renderable + Send + Sync>,
+        refresh: bool,
+    ) -> io::Result<()> {
         let (id, started) = {
             let mut state = self.state.lock().expect("live state mutex poisoned");
             if !state.started {

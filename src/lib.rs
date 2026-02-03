@@ -17,27 +17,27 @@
 //! ```
 
 // Core modules
+mod ansi;
 mod cells;
 mod color;
-mod filesize;
+mod control;
 mod emoji;
-mod ansi;
-pub mod styled;
 pub mod error;
+pub mod export_format;
+mod filesize;
 mod measure;
 mod segment;
-mod control;
 mod style;
-mod theme;
+pub mod styled;
 pub mod terminal_theme;
-pub mod export_format;
+mod theme;
 
 // Higher-level modules
 mod console;
 pub mod file_proxy;
-pub mod pager;
 pub mod highlighter;
 pub mod markup;
+pub mod pager;
 pub mod text;
 pub mod wrap;
 
@@ -48,30 +48,30 @@ pub mod r#box;
 pub mod align;
 pub mod bar;
 pub mod columns;
+pub mod constrain;
+pub mod group;
+pub mod layout;
+pub mod live;
+pub mod live_render;
+pub mod loop_helpers;
+pub mod markdown;
 pub mod padding;
 pub mod panel;
 pub mod pretty;
+pub mod progress;
+pub mod progress_bar;
+pub mod prompt;
+pub mod region;
 pub mod rule;
-pub mod group;
 pub mod scope;
+pub mod screen;
+pub mod screen_buffer;
+pub mod spinner;
+pub mod status;
 pub mod syntax;
 pub mod table;
 pub mod traceback;
 pub mod tree;
-pub mod markdown;
-pub mod live;
-pub mod live_render;
-pub mod spinner;
-pub mod status;
-pub mod progress_bar;
-pub mod progress;
-pub mod constrain;
-pub mod loop_helpers;
-pub mod prompt;
-pub mod region;
-pub mod screen;
-pub mod screen_buffer;
-pub mod layout;
 
 // Builtin renderables
 mod renderables;
@@ -82,19 +82,21 @@ pub use color::{
     ANSI_COLOR_NAMES, Color, ColorSystem, ColorTriplet, ColorType, EIGHT_BIT_PALETTE, Palette,
     STANDARD_PALETTE, SimpleColor, WINDOWS_PALETTE, blend_rgb, parse_rgb_hex,
 };
-pub use console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod, PagerContext, PagerOptions};
+pub use console::{
+    Console, ConsoleOptions, JustifyMethod, OverflowMethod, PagerContext, PagerOptions,
+};
+pub use control::Control;
 pub use error::{ParseError, Result as ParseResult};
 pub use measure::{Measurement, measure_renderables};
 pub use segment::{ControlType, Segment, Segments};
-pub use control::Control;
 pub use style::{MetaValue, NULL_STYLE, Style, StyleMeta};
 pub use text::{Span, Text, TextPart};
 pub use theme::{Theme, ThemeError, ThemeStack, default_styles};
 pub use wrap::divide_line;
 
 // Emoji re-exports
-pub use emoji::{EMOJI, Emoji, EmojiVariant};
 pub use ansi::AnsiDecoder;
+pub use emoji::{EMOJI, Emoji, EmojiVariant};
 pub use filesize::{decimal as filesize_decimal, pick_unit_and_suffix};
 pub use loop_helpers::{loop_first, loop_first_last, loop_last};
 
@@ -108,17 +110,17 @@ pub use highlighter::{
 pub use align::{Align, VerticalAlignMethod};
 pub use bar::Bar;
 pub use columns::Columns;
+pub use constrain::Constrain;
+pub use group::Group;
 pub use padding::{Padding, PaddingDimensions};
 pub use panel::Panel;
 pub use rule::{AlignMethod, Rule};
-pub use group::Group;
 pub use styled::Styled;
-pub use constrain::Constrain;
 pub use table::{Column, Row, Table};
 pub use tree::{ASCII_GUIDES, TREE_GUIDES, Tree, TreeGuides};
 
 // Syntax highlighting re-exports
-pub use syntax::{AnsiTheme, Syntax, SyntaxTheme, SyntectTheme, DEFAULT_THEME};
+pub use syntax::{AnsiTheme, DEFAULT_THEME, Syntax, SyntaxTheme, SyntectTheme};
 
 // Pretty printing re-exports
 pub use pretty::{Pretty, pprint, pretty_repr};
@@ -127,34 +129,36 @@ pub use pretty::{Pretty, pprint, pretty_repr};
 pub use scope::{ScopeRenderable, render_scope};
 
 // Traceback re-exports
-pub use traceback::{Frame, Stack, SyntaxErrorInfo, Trace, Traceback, TracebackBuilder};
+pub use layout::{Layout, LayoutRender, SplitterKind};
 pub use live::{Live, LiveOptions, VerticalOverflowMethod};
 pub use live_render::LiveRender;
-pub use region::Region;
-pub use screen::Screen;
-pub use screen_buffer::{Cell, ScreenBuffer};
-pub use layout::{Layout, LayoutRender, SplitterKind};
-pub use progress_bar::ProgressBar;
-pub use spinner::{Spinner, spinner_names};
-pub use status::Status;
 pub use progress::{
     BarColumn, DownloadColumn, FileSizeColumn, MofNCompleteColumn, Progress, ProgressColumn,
     ProgressTask, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn,
-    TimeRemainingColumn, TrackConfig, TransferSpeedColumn, TotalFileSizeColumn,
+    TimeRemainingColumn, TotalFileSizeColumn, TrackConfig, TransferSpeedColumn,
 };
+pub use progress_bar::ProgressBar;
+pub use region::Region;
+pub use screen::Screen;
+pub use screen_buffer::{Cell, ScreenBuffer};
+pub use spinner::{Spinner, spinner_names};
+pub use status::Status;
+pub use traceback::{Frame, Stack, SyntaxErrorInfo, Trace, Traceback, TracebackBuilder};
 
 // Prompt re-exports
-pub use prompt::{Confirm, FloatPrompt, IntPrompt, InvalidResponse, Prompt, PromptError, Result as PromptResult};
+pub use prompt::{
+    Confirm, FloatPrompt, IntPrompt, InvalidResponse, Prompt, PromptError, Result as PromptResult,
+};
 
 // Pager re-exports
-pub use pager::{BufferPager, NullPager, Pager, SystemPager};
 pub use file_proxy::FileProxy;
+pub use pager::{BufferPager, NullPager, Pager, SystemPager};
 
 // Terminal theme and export re-exports
+pub use export_format::{CONSOLE_HTML_FORMAT, CONSOLE_SVG_FORMAT};
 pub use terminal_theme::{
-    TerminalTheme, DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, MONOKAI, DIMMED_MONOKAI, NIGHT_OWLISH,
+    DEFAULT_TERMINAL_THEME, DIMMED_MONOKAI, MONOKAI, NIGHT_OWLISH, SVG_EXPORT_THEME, TerminalTheme,
 };
-pub use export_format::{CONSOLE_SVG_FORMAT, CONSOLE_HTML_FORMAT};
 
 // Markup re-export
 pub use markup::escape as escape_markup;

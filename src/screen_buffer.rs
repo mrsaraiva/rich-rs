@@ -304,7 +304,11 @@ impl ScreenBuffer {
                 if cell.continuation {
                     continue;
                 }
-                let text = if cell.text.is_empty() { " " } else { cell.text.as_str() };
+                let text = if cell.text.is_empty() {
+                    " "
+                } else {
+                    cell.text.as_str()
+                };
                 if cell.style == current_style {
                     run.push_str(text);
                 } else {
@@ -326,11 +330,7 @@ impl ScreenBuffer {
             0
         } else {
             let w = cell.width();
-            if w == 0 {
-                1
-            } else {
-                w
-            }
+            if w == 0 { 1 } else { w }
         }
     }
 
@@ -368,7 +368,10 @@ impl ScreenBuffer {
                     continue;
                 }
 
-                let mut span = self.cell_span_width(x, y).max(previous.cell_span_width(x, y)).max(1);
+                let mut span = self
+                    .cell_span_width(x, y)
+                    .max(previous.cell_span_width(x, y))
+                    .max(1);
                 span = span.min(self.width.saturating_sub(x));
 
                 // Extend span over subsequent differing cells.
@@ -393,9 +396,13 @@ impl ScreenBuffer {
                 // Move cursor to (x, y)
                 if y != cursor_y {
                     if y > cursor_y {
-                        out.push(Segment::control(ControlType::CursorDown((y - cursor_y) as u16)));
+                        out.push(Segment::control(ControlType::CursorDown(
+                            (y - cursor_y) as u16,
+                        )));
                     } else {
-                        out.push(Segment::control(ControlType::CursorUp((cursor_y - y) as u16)));
+                        out.push(Segment::control(ControlType::CursorUp(
+                            (cursor_y - y) as u16,
+                        )));
                     }
                     cursor_y = y;
                     cursor_x = 0;
@@ -421,7 +428,11 @@ impl ScreenBuffer {
                         continue;
                     }
                     let w = self.cell_span_width(run_x, y).max(1);
-                    let text = if cell.text.is_empty() { " ".to_string() } else { cell.text.clone() };
+                    let text = if cell.text.is_empty() {
+                        " ".to_string()
+                    } else {
+                        cell.text.clone()
+                    };
                     let mut seg = Segment::new(text);
                     seg.style = cell.style;
                     out.push(seg);
@@ -459,8 +470,12 @@ mod tests {
                     }
                     ControlType::CarriageReturn => x = 0,
                     ControlType::CursorUp(n) => y = y.saturating_sub(*n as usize),
-                    ControlType::CursorDown(n) => y = (y + *n as usize).min(height.saturating_sub(1)),
-                    ControlType::CursorForward(n) => x = (x + *n as usize).min(width.saturating_sub(1)),
+                    ControlType::CursorDown(n) => {
+                        y = (y + *n as usize).min(height.saturating_sub(1))
+                    }
+                    ControlType::CursorForward(n) => {
+                        x = (x + *n as usize).min(width.saturating_sub(1))
+                    }
                     ControlType::CursorBackward(n) => x = x.saturating_sub(*n as usize),
                     _ => {}
                 }

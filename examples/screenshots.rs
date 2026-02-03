@@ -6,11 +6,11 @@
 
 use std::io::Stdout;
 
-use rich_rs::markdown::Markdown;
 use rich_rs::r#box::{ROUNDED, SIMPLE};
+use rich_rs::markdown::Markdown;
 use rich_rs::{
-    Column, Columns, Console, ConsoleOptions, JustifyMethod, Measurement, Panel, Pretty,
-    Renderable, Row, Segment, Segments, SimpleColor, Style, Syntax, Table, Text, Tree, MONOKAI,
+    Column, Columns, Console, ConsoleOptions, JustifyMethod, MONOKAI, Measurement, Panel, Pretty,
+    Renderable, Row, Segment, Segments, SimpleColor, Style, Syntax, Table, Text, Tree,
 };
 
 const IMG_DIR: &str = "imgs";
@@ -124,8 +124,16 @@ impl Renderable for ColorBox {
                 let (r1, g1, b1) = Self::hls_to_rgb(h, l1, 1.0);
                 let (r2, g2, b2) = Self::hls_to_rgb(h, l2, 1.0);
 
-                let bgcolor = SimpleColor::Rgb { r: r1, g: g1, b: b1 };
-                let color = SimpleColor::Rgb { r: r2, g: g2, b: b2 };
+                let bgcolor = SimpleColor::Rgb {
+                    r: r1,
+                    g: g1,
+                    b: b1,
+                };
+                let color = SimpleColor::Rgb {
+                    r: r2,
+                    g: g2,
+                    b: b2,
+                };
 
                 let style = Style::new().with_color(color).with_bgcolor(bgcolor);
 
@@ -160,7 +168,11 @@ fn generate_features() -> std::io::Result<()> {
             .no_wrap(true)
             .justify(JustifyMethod::Center)
             .width(12)
-            .style(Style::new().with_bold(true).with_color(SimpleColor::Standard(1))),
+            .style(
+                Style::new()
+                    .with_bold(true)
+                    .with_color(SimpleColor::Standard(1)),
+            ),
     );
     table.add_column(Column::new());
 
@@ -254,15 +266,29 @@ fn generate_features() -> std::io::Result<()> {
             .style(Style::new().with_color(SimpleColor::Standard(4))),
     );
     movie_table.add_column(
-        Column::with_header(Box::new(Text::from_markup("[magenta]Box Office", false).unwrap()))
-            .style(Style::new().with_color(SimpleColor::Standard(5)))
-            .justify(JustifyMethod::Right),
+        Column::with_header(Box::new(
+            Text::from_markup("[magenta]Box Office", false).unwrap(),
+        ))
+        .style(Style::new().with_color(SimpleColor::Standard(5)))
+        .justify(JustifyMethod::Right),
     );
 
     let movies = vec![
-        vec!["Dec 20, 2019", "Star Wars: The Rise of Skywalker", "$375,126,118"],
-        vec!["May 25, 2018", "[b]Solo[/]: A Star Wars Story", "$393,151,347"],
-        vec!["Dec 15, 2017", "Star Wars Ep. VIII: The Last Jedi", "[bold]$1,332,539,889[/bold]"],
+        vec![
+            "Dec 20, 2019",
+            "Star Wars: The Rise of Skywalker",
+            "$375,126,118",
+        ],
+        vec![
+            "May 25, 2018",
+            "[b]Solo[/]: A Star Wars Story",
+            "$393,151,347",
+        ],
+        vec![
+            "Dec 15, 2017",
+            "Star Wars Ep. VIII: The Last Jedi",
+            "[bold]$1,332,539,889[/bold]",
+        ],
     ];
 
     for movie in movies {
@@ -296,7 +322,9 @@ fn generate_features() -> std::io::Result<()> {
         Box::new(more_text),
     ]));
 
-    console.print(&table, None, None, None, false, "\n").unwrap();
+    console
+        .print(&table, None, None, None, false, "\n")
+        .unwrap();
     save_svg(&mut console, "features.svg", "rich-rs Features")
 }
 
@@ -316,9 +344,15 @@ fn generate_markup() -> std::io::Result<()> {
     let line2 = Text::from_markup("[link=https://example.com]Click here[/link]", false).unwrap();
     let line3 = Text::from_markup(":warning: [yellow]Warning[/] :warning:", true).unwrap();
 
-    console.print(&line1, None, None, None, false, "\n").unwrap();
-    console.print(&line2, None, None, None, false, "\n").unwrap();
-    console.print(&line3, None, None, None, false, "\n").unwrap();
+    console
+        .print(&line1, None, None, None, false, "\n")
+        .unwrap();
+    console
+        .print(&line2, None, None, None, false, "\n")
+        .unwrap();
+    console
+        .print(&line3, None, None, None, false, "\n")
+        .unwrap();
 
     save_svg(&mut console, "markup.svg", "Markup Examples")
 }
@@ -354,7 +388,9 @@ fn generate_table() -> std::io::Result<()> {
     table.add_row_strs(&["Bob", "25", "Los Angeles"]);
     table.add_row_strs(&["Charlie", "35", "Chicago"]);
 
-    console.print(&table, None, None, None, false, "\n").unwrap();
+    console
+        .print(&table, None, None, None, false, "\n")
+        .unwrap();
     save_svg(&mut console, "table.svg", "Table Example")
 }
 
@@ -371,7 +407,9 @@ fn generate_syntax() -> std::io::Result<()> {
         .with_line_numbers(true)
         .with_theme("base16-ocean.dark");
 
-    console.print(&syntax, None, None, None, false, "\n").unwrap();
+    console
+        .print(&syntax, None, None, None, false, "\n")
+        .unwrap();
     save_svg(&mut console, "syntax.svg", "Syntax Highlighting")
 }
 
@@ -394,7 +432,9 @@ fn main() {
 "#;
 
     let markdown = Markdown::new(md);
-    console.print(&markdown, None, None, None, false, "\n").unwrap();
+    console
+        .print(&markdown, None, None, None, false, "\n")
+        .unwrap();
     save_svg(&mut console, "markdown.svg", "Markdown Rendering")
 }
 
@@ -451,7 +491,9 @@ fn generate_panel() -> std::io::Result<()> {
         .with_box(ROUNDED)
         .with_border_style(Style::new().with_color(SimpleColor::Standard(4))); // blue
 
-    console.print(&panel, None, None, None, false, "\n").unwrap();
+    console
+        .print(&panel, None, None, None, false, "\n")
+        .unwrap();
     save_svg(&mut console, "panel.svg", "Panel Example")
 }
 
@@ -469,7 +511,9 @@ fn generate_pretty() -> std::io::Result<()> {
     }"#;
 
     let pretty = Pretty::from_str(data).with_indent_guides(true);
-    console.print(&pretty, None, None, None, false, "\n").unwrap();
+    console
+        .print(&pretty, None, None, None, false, "\n")
+        .unwrap();
     save_svg(&mut console, "pretty.svg", "Pretty Printing")
 }
 
@@ -487,6 +531,8 @@ fn generate_columns() -> std::io::Result<()> {
         .collect();
 
     let columns = Columns::new(items).with_equal(true).with_width(15);
-    console.print(&columns, None, None, None, false, "\n").unwrap();
+    console
+        .print(&columns, None, None, None, false, "\n")
+        .unwrap();
     save_svg(&mut console, "columns.svg", "Columns Layout")
 }

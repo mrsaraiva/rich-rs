@@ -17,9 +17,9 @@
 use std::io::Stdout;
 
 use crate::align::VerticalAlignMethod;
+use crate::r#box::{Box as RichBox, HEAVY_HEAD, RowLevel};
 use crate::console::{ConsoleOptions, JustifyMethod, OverflowMethod};
 use crate::measure::Measurement;
-use crate::r#box::{Box as RichBox, RowLevel, HEAVY_HEAD};
 use crate::rule::AlignMethod;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
@@ -833,12 +833,7 @@ impl Table {
         }
 
         let min_w = min_widths.iter().max().copied().unwrap_or(1) + content_padding_width;
-        let max_w = max_widths
-            .iter()
-            .max()
-            .copied()
-            .unwrap_or(max_width)
-            + content_padding_width;
+        let max_w = max_widths.iter().max().copied().unwrap_or(max_width) + content_padding_width;
 
         Measurement::new(min_w, max_w)
             .with_maximum(max_width)
@@ -872,10 +867,7 @@ impl Table {
             .map(|col| self.measure_column(console, options, col))
             .collect();
 
-        let mut widths: Vec<usize> = measurements
-            .iter()
-            .map(|m| m.maximum.max(1))
-            .collect();
+        let mut widths: Vec<usize> = measurements.iter().map(|m| m.maximum.max(1)).collect();
 
         // Handle flexible columns with ratios
         if effective_expand {
@@ -1010,13 +1002,7 @@ impl Table {
         }
 
         // Render cell content
-        let cell_lines = console.render_lines(
-            cell,
-            Some(&cell_options),
-            Some(style),
-            true,
-            false,
-        );
+        let cell_lines = console.render_lines(cell, Some(&cell_options), Some(style), true, false);
 
         // Apply padding to each line
         let left_pad = Segment::styled(" ".repeat(pad_left), style);
@@ -1061,7 +1047,9 @@ impl Renderable for Table {
 
         // Determine box characters
         let safe_box = self.safe_box.unwrap_or(options.legacy_windows);
-        let box_chars = self.box_type.map(|b| b.substitute(safe_box, options.ascii_only()));
+        let box_chars = self
+            .box_type
+            .map(|b| b.substitute(safe_box, options.ascii_only()));
 
         // Calculate column widths
         let max_width = self.width.unwrap_or(options.max_width);
@@ -1142,14 +1130,7 @@ impl Renderable for Table {
 
                 let cell_style = header_row_style.combine(&column.header_style);
                 let cell_lines = self.render_cell(
-                    console,
-                    options,
-                    cell,
-                    column,
-                    widths[i],
-                    cell_style,
-                    true,
-                    false,
+                    console, options, cell, column, widths[i], cell_style, true, false,
                 );
                 max_height = max_height.max(cell_lines.len());
                 header_cells.push(cell_lines);
@@ -1158,9 +1139,7 @@ impl Renderable for Table {
             // Normalize heights - use column header style for padding
             for (i, cells) in header_cells.iter_mut().enumerate() {
                 let col_style = header_row_style.combine(&self.columns[i].header_style);
-                let hint_style = cells
-                    .last()
-                    .and_then(|line| Segment::get_last_style(line));
+                let hint_style = cells.last().and_then(|line| Segment::get_last_style(line));
                 while cells.len() < max_height {
                     // When padding vertically, preserve only the **background** of the last rendered
                     // line to avoid visible hairlines in block backgrounds, but don't let decoration
@@ -1188,7 +1167,8 @@ impl Renderable for Table {
                     }
                     if col_idx < header_cells.len() - 1 {
                         if let Some(ref bx) = box_chars {
-                            result.push(Segment::styled(bx.head_vertical.to_string(), border_style));
+                            result
+                                .push(Segment::styled(bx.head_vertical.to_string(), border_style));
                         }
                     }
                 }
@@ -1242,10 +1222,11 @@ impl Renderable for Table {
 
             // Normalize heights - use column style for padding and respect vertical alignment
             for (i, cells) in row_cells.iter_mut().enumerate() {
-                let col_style = self.style.combine(&self.columns[i].style).combine(&row_style);
-                let hint_style = cells
-                    .last()
-                    .and_then(|line| Segment::get_last_style(line));
+                let col_style = self
+                    .style
+                    .combine(&self.columns[i].style)
+                    .combine(&row_style);
+                let hint_style = cells.last().and_then(|line| Segment::get_last_style(line));
                 // Preserve only background from the last rendered line (see header comment).
                 let pad_style = hint_style
                     .and_then(|hint| hint.bgcolor.map(|bg| Style::new().with_bgcolor(bg)))
@@ -1360,14 +1341,7 @@ impl Renderable for Table {
 
                 let cell_style = footer_row_style.combine(&column.footer_style);
                 let cell_lines = self.render_cell(
-                    console,
-                    options,
-                    cell,
-                    column,
-                    widths[i],
-                    cell_style,
-                    false,
-                    true,
+                    console, options, cell, column, widths[i], cell_style, false, true,
                 );
                 max_height = max_height.max(cell_lines.len());
                 footer_cells.push(cell_lines);
@@ -1376,9 +1350,7 @@ impl Renderable for Table {
             // Normalize heights - use column footer style for padding
             for (i, cells) in footer_cells.iter_mut().enumerate() {
                 let col_style = footer_row_style.combine(&self.columns[i].footer_style);
-                let hint_style = cells
-                    .last()
-                    .and_then(|line| Segment::get_last_style(line));
+                let hint_style = cells.last().and_then(|line| Segment::get_last_style(line));
                 while cells.len() < max_height {
                     // Preserve only background from the last rendered line (see header comment).
                     let pad_style = hint_style
@@ -1404,7 +1376,8 @@ impl Renderable for Table {
                     }
                     if col_idx < footer_cells.len() - 1 {
                         if let Some(ref bx) = box_chars {
-                            result.push(Segment::styled(bx.foot_vertical.to_string(), border_style));
+                            result
+                                .push(Segment::styled(bx.foot_vertical.to_string(), border_style));
                         }
                     }
                 }
@@ -1534,7 +1507,12 @@ fn round_div_bankers(numer: u128, denom: u128) -> usize {
 ///
 /// `total` is the number of cells to remove from `values`, proportionally to `ratios`,
 /// with per-slot caps in `maximums`.
-fn ratio_reduce(total: usize, ratios: &[usize], maximums: &[usize], values: &[usize]) -> Vec<usize> {
+fn ratio_reduce(
+    total: usize,
+    ratios: &[usize],
+    maximums: &[usize],
+    values: &[usize],
+) -> Vec<usize> {
     let mut adjusted_ratios: Vec<usize> = Vec::with_capacity(ratios.len());
     for (&ratio, &max) in ratios.iter().zip(maximums.iter()) {
         adjusted_ratios.push(if max > 0 { ratio } else { 0 });
@@ -1675,8 +1653,8 @@ fn collapse_widths(mut widths: Vec<usize>, wrapable: Vec<bool>, max_width: usize
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cells::cell_len;
     use crate::r#box::{ASCII, DOUBLE, ROUNDED, SQUARE};
+    use crate::cells::cell_len;
 
     // ==================== Column tests ====================
 
@@ -1970,7 +1948,11 @@ mod tests {
         // Without expand, a single column with "X" header would be ~5 chars
         // With expand, it should be significantly wider (at least 30+)
         let width = cell_len(first_line);
-        assert!(width >= 30, "Expanded table width {} should be >= 30", width);
+        assert!(
+            width >= 30,
+            "Expanded table width {} should be >= 30",
+            width
+        );
     }
 
     // ==================== Measure tests ====================

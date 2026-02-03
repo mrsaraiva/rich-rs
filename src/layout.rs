@@ -105,8 +105,8 @@ impl Renderable for Placeholder {
             children: state.children.len(),
         };
 
-        let content = Align::center(Box::new(Pretty::new(&info)))
-            .with_vertical(VerticalAlignMethod::Middle);
+        let content =
+            Align::center(Box::new(Pretty::new(&info))).with_vertical(VerticalAlignMethod::Middle);
 
         let panel = Panel::new(Box::new(content))
             .with_title(title)
@@ -161,7 +161,10 @@ impl Layout {
     }
 
     pub fn with_minimum_size(self, minimum_size: usize) -> Self {
-        self.state.lock().expect("layout mutex poisoned").minimum_size = minimum_size.max(1);
+        self.state
+            .lock()
+            .expect("layout mutex poisoned")
+            .minimum_size = minimum_size.max(1);
         self
     }
 
@@ -180,7 +183,11 @@ impl Layout {
     }
 
     pub fn name(&self) -> Option<String> {
-        self.state.lock().expect("layout mutex poisoned").name.clone()
+        self.state
+            .lock()
+            .expect("layout mutex poisoned")
+            .name
+            .clone()
     }
 
     pub fn children(&self) -> Vec<Layout> {
@@ -225,11 +232,19 @@ impl Layout {
     }
 
     pub fn add_split(&self, layouts: Vec<Layout>) {
-        self.state.lock().expect("layout mutex poisoned").children.extend(layouts);
+        self.state
+            .lock()
+            .expect("layout mutex poisoned")
+            .children
+            .extend(layouts);
     }
 
     pub fn unsplit(&self) {
-        self.state.lock().expect("layout mutex poisoned").children.clear();
+        self.state
+            .lock()
+            .expect("layout mutex poisoned")
+            .children
+            .clear();
     }
 
     fn visible_children(state: &LayoutState) -> Vec<Layout> {
@@ -241,7 +256,11 @@ impl Layout {
             .collect()
     }
 
-    fn divide_region(children: &[Layout], region: Region, splitter: SplitterKind) -> Vec<(Layout, Region)> {
+    fn divide_region(
+        children: &[Layout],
+        region: Region,
+        splitter: SplitterKind,
+    ) -> Vec<(Layout, Region)> {
         let x = region.x;
         let y = region.y;
         let width = region.width as usize;
@@ -279,7 +298,8 @@ impl Layout {
     }
 
     fn make_region_map(&self, width: usize, height: usize) -> Vec<(Layout, Region)> {
-        let mut stack: Vec<(Layout, Region)> = vec![(self.clone(), Region::new(0, 0, width as u32, height as u32))];
+        let mut stack: Vec<(Layout, Region)> =
+            vec![(self.clone(), Region::new(0, 0, width as u32, height as u32))];
         let mut layout_regions: Vec<(Layout, Region)> = Vec::new();
         while let Some((layout, region)) = stack.pop() {
             layout_regions.push((layout.clone(), region));
@@ -304,7 +324,11 @@ impl Layout {
         layout_regions
     }
 
-    fn render_map(&self, console: &Console, options: &ConsoleOptions) -> HashMap<usize, LayoutRender> {
+    fn render_map(
+        &self,
+        console: &Console,
+        options: &ConsoleOptions,
+    ) -> HashMap<usize, LayoutRender> {
         let width = options.max_width.max(1);
         let height = options.height.unwrap_or_else(|| console.height()).max(1);
         let regions = self.make_region_map(width, height);
@@ -330,11 +354,9 @@ impl Layout {
                 state.renderable.clone()
             };
 
-            let lines = console.render_lines(renderable.as_ref(), Some(&child_opts), None, true, false);
-            render_map.insert(
-                layout.id,
-                LayoutRender { region, lines },
-            );
+            let lines =
+                console.render_lines(renderable.as_ref(), Some(&child_opts), None, true, false);
+            render_map.insert(layout.id, LayoutRender { region, lines });
         }
 
         render_map
@@ -343,7 +365,11 @@ impl Layout {
     /// Refresh a sub-layout in an alternate screen.
     ///
     /// This matches Rich's `Layout.refresh_screen` behavior and requires alt-screen mode.
-    pub fn refresh_screen(&self, console: &mut crate::Console<std::io::Stdout>, layout_name: &str) -> std::io::Result<()> {
+    pub fn refresh_screen(
+        &self,
+        console: &mut crate::Console<std::io::Stdout>,
+        layout_name: &str,
+    ) -> std::io::Result<()> {
         let Some(layout) = self.get(layout_name) else {
             return Ok(());
         };
@@ -368,10 +394,17 @@ impl Layout {
         let lines = console.render_lines(&layout, Some(&child_opts), None, true, false);
 
         // Store updated lines in the root render_map.
-        self.state.lock().expect("layout mutex poisoned").render_map.insert(
-            layout.id,
-            LayoutRender { region, lines: lines.clone() },
-        );
+        self.state
+            .lock()
+            .expect("layout mutex poisoned")
+            .render_map
+            .insert(
+                layout.id,
+                LayoutRender {
+                    region,
+                    lines: lines.clone(),
+                },
+            );
 
         console.update_screen_lines(&lines, region.x.max(0) as u16, region.y.max(0) as u16)?;
         Ok(())
@@ -382,7 +415,12 @@ impl Renderable for Layout {
     fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
         // Leaf layouts render their stored renderable.
         if self.children().is_empty() {
-            let renderable = self.state.lock().expect("layout mutex poisoned").renderable.clone();
+            let renderable = self
+                .state
+                .lock()
+                .expect("layout mutex poisoned")
+                .renderable
+                .clone();
             return renderable.render(console, options);
         }
 
@@ -519,7 +557,11 @@ mod tests {
         let root = Layout::new();
         root.split_row(vec![left, right]);
 
-        let output: String = root.render(&console, &options).iter().map(|s| s.text.to_string()).collect();
+        let output: String = root
+            .render(&console, &options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
         let lines: Vec<&str> = output.split('\n').collect();
         assert!(lines[0].contains('L'));
         assert!(lines[0].contains('R'));
@@ -546,7 +588,11 @@ mod tests {
         let root = Layout::new();
         root.split_column(vec![top, bottom]);
 
-        let output: String = root.render(&console, &options).iter().map(|s| s.text.to_string()).collect();
+        let output: String = root
+            .render(&console, &options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
         let lines: Vec<&str> = output.split('\n').collect();
         assert!(lines[0].contains('A'));
         assert!(lines[1].contains('B'));
@@ -560,7 +606,9 @@ mod tests {
         options.size = (6, 3);
         options.height = Some(3);
 
-        let header = Layout::with_renderable(Text::plain("H")).with_size(1).with_name("header");
+        let header = Layout::with_renderable(Text::plain("H"))
+            .with_size(1)
+            .with_name("header");
         let body = Layout::new().with_name("body");
         let root = Layout::new();
         root.split_column(vec![header, body.clone()]);
@@ -569,7 +617,11 @@ mod tests {
         let right = Layout::with_renderable(Text::plain("R"));
         body.split_row(vec![left, right]);
 
-        let output: String = root.render(&console, &options).iter().map(|s| s.text.to_string()).collect();
+        let output: String = root
+            .render(&console, &options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
         let lines: Vec<&str> = output.split('\n').collect();
         // Header on first row.
         assert!(lines[0].contains('H'));

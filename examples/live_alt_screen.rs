@@ -20,8 +20,8 @@ fn main() -> std::io::Result<()> {
 
     for i in 0..120u32 {
         let markup = format!("[bold magenta]Alt-screen[/] tick={i}");
-        let t =
-            Text::from_markup(&markup, false).unwrap_or_else(|_| Text::plain(format!("Alt-screen tick={i}")));
+        let t = Text::from_markup(&markup, false)
+            .unwrap_or_else(|_| Text::plain(format!("Alt-screen tick={i}")));
         live.update(Box::new(t), true)?;
         sleep(Duration::from_millis(25));
     }

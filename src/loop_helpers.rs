@@ -203,7 +203,9 @@ mod tests {
     #[test]
     fn test_loop_first_last_multi() {
         let items: Vec<(bool, bool, i32)> = loop_first_last([1, 2, 3]).collect();
-        assert_eq!(items, vec![(true, false, 1), (false, false, 2), (false, true, 3)]);
+        assert_eq!(
+            items,
+            vec![(true, false, 1), (false, false, 2), (false, true, 3)]
+        );
     }
 }
-

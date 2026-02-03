@@ -4,13 +4,13 @@
 
 use std::f64::consts::PI;
 
-use crate::color::{blend_rgb, Color, ColorSystem, ColorTriplet, SimpleColor};
+use crate::Console;
+use crate::Renderable;
+use crate::color::{Color, ColorSystem, ColorTriplet, SimpleColor, blend_rgb};
 use crate::console::ConsoleOptions;
 use crate::measure::Measurement;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
-use crate::Renderable;
-use crate::{Console};
 
 const PULSE_SIZE: usize = 20;
 
@@ -84,9 +84,13 @@ impl ProgressBar {
         ) || no_color
         {
             let mut segments: Vec<Segment> = Vec::new();
-            segments.extend(std::iter::repeat(Segment::styled(bar, fore_style)).take(PULSE_SIZE / 2));
+            segments
+                .extend(std::iter::repeat(Segment::styled(bar, fore_style)).take(PULSE_SIZE / 2));
             let back_char = if no_color { " " } else { bar };
-            segments.extend(std::iter::repeat(Segment::styled(back_char, back_style)).take(PULSE_SIZE - (PULSE_SIZE / 2)));
+            segments.extend(
+                std::iter::repeat(Segment::styled(back_char, back_style))
+                    .take(PULSE_SIZE - (PULSE_SIZE / 2)),
+            );
             return segments;
         }
 
@@ -129,7 +133,9 @@ impl ProgressBar {
 
 impl Renderable for ProgressBar {
     fn render(&self, _console: &Console, options: &ConsoleOptions) -> Segments {
-        let width = (self.width.unwrap_or(options.max_width)).min(options.max_width).max(1);
+        let width = (self.width.unwrap_or(options.max_width))
+            .min(options.max_width)
+            .max(1);
         let ascii = options.legacy_windows || !options.encoding.to_lowercase().starts_with("utf");
         let should_pulse = self.pulse || self.total.is_none();
         if should_pulse {
