@@ -755,7 +755,10 @@ pub fn default_styles() -> HashMap<String, Style> {
     add!("pretty", Style::new());
 
     // Scope styles (for local variable display in tracebacks)
-    add!("scope.border", Style::color(Color::Standard(4)).with_dim(true));
+    add!(
+        "scope.border",
+        Style::color(Color::Standard(4)).with_dim(true)
+    );
     add!(
         "scope.key",
         Style::color(Color::Standard(6)).with_bold(true)

@@ -433,7 +433,8 @@ impl Renderable for Panel {
             max_width.saturating_sub(2)
         } else {
             // When fitting, measure content and add padding
-            let render_opts = options.update_width(max_width.saturating_sub(2 + pad_left + pad_right));
+            let render_opts =
+                options.update_width(max_width.saturating_sub(2 + pad_left + pad_right));
             let content_width = console.measure(renderable_ref, Some(&render_opts)).maximum;
             // child_width = content + padding (fits snugly)
             content_width + pad_left + pad_right
@@ -643,8 +644,7 @@ impl Renderable for Panel {
         // Build list of renderables to measure (include both title and subtitle)
         let inner_ref: &dyn Renderable = self.renderable.as_ref();
         let title_ref: Option<&dyn Renderable> = title.as_ref().map(|t| t as &dyn Renderable);
-        let subtitle_ref: Option<&dyn Renderable> =
-            subtitle.as_ref().map(|t| t as &dyn Renderable);
+        let subtitle_ref: Option<&dyn Renderable> = subtitle.as_ref().map(|t| t as &dyn Renderable);
 
         let mut renderables: Vec<&dyn Renderable> = vec![inner_ref];
         if let Some(t) = title_ref {

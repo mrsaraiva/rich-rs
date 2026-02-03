@@ -26,14 +26,14 @@
 use std::fmt::Debug;
 use std::io::Stdout;
 
+use crate::Renderable;
 use crate::cells::cell_len;
 use crate::console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod};
-use crate::highlighter::{repr_highlighter, repr_highlighter_with_theme, Highlighter};
+use crate::highlighter::{Highlighter, repr_highlighter, repr_highlighter_with_theme};
 use crate::measure::Measurement;
 use crate::segment::Segments;
 use crate::text::Text;
 use crate::theme::Theme;
-use crate::Renderable;
 
 // ============================================================================
 // Node - Tree structure for repr output
@@ -173,7 +173,11 @@ impl Node {
             line_no += 1;
         }
 
-        lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n")
+        lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -300,9 +304,26 @@ impl Line {
 impl std::fmt::Display for Line {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.last {
-            write!(f, "{}{}{}", self.whitespace, self.text, self.node.as_ref().map_or(String::new(), |n| n.to_string_inline()))
+            write!(
+                f,
+                "{}{}{}",
+                self.whitespace,
+                self.text,
+                self.node
+                    .as_ref()
+                    .map_or(String::new(), |n| n.to_string_inline())
+            )
         } else {
-            write!(f, "{}{}{}{}", self.whitespace, self.text, self.node.as_ref().map_or(String::new(), |n| n.to_string_inline()), self.suffix.trim_end())
+            write!(
+                f,
+                "{}{}{}{}",
+                self.whitespace,
+                self.text,
+                self.node
+                    .as_ref()
+                    .map_or(String::new(), |n| n.to_string_inline()),
+                self.suffix.trim_end()
+            )
         }
     }
 }
@@ -312,7 +333,12 @@ impl std::fmt::Display for Line {
 // ============================================================================
 
 /// Parse a Debug output string into a Node tree.
-fn parse_debug_output(s: &str, max_length: Option<usize>, max_string: Option<usize>, max_depth: Option<usize>) -> Node {
+fn parse_debug_output(
+    s: &str,
+    max_length: Option<usize>,
+    max_string: Option<usize>,
+    max_depth: Option<usize>,
+) -> Node {
     let mut parser = DebugParser::new(s, max_length, max_string, max_depth);
     parser.parse()
 }
@@ -326,7 +352,12 @@ struct DebugParser<'a> {
 }
 
 impl<'a> DebugParser<'a> {
-    fn new(input: &'a str, max_length: Option<usize>, max_string: Option<usize>, max_depth: Option<usize>) -> Self {
+    fn new(
+        input: &'a str,
+        max_length: Option<usize>,
+        max_string: Option<usize>,
+        max_depth: Option<usize>,
+    ) -> Self {
         DebugParser {
             input,
             pos: 0,
@@ -596,7 +627,7 @@ impl<'a> DebugParser<'a> {
             let chars: Vec<char> = s.chars().collect();
             if chars.len() > 2 {
                 // Get content between quotes (skip first and last char)
-                let content_chars: Vec<char> = chars[1..chars.len()-1].to_vec();
+                let content_chars: Vec<char> = chars[1..chars.len() - 1].to_vec();
                 if content_chars.len() > max_str {
                     let truncated: String = content_chars[..max_str].iter().collect();
                     let truncated_len = content_chars.len() - max_str;

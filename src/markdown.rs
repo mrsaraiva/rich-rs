@@ -29,20 +29,20 @@ use std::io::Stdout;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+use crate::Renderable;
 use crate::align::Align;
+use crate::r#box::DOUBLE;
 use crate::cells::cell_len;
 use crate::console::{Console, ConsoleOptions, JustifyMethod};
 use crate::measure::Measurement;
-use crate::panel::Panel;
 use crate::padding::{Padding, PaddingDimensions};
+use crate::panel::Panel;
 use crate::rule::Rule;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
 use crate::syntax::Syntax;
 use crate::table::{Column, Table};
 use crate::text::Text;
-use crate::r#box::DOUBLE;
-use crate::Renderable;
 
 // ============================================================================
 // Style definitions
@@ -50,8 +50,8 @@ use crate::Renderable;
 
 /// Default styles for markdown elements.
 mod styles {
-    use crate::style::Style;
     use crate::color::SimpleColor;
+    use crate::style::Style;
 
     fn cyan() -> SimpleColor {
         SimpleColor::parse("cyan").unwrap_or(SimpleColor::Default)
@@ -78,7 +78,7 @@ mod styles {
     }
 
     pub fn heading1_border() -> Style {
-        Style::new()  // Default/white border like Python Rich
+        Style::new() // Default/white border like Python Rich
     }
 
     pub fn heading2() -> Style {
@@ -111,7 +111,10 @@ mod styles {
 
     pub fn code() -> Style {
         // Python Rich uses "bold cyan on black" for inline code
-        Style::new().with_bold(true).with_color(cyan()).with_bgcolor(black())
+        Style::new()
+            .with_bold(true)
+            .with_color(cyan())
+            .with_bgcolor(black())
     }
 
     pub fn block_quote() -> Style {
@@ -227,11 +230,25 @@ impl MarkdownContext {
 /// Represents a renderable block element.
 enum BlockElement {
     Paragraph(Text),
-    Heading { level: HeadingLevel, text: Text },
-    CodeBlock { code: String, language: Option<String> },
+    Heading {
+        level: HeadingLevel,
+        text: Text,
+    },
+    CodeBlock {
+        code: String,
+        language: Option<String>,
+    },
     BlockQuote(Vec<BlockElement>),
-    List { ordered: bool, start: u64, items: Vec<ListItem> },
-    Table { headers: Vec<Text>, rows: Vec<Vec<Text>>, alignments: Vec<Option<pulldown_cmark::Alignment>> },
+    List {
+        ordered: bool,
+        start: u64,
+        items: Vec<ListItem>,
+    },
+    Table {
+        headers: Vec<Text>,
+        rows: Vec<Vec<Text>>,
+        alignments: Vec<Option<pulldown_cmark::Alignment>>,
+    },
     HorizontalRule,
 }
 
@@ -242,7 +259,12 @@ struct ListItem {
 
 impl BlockElement {
     /// Render this block element to segments.
-    fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions, context: &MarkdownContext) -> Segments {
+    fn render(
+        &self,
+        console: &Console<Stdout>,
+        options: &ConsoleOptions,
+        context: &MarkdownContext,
+    ) -> Segments {
         match self {
             BlockElement::Paragraph(text) => {
                 let mut result = text.render(console, options);
@@ -352,7 +374,9 @@ impl BlockElement {
                             // Apply block quote style to content
                             let styled_seg = Segment::styled(
                                 seg.text.clone(),
-                                seg.style.map(|s| s + styles::block_quote()).unwrap_or_else(styles::block_quote),
+                                seg.style
+                                    .map(|s| s + styles::block_quote())
+                                    .unwrap_or_else(styles::block_quote),
                             );
                             result.push(styled_seg);
                         }
@@ -363,7 +387,11 @@ impl BlockElement {
                 result
             }
 
-            BlockElement::List { ordered, start, items } => {
+            BlockElement::List {
+                ordered,
+                start,
+                items,
+            } => {
                 let mut result = Segments::new();
 
                 // Calculate max number width for padding (using saturating add to prevent overflow)
@@ -417,7 +445,11 @@ impl BlockElement {
                 result
             }
 
-            BlockElement::Table { headers, rows, alignments } => {
+            BlockElement::Table {
+                headers,
+                rows,
+                alignments,
+            } => {
                 let mut table = Table::new();
 
                 // Add header columns
@@ -438,7 +470,8 @@ impl BlockElement {
 
                 // Add rows
                 for row in rows {
-                    let cells: Vec<Box<dyn Renderable + Send + Sync>> = row.iter()
+                    let cells: Vec<Box<dyn Renderable + Send + Sync>> = row
+                        .iter()
                         .map(|t| Box::new(t.clone()) as Box<dyn Renderable + Send + Sync>)
                         .collect();
                     table.add_row_renderables(cells);
@@ -509,7 +542,11 @@ impl<'a> MarkdownParser<'a> {
                 let language = match kind {
                     CodeBlockKind::Fenced(lang) => {
                         let lang_str = lang.to_string();
-                        if lang_str.is_empty() { None } else { Some(lang_str) }
+                        if lang_str.is_empty() {
+                            None
+                        } else {
+                            Some(lang_str)
+                        }
                     }
                     CodeBlockKind::Indented => None,
                 };
@@ -545,14 +582,20 @@ impl<'a> MarkdownParser<'a> {
                     match event {
                         Event::Start(Tag::Item) => {
                             let item_blocks = self.parse_until_end(TagEnd::Item);
-                            items.push(ListItem { blocks: item_blocks });
+                            items.push(ListItem {
+                                blocks: item_blocks,
+                            });
                         }
                         Event::End(TagEnd::List(_)) => break,
                         _ => {}
                     }
                 }
 
-                Some(BlockElement::List { ordered, start, items })
+                Some(BlockElement::List {
+                    ordered,
+                    start,
+                    items,
+                })
             }
 
             Event::Start(Tag::Table(alignments)) => {
@@ -597,7 +640,11 @@ impl<'a> MarkdownParser<'a> {
                     }
                 }
 
-                Some(BlockElement::Table { headers, rows, alignments: alignments_vec })
+                Some(BlockElement::Table {
+                    headers,
+                    rows,
+                    alignments: alignments_vec,
+                })
             }
 
             Event::Rule => Some(BlockElement::HorizontalRule),
@@ -612,7 +659,8 @@ impl<'a> MarkdownParser<'a> {
         let mut inline_text = Text::default();
 
         while let Some(event) = self.next_event() {
-            if matches!(&event, Event::End(tag) if std::mem::discriminant(tag) == std::mem::discriminant(&end_tag)) {
+            if matches!(&event, Event::End(tag) if std::mem::discriminant(tag) == std::mem::discriminant(&end_tag))
+            {
                 break;
             }
 
@@ -675,7 +723,9 @@ impl<'a> MarkdownParser<'a> {
 
         while let Some(event) = self.next_event() {
             match event {
-                Event::End(tag) if std::mem::discriminant(&tag) == std::mem::discriminant(&end_tag) => {
+                Event::End(tag)
+                    if std::mem::discriminant(&tag) == std::mem::discriminant(&end_tag) =>
+                {
                     break;
                 }
 

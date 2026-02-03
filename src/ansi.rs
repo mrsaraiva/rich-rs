@@ -21,7 +21,9 @@ pub struct AnsiDecoder {
 
 impl Default for AnsiDecoder {
     fn default() -> Self {
-        Self { style: Style::new() }
+        Self {
+            style: Style::new(),
+        }
     }
 }
 
@@ -80,8 +82,7 @@ impl AnsiDecoder {
             match bytes[index + 1] {
                 b'[' => {
                     // CSI ... <final>
-                    if let Some((final_byte, params_end, next_index)) =
-                        parse_csi(bytes, index + 2)
+                    if let Some((final_byte, params_end, next_index)) = parse_csi(bytes, index + 2)
                     {
                         if final_byte == b'm' {
                             let params = &line[index + 2..params_end];
@@ -217,7 +218,9 @@ impl AnsiDecoder {
                                 }
                             }
                             2 => {
-                                let (Some(r), Some(g), Some(b)) = (iter.next(), iter.next(), iter.next()) else {
+                                let (Some(r), Some(g), Some(b)) =
+                                    (iter.next(), iter.next(), iter.next())
+                                else {
                                     continue;
                                 };
                                 self.style.color = Some(SimpleColor::Rgb {
@@ -240,7 +243,9 @@ impl AnsiDecoder {
                                 }
                             }
                             2 => {
-                                let (Some(r), Some(g), Some(b)) = (iter.next(), iter.next(), iter.next()) else {
+                                let (Some(r), Some(g), Some(b)) =
+                                    (iter.next(), iter.next(), iter.next())
+                                else {
                                     continue;
                                 };
                                 self.style.bgcolor = Some(SimpleColor::Rgb {
@@ -374,7 +379,10 @@ mod tests {
         assert_eq!(lines[1].plain_text(), "still");
         assert_eq!(lines[0].spans().len(), 1);
         assert_eq!(lines[1].spans().len(), 1);
-        assert_eq!(lines[1].spans()[0].style.color, Some(SimpleColor::Standard(1)));
+        assert_eq!(
+            lines[1].spans()[0].style.color,
+            Some(SimpleColor::Standard(1))
+        );
     }
 
     #[test]

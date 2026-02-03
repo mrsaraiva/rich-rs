@@ -18,14 +18,7 @@ fn main() -> std::io::Result<()> {
 
     if !console.is_terminal() || console.is_dumb_terminal() {
         console.print_text("live_stress: not a supported interactive terminal; printing once.")?;
-        console.print(
-            &Text::plain("LIVE (final)\n"),
-            None,
-            None,
-            None,
-            false,
-            "",
-        )?;
+        console.print(&Text::plain("LIVE (final)\n"), None, None, None, false, "")?;
         return Ok(());
     }
 
@@ -48,9 +41,8 @@ fn main() -> std::io::Result<()> {
         }
 
         // Update the root live renderable.
-        let root_markup = format!(
-            "[bold green]Live[/] tick={tick}  [dim]printing while live is active[/]"
-        );
+        let root_markup =
+            format!("[bold green]Live[/] tick={tick}  [dim]printing while live is active[/]");
         let root = Text::from_markup(&root_markup, false)
             .unwrap_or_else(|_| Text::plain(format!("Live tick={tick}")));
         console.live_update(root_id, Box::new(root));

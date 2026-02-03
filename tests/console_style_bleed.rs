@@ -1,6 +1,4 @@
-use rich_rs::{
-    ColorSystem, Column, Console, ConsoleOptions, Row, SimpleColor, Style, Table, Text,
-};
+use rich_rs::{ColorSystem, Column, Console, ConsoleOptions, Row, SimpleColor, Style, Table, Text};
 
 #[test]
 fn background_does_not_bleed_between_table_cells() {

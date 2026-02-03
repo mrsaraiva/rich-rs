@@ -7,14 +7,14 @@
 use std::io::Stdout;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rich_rs::r#box::SIMPLE;
 use rich_rs::markdown::Markdown;
 use rich_rs::{
-    Column, Console, ConsoleOptions, JustifyMethod, Measurement, Panel, Pretty, Row,
-    ControlType, Renderable, Segment, Segments, SimpleColor, Style, Syntax, Table, Text,
+    Column, Console, ConsoleOptions, ControlType, JustifyMethod, Measurement, Panel, Pretty,
+    Renderable, Row, Segment, Segments, SimpleColor, Style, Syntax, Table, Text,
     VerticalAlignMethod,
 };
 
@@ -82,12 +82,18 @@ impl Renderable for ColorBox {
                 let (r1, g1, b1) = Self::hls_to_rgb(h, l1, 1.0);
                 let (r2, g2, b2) = Self::hls_to_rgb(h, l2, 1.0);
 
-                let bgcolor = SimpleColor::Rgb { r: r1, g: g1, b: b1 };
-                let color = SimpleColor::Rgb { r: r2, g: g2, b: b2 };
+                let bgcolor = SimpleColor::Rgb {
+                    r: r1,
+                    g: g1,
+                    b: b1,
+                };
+                let color = SimpleColor::Rgb {
+                    r: r2,
+                    g: g2,
+                    b: b2,
+                };
 
-                let style = Style::new()
-                    .with_color(color)
-                    .with_bgcolor(bgcolor);
+                let style = Style::new().with_color(color).with_bgcolor(bgcolor);
 
                 segments.push(Segment::styled("▄", style));
             }
@@ -224,7 +230,11 @@ fn make_test_card() -> Table {
             // Match Python Rich demo: feature labels are centered in a 12-cell content column
             // (plus 1 cell padding on each side from the table).
             .width(12)
-            .style(Style::new().with_bold(true).with_color(SimpleColor::Standard(1))), // bold red
+            .style(
+                Style::new()
+                    .with_bold(true)
+                    .with_color(SimpleColor::Standard(1)),
+            ), // bold red
     );
     table.add_column(Column::new());
 
@@ -251,23 +261,17 @@ fn make_test_card() -> Table {
     )
     .unwrap();
 
-    let color_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(color_text),
-        Box::new(ColorBox),
-    ];
+    let color_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(color_text), Box::new(ColorBox)];
     color_table.add_row(Row::new(color_cells));
 
-    let colors_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("Colors")),
-        Box::new(color_table),
-    ];
+    let colors_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("Colors")), Box::new(color_table)];
     table.add_row(Row::new(colors_cells));
 
     // Add blank row for spacing (like Python Rich demo)
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -281,17 +285,13 @@ fn make_test_card() -> Table {
     )
     .unwrap();
 
-    let styles_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("Styles")),
-        Box::new(styles_text),
-    ];
+    let styles_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("Styles")), Box::new(styles_text)];
     table.add_row(Row::new(styles_cells));
 
     // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -301,9 +301,7 @@ fn make_test_card() -> Table {
                  Quisque in metus sed sapien ultricies pretium a at justo. \
                  Maecenas luctus velit et auctor maximus.";
 
-    let mut lorem_table = Table::grid()
-        .with_padding(1, 1)
-        .with_pad_edge(false);
+    let mut lorem_table = Table::grid().with_padding(1, 1).with_pad_edge(false);
 
     lorem_table.add_column(Column::new().ratio(1).justify(JustifyMethod::Left));
     lorem_table.add_column(Column::new().ratio(1).justify(JustifyMethod::Center));
@@ -311,10 +309,22 @@ fn make_test_card() -> Table {
     lorem_table.add_column(Column::new().ratio(1).justify(JustifyMethod::Full));
 
     let lorem_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::styled(lorem, Style::new().with_color(SimpleColor::Standard(2)))), // green
-        Box::new(Text::styled(lorem, Style::new().with_color(SimpleColor::Standard(3)))), // yellow
-        Box::new(Text::styled(lorem, Style::new().with_color(SimpleColor::Standard(4)))), // blue
-        Box::new(Text::styled(lorem, Style::new().with_color(SimpleColor::Standard(1)))), // red
+        Box::new(Text::styled(
+            lorem,
+            Style::new().with_color(SimpleColor::Standard(2)),
+        )), // green
+        Box::new(Text::styled(
+            lorem,
+            Style::new().with_color(SimpleColor::Standard(3)),
+        )), // yellow
+        Box::new(Text::styled(
+            lorem,
+            Style::new().with_color(SimpleColor::Standard(4)),
+        )), // blue
+        Box::new(Text::styled(
+            lorem,
+            Style::new().with_color(SimpleColor::Standard(1)),
+        )), // red
     ];
     lorem_table.add_row(Row::new(lorem_cells));
 
@@ -334,17 +344,13 @@ fn make_test_card() -> Table {
     let text_section_cells2: Vec<Box<dyn Renderable + Send + Sync>> = vec![Box::new(lorem_table)];
     text_section.add_row(Row::new(text_section_cells2));
 
-    let text_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("Text")),
-        Box::new(text_section),
-    ];
+    let text_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("Text")), Box::new(text_section)];
     table.add_row(Row::new(text_cells));
 
     // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -365,10 +371,8 @@ fn make_test_card() -> Table {
     table.add_row(Row::new(asian_cells));
 
     // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -382,17 +386,13 @@ fn make_test_card() -> Table {
     )
     .unwrap();
 
-    let markup_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("Markup")),
-        Box::new(markup_text),
-    ];
+    let markup_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("Markup")), Box::new(markup_text)];
     table.add_row(Row::new(markup_cells));
 
     // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -417,26 +417,50 @@ fn make_test_card() -> Table {
             .ratio(1),
     );
     movie_table.add_column(
-        Column::with_header(Box::new(Text::from_markup("[cyan]Production Budget", false).unwrap()))
-            .style(Style::new().with_color(SimpleColor::Standard(6)))
-            .justify(JustifyMethod::Right)
-            .no_wrap(true)
-            .min_width(17),
+        Column::with_header(Box::new(
+            Text::from_markup("[cyan]Production Budget", false).unwrap(),
+        ))
+        .style(Style::new().with_color(SimpleColor::Standard(6)))
+        .justify(JustifyMethod::Right)
+        .no_wrap(true)
+        .min_width(17),
     );
     movie_table.add_column(
-        Column::with_header(Box::new(Text::from_markup("[magenta]Box Office", false).unwrap()))
-            .style(Style::new().with_color(SimpleColor::Standard(5)))
-            .justify(JustifyMethod::Right)
-            .no_wrap(true)
-            .min_width(14),
+        Column::with_header(Box::new(
+            Text::from_markup("[magenta]Box Office", false).unwrap(),
+        ))
+        .style(Style::new().with_color(SimpleColor::Standard(5)))
+        .justify(JustifyMethod::Right)
+        .no_wrap(true)
+        .min_width(14),
     );
 
     // Movie data rows
     let movies: Vec<Vec<&str>> = vec![
-        vec!["Dec 20, 2019", "Star Wars: The Rise of Skywalker", "$275,000,000", "$375,126,118"],
-        vec!["May 25, 2018", "[b]Solo[/]: A Star Wars Story", "$275,000,000", "$393,151,347"],
-        vec!["Dec 15, 2017", "Star Wars Ep. VIII: The Last Jedi", "$262,000,000", "[bold]$1,332,539,889[/bold]"],
-        vec!["May 19, 1999", "Star Wars Ep. [b]I[/b]: [i]The Phantom Menace", "$115,000,000", "$1,027,044,677"],
+        vec![
+            "Dec 20, 2019",
+            "Star Wars: The Rise of Skywalker",
+            "$275,000,000",
+            "$375,126,118",
+        ],
+        vec![
+            "May 25, 2018",
+            "[b]Solo[/]: A Star Wars Story",
+            "$275,000,000",
+            "$393,151,347",
+        ],
+        vec![
+            "Dec 15, 2017",
+            "Star Wars Ep. VIII: The Last Jedi",
+            "$262,000,000",
+            "[bold]$1,332,539,889[/bold]",
+        ],
+        vec![
+            "May 19, 1999",
+            "Star Wars Ep. [b]I[/b]: [i]The Phantom Menace",
+            "$115,000,000",
+            "$1,027,044,677",
+        ],
     ];
 
     for movie in movies {
@@ -450,17 +474,13 @@ fn make_test_card() -> Table {
         movie_table.add_row(Row::new(row_cells));
     }
 
-    let tables_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("Tables")),
-        Box::new(movie_table),
-    ];
+    let tables_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("Tables")), Box::new(movie_table)];
     table.add_row(Row::new(tables_cells));
 
     // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -490,16 +510,14 @@ fn make_test_card() -> Table {
         .with_show_header(false)
         .with_pad_edge(false)
         .with_box(None)
-        .with_padding(1, 1)  // Add horizontal padding between columns
+        .with_padding(1, 1) // Add horizontal padding between columns
         .with_expand(true);
 
     comparison_table.add_column(Column::new().ratio(1));
     comparison_table.add_column(Column::new().ratio(1));
 
-    let syntax_pretty_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(syntax),
-        Box::new(pretty),
-    ];
+    let syntax_pretty_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(syntax), Box::new(pretty)];
     comparison_table.add_row(Row::new(syntax_pretty_cells));
 
     let syntax_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
@@ -509,10 +527,8 @@ fn make_test_card() -> Table {
     table.add_row(Row::new(syntax_cells));
 
     // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -543,34 +559,27 @@ Supports much of the *markdown* __syntax__!
     md_comparison.add_column(Column::new().ratio(1));
     md_comparison.add_column(Column::new().ratio(1));
 
-    let md_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(markdown_raw),
-        Box::new(markdown_rendered),
-    ];
+    let md_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(markdown_raw), Box::new(markdown_rendered)];
     md_comparison.add_row(Row::new(md_cells));
 
-    let markdown_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("Markdown")),
-        Box::new(md_comparison),
-    ];
+    let markdown_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("Markdown")), Box::new(md_comparison)];
     table.add_row(Row::new(markdown_cells));
 
     // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("")),
-        Box::new(Text::plain("")),
-    ];
+    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
     table.add_row(Row::new(blank_row));
 
     // ─────────────────────────────────────────────────────────────────────────
     // +more! Section
     // ─────────────────────────────────────────────────────────────────────────
-    let more_text = Text::plain("Progress bars, columns, styled logging handler, tracebacks, etc...");
+    let more_text =
+        Text::plain("Progress bars, columns, styled logging handler, tracebacks, etc...");
 
-    let more_cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-        Box::new(Text::plain("+more!")),
-        Box::new(more_text),
-    ];
+    let more_cells: Vec<Box<dyn Renderable + Send + Sync>> =
+        vec![Box::new(Text::plain("+more!")), Box::new(more_text)];
     table.add_row(Row::new(more_cells));
 
     table
@@ -608,12 +617,18 @@ fn main() {
     // Print timing info
     let _ = console.line(1);
     let timing_cold = Text::from_markup(
-        &format!("[dim]rendered in [not dim]{:.1}ms[/] (cold cache)", cold_time.as_secs_f64() * 1000.0),
+        &format!(
+            "[dim]rendered in [not dim]{:.1}ms[/] (cold cache)",
+            cold_time.as_secs_f64() * 1000.0
+        ),
         false,
     )
     .unwrap();
     let timing_warm = Text::from_markup(
-        &format!("[dim]rendered in [not dim]{:.1}ms[/] (warm cache)", warm_time.as_secs_f64() * 1000.0),
+        &format!(
+            "[dim]rendered in [not dim]{:.1}ms[/] (warm cache)",
+            warm_time.as_secs_f64() * 1000.0
+        ),
         false,
     )
     .unwrap();

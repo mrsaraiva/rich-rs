@@ -25,7 +25,11 @@ impl Group {
         I: IntoIterator<Item = R>,
         R: Renderable + 'static,
     {
-        Self::from_arcs(renderables.into_iter().map(|r| Arc::new(r) as Arc<dyn Renderable>))
+        Self::from_arcs(
+            renderables
+                .into_iter()
+                .map(|r| Arc::new(r) as Arc<dyn Renderable>),
+        )
     }
 
     /// Create a Group from an iterator of `Arc<dyn Renderable>`.
@@ -117,7 +121,11 @@ mod tests {
         let group = Group::new([Text::plain("A"), Text::plain("B")]);
         let console = Console::new();
         let options = console.options();
-        let rendered: String = group.render(&console, options).iter().map(|s| s.text.to_string()).collect();
+        let rendered: String = group
+            .render(&console, options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
         assert!(rendered.contains('\n'));
     }
 

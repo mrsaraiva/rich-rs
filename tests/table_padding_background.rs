@@ -24,7 +24,8 @@ fn table_vertical_padding_inherits_cell_background() {
     // Line 1: second column should have a trailing padding space with background style.
     let has_bg_trailing_space = lines[0].iter().any(|seg| {
         seg.text.as_ref() == " "
-            && seg.style
+            && seg
+                .style
                 .is_some_and(|s| s.bgcolor == Some(SimpleColor::Rgb { r: 1, g: 2, b: 3 }))
     });
     assert!(has_bg_trailing_space);
@@ -32,7 +33,8 @@ fn table_vertical_padding_inherits_cell_background() {
     // Line 2: second column should be a blank line padded to column width with background style.
     let has_bg_blank_line = lines[1].iter().any(|seg| {
         seg.text.as_ref() == "  "
-            && seg.style
+            && seg
+                .style
                 .is_some_and(|s| s.bgcolor == Some(SimpleColor::Rgb { r: 1, g: 2, b: 3 }))
     });
     assert!(has_bg_blank_line);

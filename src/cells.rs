@@ -309,9 +309,9 @@ mod tests {
     }
 }
 
-    #[test]
-    fn test_half_block_width() {
-        // Half-block character used in ColorBox
-        assert_eq!(cell_len("▄"), 1, "half-block should be 1 cell");
-        assert_eq!(cell_len("▄▄▄"), 3, "three half-blocks should be 3 cells");
-    }
+#[test]
+fn test_half_block_width() {
+    // Half-block character used in ColorBox
+    assert_eq!(cell_len("▄"), 1, "half-block should be 1 cell");
+    assert_eq!(cell_len("▄▄▄"), 3, "three half-blocks should be 3 cells");
+}

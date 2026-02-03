@@ -4,13 +4,13 @@
 
 use std::sync::Arc;
 
+use crate::Renderable;
 use crate::console::Console;
 use crate::console::ConsoleOptions;
 use crate::group::Group;
 use crate::loop_helpers::loop_last;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
-use crate::Renderable;
 
 /// A renderable that fills the terminal screen and crops excess.
 ///

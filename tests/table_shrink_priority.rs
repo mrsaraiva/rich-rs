@@ -1,6 +1,6 @@
 use rich_rs::{
-    ColorSystem, Column, Console, ConsoleOptions, JustifyMethod, Measurement, Renderable, Row, Table,
-    Text,
+    ColorSystem, Column, Console, ConsoleOptions, JustifyMethod, Measurement, Renderable, Row,
+    Table, Text,
 };
 use std::io::Stdout;
 
@@ -32,7 +32,12 @@ fn fixed_feature_column_width_survives_last_resort_shrink() {
     // Force a scenario where the table's measured minimum widths exceed max_width,
     // which triggers the "last resort" shrink path.
     let mut table = Table::grid().with_padding(1, 1).with_pad_edge(true);
-    table.add_column(Column::new().no_wrap(true).justify(JustifyMethod::Center).width(12));
+    table.add_column(
+        Column::new()
+            .no_wrap(true)
+            .justify(JustifyMethod::Center)
+            .width(12),
+    );
     table.add_column(Column::new());
     table.add_row(Row::new(vec![
         Box::new(Text::plain("Colors")),

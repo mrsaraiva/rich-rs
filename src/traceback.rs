@@ -23,16 +23,16 @@ use std::fs;
 use std::io::Stdout;
 use std::path::Path;
 
-use crate::console::{Console, ConsoleOptions};
-use crate::highlighter::{path_highlighter, repr_highlighter, Highlighter, RegexHighlighter};
-use crate::measure::Measurement;
+use crate::Renderable;
 use crate::r#box::ROUNDED;
+use crate::console::{Console, ConsoleOptions};
+use crate::highlighter::{Highlighter, RegexHighlighter, path_highlighter, repr_highlighter};
+use crate::measure::Measurement;
 use crate::scope::render_scope;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
 use crate::syntax::Syntax;
 use crate::text::Text;
-use crate::Renderable;
 
 // ============================================================================
 // Constants
@@ -621,7 +621,6 @@ impl Traceback {
 unsafe impl Send for Traceback {}
 unsafe impl Sync for Traceback {}
 
-
 // ============================================================================
 // Styles
 // ============================================================================
@@ -683,7 +682,10 @@ impl Renderable for Traceback {
         let mut result = Segments::new();
 
         // Get display width
-        let width = self.width.unwrap_or(options.max_width).min(options.max_width);
+        let width = self
+            .width
+            .unwrap_or(options.max_width)
+            .min(options.max_width);
         let code_width = width.saturating_sub(8); // Leave room for line numbers and borders
 
         // Render stacks in reverse order (most recent exception last)
@@ -703,7 +705,10 @@ impl Renderable for Traceback {
 
                 // Create panel title
                 let mut title = Text::styled("Traceback ", traceback_title_style());
-                title.append("(most recent call last)", Some(traceback_title_style().with_dim(true)));
+                title.append(
+                    "(most recent call last)",
+                    Some(traceback_title_style().with_dim(true)),
+                );
 
                 // Render panel border manually
                 let border_style = traceback_border_style();
@@ -718,41 +723,71 @@ impl Renderable for Traceback {
                 let right_pad = title_pad - left_pad;
 
                 // Top line: ╭─ Title ─────────────────╮
-                result.push(Segment::styled(box_chars.top_left.to_string(), border_style));
-                result.push(Segment::styled(box_chars.top.to_string().repeat(left_pad + 1), border_style));
+                result.push(Segment::styled(
+                    box_chars.top_left.to_string(),
+                    border_style,
+                ));
+                result.push(Segment::styled(
+                    box_chars.top.to_string().repeat(left_pad + 1),
+                    border_style,
+                ));
                 result.extend(title.render(console, options));
-                result.push(Segment::styled(box_chars.top.to_string().repeat(right_pad + 1), border_style));
-                result.push(Segment::styled(box_chars.top_right.to_string(), border_style));
+                result.push(Segment::styled(
+                    box_chars.top.to_string().repeat(right_pad + 1),
+                    border_style,
+                ));
+                result.push(Segment::styled(
+                    box_chars.top_right.to_string(),
+                    border_style,
+                ));
                 result.push(Segment::line());
 
                 // Content lines with side borders
                 let segment_vec: Vec<Segment> = stack_segments.iter().cloned().collect();
                 let content_lines = Segment::split_lines(segment_vec);
                 for line_segments in content_lines {
-                    result.push(Segment::styled(format!("{} ", box_chars.mid_left), border_style));
+                    result.push(Segment::styled(
+                        format!("{} ", box_chars.mid_left),
+                        border_style,
+                    ));
                     result.extend(line_segments.into_iter().map(|s| Segment::from(s)));
                     // Pad to width
-                    let line_width: usize = result.iter().skip(result.len().saturating_sub(10))
+                    let line_width: usize = result
+                        .iter()
+                        .skip(result.len().saturating_sub(10))
                         .map(|s| crate::cells::cell_len(&s.text))
                         .sum();
                     let padding = inner_width.saturating_sub(line_width.saturating_sub(2));
                     if padding > 0 {
                         result.push(Segment::new(" ".repeat(padding)));
                     }
-                    result.push(Segment::styled(format!(" {}", box_chars.mid_right), border_style));
+                    result.push(Segment::styled(
+                        format!(" {}", box_chars.mid_right),
+                        border_style,
+                    ));
                     result.push(Segment::line());
                 }
 
                 // Bottom border
-                result.push(Segment::styled(box_chars.bottom_left.to_string(), border_style));
-                result.push(Segment::styled(box_chars.bottom.to_string().repeat(inner_width), border_style));
-                result.push(Segment::styled(box_chars.bottom_right.to_string(), border_style));
+                result.push(Segment::styled(
+                    box_chars.bottom_left.to_string(),
+                    border_style,
+                ));
+                result.push(Segment::styled(
+                    box_chars.bottom.to_string().repeat(inner_width),
+                    border_style,
+                ));
+                result.push(Segment::styled(
+                    box_chars.bottom_right.to_string(),
+                    border_style,
+                ));
                 result.push(Segment::line());
             }
 
             // Render syntax error if present
             if let Some(ref syntax_error) = stack.syntax_error {
-                let syntax_error_segments = self.render_syntax_error_content(syntax_error, console, options);
+                let syntax_error_segments =
+                    self.render_syntax_error_content(syntax_error, console, options);
                 result.extend(syntax_error_segments);
                 result.push(Segment::line());
             }
@@ -783,7 +818,10 @@ impl Renderable for Traceback {
 
     fn measure(&self, _console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
         // Traceback width is configurable, use it or max_width
-        let width = self.width.unwrap_or(options.max_width).min(options.max_width);
+        let width = self
+            .width
+            .unwrap_or(options.max_width)
+            .min(options.max_width);
         Measurement::new(width, width)
     }
 }
@@ -980,7 +1018,10 @@ impl Traceback {
         repr_hl.highlight(&mut error_line);
 
         // Underline the error position
-        let offset = error.offset.saturating_sub(1).min(error_line.plain_text().len());
+        let offset = error
+            .offset
+            .saturating_sub(1)
+            .min(error_line.plain_text().len());
         if offset < error_line.plain_text().len() {
             error_line.stylize(
                 offset,
@@ -1189,8 +1230,7 @@ mod tests {
 
     #[test]
     fn test_frame_with_line() {
-        let frame = Frame::new("test.rs", 10, "test")
-            .with_line("    let x = 42;");
+        let frame = Frame::new("test.rs", 10, "test").with_line("    let x = 42;");
         assert_eq!(frame.line, "    let x = 42;");
     }
 
@@ -1228,8 +1268,7 @@ mod tests {
 
     #[test]
     fn test_syntax_error_info_with_line() {
-        let info = SyntaxErrorInfo::new("test.rs", 5, 10, "error")
-            .with_line("let x = ;");
+        let info = SyntaxErrorInfo::new("test.rs", 5, 10, "error").with_line("let x = ;");
         assert_eq!(info.line, "let x = ;");
     }
 
@@ -1254,10 +1293,7 @@ mod tests {
 
     #[test]
     fn test_stack_with_frames() {
-        let frames = vec![
-            Frame::new("a.rs", 1, "a"),
-            Frame::new("b.rs", 2, "b"),
-        ];
+        let frames = vec![Frame::new("a.rs", 1, "a"), Frame::new("b.rs", 2, "b")];
         let stack = Stack::new("Error", "msg").with_frames(frames);
         assert_eq!(stack.frame_count(), 2);
     }
@@ -1485,10 +1521,8 @@ mod tests {
     fn test_traceback_render_basic() {
         use crate::{Console, Renderable};
 
-        let frame = Frame::new("test.rs", 42, "test_function")
-            .with_line("    let x = 42;");
-        let stack = Stack::new("RuntimeError", "Something went wrong")
-            .with_frame(frame);
+        let frame = Frame::new("test.rs", 42, "test_function").with_line("    let x = 42;");
+        let stack = Stack::new("RuntimeError", "Something went wrong").with_frame(frame);
         let trace = Trace::new(vec![stack]);
         let tb = Traceback::new(trace);
 
@@ -1513,13 +1547,12 @@ mod tests {
         // Create chained exception (stack order matters for rendering)
         // Stacks are rendered in reverse order, so stack1 appears first in output
         let frame1 = Frame::new("inner.rs", 10, "inner_fn");
-        let stack1 = Stack::new("ValueError", "inner error")
-            .with_frame(frame1);
+        let stack1 = Stack::new("ValueError", "inner error").with_frame(frame1);
 
         let frame2 = Frame::new("outer.rs", 20, "outer_fn");
         let stack2 = Stack::new("RuntimeError", "outer error")
             .with_frame(frame2)
-            .with_is_cause(true);  // This stack was caused by the previous one
+            .with_is_cause(true); // This stack was caused by the previous one
 
         let trace = Trace::new(vec![stack1, stack2]);
         let tb = Traceback::new(trace);
@@ -1556,11 +1589,10 @@ mod tests {
     fn test_traceback_render_syntax_error() {
         use crate::{Console, Renderable};
 
-        let syntax_err = SyntaxErrorInfo::new("test.py", 5, 10, "unexpected token")
-            .with_line("def foo(:");
+        let syntax_err =
+            SyntaxErrorInfo::new("test.py", 5, 10, "unexpected token").with_line("def foo(:");
 
-        let stack = Stack::new("SyntaxError", "invalid syntax")
-            .with_syntax_error(syntax_err);
+        let stack = Stack::new("SyntaxError", "invalid syntax").with_syntax_error(syntax_err);
         let trace = Trace::new(vec![stack]);
         let tb = Traceback::new(trace);
 

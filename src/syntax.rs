@@ -27,6 +27,7 @@ use syntect::highlighting::{Style as SyntectStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
+use crate::Renderable;
 use crate::cells::cell_len;
 use crate::color::SimpleColor as Color;
 use crate::console::{Console, ConsoleOptions, OverflowMethod};
@@ -35,7 +36,6 @@ use crate::padding::PaddingDimensions;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
 use crate::text::Text;
-use crate::Renderable;
 
 // ============================================================================
 // Static syntax and theme sets
@@ -115,8 +115,8 @@ pub const NUMBERS_COLUMN_DEFAULT_PADDING: usize = 2;
 
 /// ANSI-friendly style mappings for light terminals.
 pub mod ansi_light {
-    use crate::style::Style;
     use crate::color::SimpleColor as Color;
+    use crate::style::Style;
 
     pub fn comment() -> Style {
         Style::new().with_dim(true)
@@ -140,10 +140,14 @@ pub mod ansi_light {
         Style::new().with_color(Color::Standard(2)) // green
     }
     pub fn name_namespace() -> Style {
-        Style::new().with_color(Color::Standard(6)).with_underline(true) // cyan underlined
+        Style::new()
+            .with_color(Color::Standard(6))
+            .with_underline(true) // cyan underlined
     }
     pub fn name_class() -> Style {
-        Style::new().with_color(Color::Standard(2)).with_underline(true) // green underlined
+        Style::new()
+            .with_color(Color::Standard(2))
+            .with_underline(true) // green underlined
     }
     pub fn name_decorator() -> Style {
         Style::new().with_color(Color::Standard(5)).with_bold(true) // magenta bold
@@ -164,14 +168,16 @@ pub mod ansi_light {
         Style::new().with_color(Color::Standard(4)) // blue
     }
     pub fn error() -> Style {
-        Style::new().with_color(Color::Standard(1)).with_underline(true) // red underlined
+        Style::new()
+            .with_color(Color::Standard(1))
+            .with_underline(true) // red underlined
     }
 }
 
 /// ANSI-friendly style mappings for dark terminals.
 pub mod ansi_dark {
-    use crate::style::Style;
     use crate::color::SimpleColor as Color;
+    use crate::style::Style;
 
     pub fn comment() -> Style {
         Style::new().with_dim(true)
@@ -195,10 +201,14 @@ pub mod ansi_dark {
         Style::new().with_color(Color::Standard(10)) // bright green
     }
     pub fn name_namespace() -> Style {
-        Style::new().with_color(Color::Standard(14)).with_underline(true) // bright cyan underlined
+        Style::new()
+            .with_color(Color::Standard(14))
+            .with_underline(true) // bright cyan underlined
     }
     pub fn name_class() -> Style {
-        Style::new().with_color(Color::Standard(10)).with_underline(true) // bright green underlined
+        Style::new()
+            .with_color(Color::Standard(10))
+            .with_underline(true) // bright green underlined
     }
     pub fn name_decorator() -> Style {
         Style::new().with_color(Color::Standard(13)).with_bold(true) // bright magenta bold
@@ -219,7 +229,9 @@ pub mod ansi_dark {
         Style::new().with_color(Color::Standard(12)) // bright blue
     }
     pub fn error() -> Style {
-        Style::new().with_color(Color::Standard(1)).with_underline(true) // red underlined
+        Style::new()
+            .with_color(Color::Standard(1))
+            .with_underline(true) // red underlined
     }
 }
 
@@ -250,12 +262,10 @@ pub struct SyntectTheme {
 impl SyntectTheme {
     /// Create a new syntect-based theme.
     pub fn new(theme: Theme) -> Self {
-        let bg_color = theme.settings.background.map(|c| {
-            Color::Rgb {
-                r: c.r,
-                g: c.g,
-                b: c.b,
-            }
+        let bg_color = theme.settings.background.map(|c| Color::Rgb {
+            r: c.r,
+            g: c.g,
+            b: c.b,
         });
         let background_style = match bg_color {
             Some(c) => Style::new().with_bgcolor(c),
@@ -599,8 +609,7 @@ impl Syntax {
         // Try to detect from content
         if let Some(code) = code {
             // Simple heuristics
-            if code.starts_with("#!/usr/bin/env python") || code.starts_with("#!/usr/bin/python")
-            {
+            if code.starts_with("#!/usr/bin/env python") || code.starts_with("#!/usr/bin/python") {
                 return "python".to_string();
             }
             if code.starts_with("#!/bin/bash") || code.starts_with("#!/usr/bin/env bash") {
@@ -903,10 +912,8 @@ impl Syntax {
             }
         } else {
             // For ANSI themes without syntect theme, use plain highlighting
-            let mut highlighter = HighlightLines::new(
-                syntax,
-                &THEME_SET.themes[FALLBACK_SYNTECT_THEME],
-            );
+            let mut highlighter =
+                HighlightLines::new(syntax, &THEME_SET.themes[FALLBACK_SYNTECT_THEME]);
 
             for line in LinesWithEndings::from(&processed_code) {
                 match highlighter.highlight_line(line, &SYNTAX_SET) {
@@ -1179,9 +1186,8 @@ impl Renderable for Syntax {
 
                 if is_highlighted {
                     // Highlighted line: red pointer, bold number
-                    let pointer_style = base_style.combine(
-                        &Style::new().with_color(Color::Standard(1)).with_bold(true),
-                    );
+                    let pointer_style = base_style
+                        .combine(&Style::new().with_color(Color::Standard(1)).with_bold(true));
                     result.push(Segment::styled(pointer.to_string(), pointer_style));
                     result.push(Segment::styled(line_num_str, highlight_number_style));
                 } else {
@@ -1233,7 +1239,10 @@ impl Renderable for Syntax {
             line_options.no_wrap = true;
             line_options.overflow = Some(OverflowMethod::Crop);
 
-            let line_segments: Vec<Segment> = line_to_render.render(console, &line_options).into_iter().collect();
+            let line_segments: Vec<Segment> = line_to_render
+                .render(console, &line_options)
+                .into_iter()
+                .collect();
             let adjusted =
                 Segment::adjust_line_length(&line_segments, content_width, Some(base_style), true);
             for seg in adjusted {
@@ -1372,10 +1381,16 @@ mod tests {
         assert!(themes.contains(&"ansi_light"));
         // Check embedded themes are listed
         assert!(themes.contains(&"dracula"), "Should contain dracula theme");
-        assert!(themes.contains(&"gruvbox-dark"), "Should contain gruvbox-dark theme");
+        assert!(
+            themes.contains(&"gruvbox-dark"),
+            "Should contain gruvbox-dark theme"
+        );
         assert!(themes.contains(&"nord"), "Should contain nord theme");
         assert!(themes.contains(&"monokai"), "Should contain monokai theme");
-        assert!(themes.contains(&"monokai-plus"), "Should contain monokai-plus theme");
+        assert!(
+            themes.contains(&"monokai-plus"),
+            "Should contain monokai-plus theme"
+        );
     }
 
     #[test]
@@ -1492,7 +1507,11 @@ mod tests {
     fn test_syntect_theme() {
         // Test that the fallback syntect theme exists
         let theme = SyntectTheme::from_name(FALLBACK_SYNTECT_THEME);
-        assert!(theme.is_some(), "Fallback theme '{}' should exist", FALLBACK_SYNTECT_THEME);
+        assert!(
+            theme.is_some(),
+            "Fallback theme '{}' should exist",
+            FALLBACK_SYNTECT_THEME
+        );
         let theme = theme.unwrap();
         assert!(theme.syntect_theme().is_some());
 

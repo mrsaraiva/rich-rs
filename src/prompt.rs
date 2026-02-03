@@ -27,8 +27,8 @@
 
 use std::io;
 
-use crate::text::Text;
 use crate::Console;
+use crate::text::Text;
 
 // ============================================================================
 // Errors
@@ -60,9 +60,7 @@ impl std::error::Error for PromptError {}
 impl From<io::Error> for PromptError {
     fn from(err: io::Error) -> Self {
         match err.kind() {
-            io::ErrorKind::UnexpectedEof | io::ErrorKind::Interrupted => {
-                PromptError::Interrupted
-            }
+            io::ErrorKind::UnexpectedEof | io::ErrorKind::Interrupted => PromptError::Interrupted,
             _ => PromptError::Io(err.to_string()),
         }
     }
@@ -113,7 +111,8 @@ pub trait PromptBase<T> {
     const VALIDATE_ERROR_MESSAGE: &'static str = "[prompt.invalid]Please enter a valid value";
 
     /// The error message for invalid choices.
-    const ILLEGAL_CHOICE_MESSAGE: &'static str = "[prompt.invalid.choice]Please select one of the available options";
+    const ILLEGAL_CHOICE_MESSAGE: &'static str =
+        "[prompt.invalid.choice]Please select one of the available options";
 
     /// The prompt suffix.
     const PROMPT_SUFFIX: &'static str = ": ";

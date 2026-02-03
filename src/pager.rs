@@ -76,9 +76,7 @@ impl SystemPager {
                 if let Some((cmd, args)) = parts.split_first() {
                     let mut args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
                     // Add -R flag for styles if using less and styles enabled
-                    if self.styles
-                        && cmd.ends_with("less")
-                        && !args.iter().any(|a| a.contains('R'))
+                    if self.styles && cmd.ends_with("less") && !args.iter().any(|a| a.contains('R'))
                     {
                         args.push("-R".to_string());
                     }
@@ -132,10 +130,7 @@ impl SystemPager {
 
     /// Run the pager with the given content.
     fn run_pager(&self, cmd: &str, args: &[String], content: &str) -> io::Result<()> {
-        let mut child = Command::new(cmd)
-            .args(args)
-            .stdin(Stdio::piped())
-            .spawn()?;
+        let mut child = Command::new(cmd).args(args).stdin(Stdio::piped()).spawn()?;
 
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(content.as_bytes())?;

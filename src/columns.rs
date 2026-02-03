@@ -238,12 +238,14 @@ impl Columns {
                 let mut fits = true;
 
                 for idx in self.iter_indices(column_count) {
-                    let w = idx.and_then(|i| renderable_widths.get(i).copied()).unwrap_or(0);
+                    let w = idx
+                        .and_then(|i| renderable_widths.get(i).copied())
+                        .unwrap_or(0);
                     let entry = widths.entry(column_no).or_insert(0);
                     *entry = (*entry).max(w);
 
-                    let total_width: usize =
-                        widths.values().sum::<usize>() + width_padding * widths.len().saturating_sub(1);
+                    let total_width: usize = widths.values().sum::<usize>()
+                        + width_padding * widths.len().saturating_sub(1);
 
                     if total_width > max_width {
                         column_count = widths.len().saturating_sub(1).max(1);
@@ -289,7 +291,8 @@ impl Columns {
                     // Get the renderable and render it to text
                     let r = &self.renderables[ridx];
                     let segments = r.render(console, options);
-                    let text_content: String = segments.iter().map(|s| s.text.to_string()).collect();
+                    let text_content: String =
+                        segments.iter().map(|s| s.text.to_string()).collect();
                     let text = Text::plain(&text_content);
 
                     // Wrap in alignment if specified
@@ -354,7 +357,11 @@ impl Columns {
                 let extra = item_count % column_count;
 
                 // This column's length
-                let col_length = if col < extra { base_per_col + 1 } else { base_per_col };
+                let col_length = if col < extra {
+                    base_per_col + 1
+                } else {
+                    base_per_col
+                };
 
                 if row >= col_length {
                     None // This cell is empty
@@ -464,10 +471,8 @@ mod tests {
 
     #[test]
     fn test_columns_with_expand() {
-        let items: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-            Box::new(Text::plain("A")),
-            Box::new(Text::plain("B")),
-        ];
+        let items: Vec<Box<dyn Renderable + Send + Sync>> =
+            vec![Box::new(Text::plain("A")), Box::new(Text::plain("B"))];
         let columns = Columns::new(items).with_expand(true);
         assert!(columns.expand);
     }

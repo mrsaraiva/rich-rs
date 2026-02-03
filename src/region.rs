@@ -15,7 +15,12 @@ pub struct Region {
 impl Region {
     /// Create a new region.
     pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// Create a region at origin.

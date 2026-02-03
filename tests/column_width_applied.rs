@@ -11,7 +11,12 @@ fn fixed_feature_column_width_is_respected() {
     console.set_size(80, 10);
 
     let mut table = Table::grid().with_padding(1, 1).with_pad_edge(true);
-    table.add_column(Column::new().no_wrap(true).justify(JustifyMethod::Center).width(12));
+    table.add_column(
+        Column::new()
+            .no_wrap(true)
+            .justify(JustifyMethod::Center)
+            .width(12),
+    );
     table.add_column(Column::new());
     table.add_row(Row::new(vec![
         Box::new(Text::plain("Colors")),
@@ -24,7 +29,10 @@ fn fixed_feature_column_width_is_respected() {
     // Expect: 1 left pad + 3 center pad = 4 spaces, then "Colors", then 3 center + 1 right pad = 4.
     // So "X" begins at index 14.
     let plain = strip_ansi(&out);
-    let line = plain.lines().find(|l| l.contains("Colors")).expect("missing row");
+    let line = plain
+        .lines()
+        .find(|l| l.contains("Colors"))
+        .expect("missing row");
     assert_eq!(
         line.find('X'),
         Some(14),
@@ -50,4 +58,3 @@ fn strip_ansi(s: &str) -> String {
     }
     out
 }
-

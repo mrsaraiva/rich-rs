@@ -19,15 +19,15 @@
 use std::collections::BTreeMap;
 use std::io::Stdout;
 
+use crate::Renderable;
 use crate::console::{Console, ConsoleOptions, JustifyMethod};
-use crate::highlighter::{repr_highlighter, Highlighter};
+use crate::highlighter::{Highlighter, repr_highlighter};
 use crate::measure::Measurement;
 use crate::panel::Panel;
 use crate::segment::Segments;
 use crate::style::Style;
 use crate::table::{Column, Row, Table};
 use crate::text::Text;
-use crate::Renderable;
 
 // ============================================================================
 // Styles
@@ -162,9 +162,7 @@ unsafe impl Sync for ScopeRenderable {}
 impl Renderable for ScopeRenderable {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         // Create a grid table (no borders, minimal padding)
-        let mut table = Table::grid()
-            .with_padding(0, 1)
-            .with_expand(false);
+        let mut table = Table::grid().with_padding(0, 1).with_expand(false);
 
         // Add columns: key (right-justified) and value
         let key_column = Column::new().justify(JustifyMethod::Right);
@@ -204,10 +202,8 @@ impl Renderable for ScopeRenderable {
             }
 
             // Create row
-            let cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![
-                Box::new(key_text),
-                Box::new(value_text),
-            ];
+            let cells: Vec<Box<dyn Renderable + Send + Sync>> =
+                vec![Box::new(key_text), Box::new(value_text)];
             table.add_row(Row::new(cells));
         }
 

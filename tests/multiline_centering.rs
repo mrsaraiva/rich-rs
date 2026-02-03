@@ -31,7 +31,10 @@ fn multiline_centered_text_does_not_shift_right_per_line() {
     let _ = console.print(&table, None, None, None, false, "");
     let plain = strip_ansi(&console.get_captured());
 
-    let asian = plain.lines().find(|l| l.contains("Asian")).expect("missing Asian line");
+    let asian = plain
+        .lines()
+        .find(|l| l.contains("Asian"))
+        .expect("missing Asian line");
     let language = plain
         .lines()
         .find(|l| l.contains("language"))
@@ -53,8 +56,7 @@ fn multiline_centered_text_does_not_shift_right_per_line() {
         "expected 'Asian' to start 1 cell right of 'language', got:\n{asian:?}\n{language:?}"
     );
     assert_eq!(
-        l,
-        s,
+        l, s,
         "expected 'language' and 'support' to start at same column, got:\n{language:?}\n{support:?}"
     );
 }
@@ -76,4 +78,3 @@ fn strip_ansi(s: &str) -> String {
     }
     out
 }
-

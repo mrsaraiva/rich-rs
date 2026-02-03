@@ -12,7 +12,9 @@ pub struct Control {
 
 impl Control {
     pub fn new() -> Self {
-        Self { controls: Vec::new() }
+        Self {
+            controls: Vec::new(),
+        }
     }
 
     pub fn home() -> Self {
