@@ -83,7 +83,7 @@ pub use error::{ParseError, Result as ParseResult};
 pub use measure::{Measurement, measure_renderables};
 pub use segment::{ControlType, Segment, Segments};
 pub use control::Control;
-pub use style::{NULL_STYLE, Style, StyleMeta};
+pub use style::{MetaValue, NULL_STYLE, Style, StyleMeta};
 pub use text::{Span, Text, TextPart};
 pub use theme::{Theme, ThemeError, ThemeStack, default_styles};
 pub use wrap::divide_line;

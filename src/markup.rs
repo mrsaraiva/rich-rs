@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use crate::emoji::Emoji;
 use crate::error::{ParseError, Result};
-use crate::style::{Style, StyleMeta};
+use crate::style::{MetaValue, Style, StyleMeta};
 use crate::text::{Span, Text};
 
 /// A parsed markup tag.
@@ -281,10 +281,13 @@ pub fn render(markup: &str, emoji: bool) -> Result<Text> {
                 if open_tag.name.starts_with('@') {
                     // Metadata tag - used by Textual for event handlers.
                     let mut meta_map = BTreeMap::new();
-                    meta_map.insert(
-                        open_tag.name.clone(),
-                        open_tag.parameters.clone().unwrap_or_default(),
-                    );
+                    let value = match open_tag.parameters.as_deref().map(str::trim) {
+                        None => MetaValue::None,
+                        Some("") => MetaValue::None,
+                        Some(params) => MetaValue::parse_python_literal(params)
+                            .unwrap_or_else(|| MetaValue::str(params.to_string())),
+                    };
+                    meta_map.insert(open_tag.name.clone(), value);
                     let meta = StyleMeta {
                         meta: Some(Arc::new(meta_map)),
                         ..Default::default()
@@ -335,7 +338,13 @@ pub fn render(markup: &str, emoji: bool) -> Result<Text> {
     while let Some((start, tag)) = style_stack.pop() {
         if tag.name.starts_with('@') {
             let mut meta_map = BTreeMap::new();
-            meta_map.insert(tag.name.clone(), tag.parameters.clone().unwrap_or_default());
+            let value = match tag.parameters.as_deref().map(str::trim) {
+                None => MetaValue::None,
+                Some("") => MetaValue::None,
+                Some(params) => MetaValue::parse_python_literal(params)
+                    .unwrap_or_else(|| MetaValue::str(params.to_string())),
+            };
+            meta_map.insert(tag.name.clone(), value);
             let meta = StyleMeta {
                 meta: Some(Arc::new(meta_map)),
                 ..Default::default()
@@ -579,7 +588,7 @@ mod tests {
         assert!(text.spans()[0].style.is_null());
         let meta = text.spans()[0].meta.as_ref().unwrap();
         let meta_map = meta.meta.as_ref().unwrap();
-        assert_eq!(meta_map.get("@foo").map(|s| s.as_str()), Some(""));
+        assert_eq!(meta_map.get("@foo"), Some(&MetaValue::None));
     }
 
     #[test]

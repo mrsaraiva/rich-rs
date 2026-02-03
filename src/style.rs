@@ -455,7 +455,7 @@ pub struct StyleMeta {
     /// Link ID for grouping multiple segments with the same link.
     pub link_id: Option<Arc<str>>,
     /// Custom metadata (used by Textual for event handlers).
-    pub meta: Option<Arc<BTreeMap<String, String>>>,
+    pub meta: Option<Arc<BTreeMap<String, MetaValue>>>,
 }
 
 impl StyleMeta {
@@ -493,6 +493,282 @@ impl StyleMeta {
                 (None, None) => None,
             },
         }
+    }
+}
+
+/// Structured metadata values (used by Textual handlers and richer annotations).
+///
+/// This is intentionally deterministic and `Eq` so it can be compared / merged
+/// and used in segment simplification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MetaValue {
+    None,
+    Bool(bool),
+    Int(i64),
+    Str(Arc<str>),
+    List(Vec<MetaValue>),
+    Tuple(Vec<MetaValue>),
+    Map(BTreeMap<String, MetaValue>),
+}
+
+impl Default for MetaValue {
+    fn default() -> Self {
+        MetaValue::None
+    }
+}
+
+impl MetaValue {
+    pub fn str(value: impl Into<Arc<str>>) -> Self {
+        MetaValue::Str(value.into())
+    }
+
+    /// Parse a small, deterministic subset of Python literals (like `ast.literal_eval`).
+    ///
+    /// Supported:
+    /// - `None`, `True`, `False`
+    /// - integers (base-10)
+    /// - quoted strings `'...'` / `"..."` with basic escapes
+    /// - lists `[a, b]`
+    /// - tuples `(a, b)` (single element tuples require a trailing comma, like Python)
+    /// - dicts `{'k': 1}` (string keys only)
+    pub fn parse_python_literal(input: &str) -> Option<Self> {
+        struct Parser<'a> {
+            s: &'a str,
+            i: usize,
+        }
+
+        impl<'a> Parser<'a> {
+            fn new(s: &'a str) -> Self {
+                Self { s, i: 0 }
+            }
+
+            fn is_eof(&self) -> bool {
+                self.i >= self.s.len()
+            }
+
+            fn rest(&self) -> &'a str {
+                &self.s[self.i..]
+            }
+
+            fn skip_ws(&mut self) {
+                while let Some(ch) = self.peek() {
+                    if ch.is_whitespace() {
+                        self.bump(ch);
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            fn peek(&self) -> Option<char> {
+                self.rest().chars().next()
+            }
+
+            fn bump(&mut self, ch: char) {
+                self.i += ch.len_utf8();
+            }
+
+            fn eat(&mut self, expected: char) -> bool {
+                self.skip_ws();
+                if self.peek() == Some(expected) {
+                    self.bump(expected);
+                    true
+                } else {
+                    false
+                }
+            }
+
+            fn parse_value(&mut self) -> Option<MetaValue> {
+                self.skip_ws();
+                let ch = self.peek()?;
+
+                match ch {
+                    '\'' | '"' => self.parse_string().map(|s| MetaValue::Str(Arc::from(s))),
+                    '[' => self.parse_list(),
+                    '{' => self.parse_map(),
+                    '(' => self.parse_parens(),
+                    '-' | '0'..='9' => self.parse_int().map(MetaValue::Int),
+                    _ => self.parse_ident_or_keyword(),
+                }
+            }
+
+            fn parse_ident_or_keyword(&mut self) -> Option<MetaValue> {
+                self.skip_ws();
+                let start = self.i;
+                while let Some(ch) = self.peek() {
+                    if ch.is_ascii_alphanumeric() || ch == '_' {
+                        self.bump(ch);
+                    } else {
+                        break;
+                    }
+                }
+                if self.i == start {
+                    return None;
+                }
+                let ident = &self.s[start..self.i];
+                match ident {
+                    "None" => Some(MetaValue::None),
+                    "True" => Some(MetaValue::Bool(true)),
+                    "False" => Some(MetaValue::Bool(false)),
+                    _ => None,
+                }
+            }
+
+            fn parse_int(&mut self) -> Option<i64> {
+                self.skip_ws();
+                let start = self.i;
+                if self.peek() == Some('-') {
+                    self.bump('-');
+                }
+                let mut saw_digit = false;
+                while let Some(ch) = self.peek() {
+                    if ch.is_ascii_digit() {
+                        saw_digit = true;
+                        self.bump(ch);
+                    } else {
+                        break;
+                    }
+                }
+                if !saw_digit {
+                    self.i = start;
+                    return None;
+                }
+                self.s[start..self.i].parse::<i64>().ok()
+            }
+
+            fn parse_string(&mut self) -> Option<String> {
+                self.skip_ws();
+                let quote = self.peek()?;
+                if quote != '\'' && quote != '"' {
+                    return None;
+                }
+                self.bump(quote);
+                let mut out = String::new();
+                while let Some(ch) = self.peek() {
+                    self.bump(ch);
+                    if ch == quote {
+                        return Some(out);
+                    }
+                    if ch == '\\' {
+                        let esc = self.peek()?;
+                        self.bump(esc);
+                        match esc {
+                            'n' => out.push('\n'),
+                            'r' => out.push('\r'),
+                            't' => out.push('\t'),
+                            '\\' => out.push('\\'),
+                            '\'' => out.push('\''),
+                            '"' => out.push('"'),
+                            other => out.push(other),
+                        }
+                    } else {
+                        out.push(ch);
+                    }
+                }
+                None
+            }
+
+            fn parse_list(&mut self) -> Option<MetaValue> {
+                if !self.eat('[') {
+                    return None;
+                }
+                let mut items = Vec::new();
+                loop {
+                    self.skip_ws();
+                    if self.eat(']') {
+                        break;
+                    }
+                    let value = self.parse_value()?;
+                    items.push(value);
+                    self.skip_ws();
+                    if self.eat(']') {
+                        break;
+                    }
+                    if !self.eat(',') {
+                        return None;
+                    }
+                }
+                Some(MetaValue::List(items))
+            }
+
+            fn parse_map(&mut self) -> Option<MetaValue> {
+                if !self.eat('{') {
+                    return None;
+                }
+                let mut map: BTreeMap<String, MetaValue> = BTreeMap::new();
+                loop {
+                    self.skip_ws();
+                    if self.eat('}') {
+                        break;
+                    }
+                    let key = match self.parse_value()? {
+                        MetaValue::Str(s) => s.to_string(),
+                        _ => return None,
+                    };
+                    if !self.eat(':') {
+                        return None;
+                    }
+                    let value = self.parse_value()?;
+                    map.insert(key, value);
+                    self.skip_ws();
+                    if self.eat('}') {
+                        break;
+                    }
+                    if !self.eat(',') {
+                        return None;
+                    }
+                }
+                Some(MetaValue::Map(map))
+            }
+
+            fn parse_parens(&mut self) -> Option<MetaValue> {
+                if !self.eat('(') {
+                    return None;
+                }
+                self.skip_ws();
+                if self.eat(')') {
+                    return Some(MetaValue::Tuple(Vec::new()));
+                }
+
+                let first = self.parse_value()?;
+                self.skip_ws();
+
+                // If there's no comma, treat as grouping: `(x)` -> `x`
+                if self.eat(')') {
+                    return Some(first);
+                }
+                if !self.eat(',') {
+                    return None;
+                }
+
+                let mut items = vec![first];
+                loop {
+                    self.skip_ws();
+                    if self.eat(')') {
+                        break;
+                    }
+                    let value = self.parse_value()?;
+                    items.push(value);
+                    self.skip_ws();
+                    if self.eat(')') {
+                        break;
+                    }
+                    if !self.eat(',') {
+                        return None;
+                    }
+                }
+
+                Some(MetaValue::Tuple(items))
+            }
+        }
+
+        let mut p = Parser::new(input);
+        let value = p.parse_value()?;
+        p.skip_ws();
+        if !p.is_eof() {
+            return None;
+        }
+        Some(value)
     }
 }
 
