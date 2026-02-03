@@ -8,7 +8,7 @@ Rich text and beautiful formatting for the terminal — a Rust port of Python's 
 
 The rich-rs API makes it easy to add color and style to terminal output. Rich can also render pretty tables, progress bars, markdown, syntax highlighted source code, tracebacks, and more — out of the box.
 
-![Features](https://github.com/textualize/rich/raw/master/imgs/features.png)
+![Features](imgs/features.svg)
 
 ## Compatibility
 
@@ -39,14 +39,11 @@ To add rich output to your application, create a `Console` and use its print met
 use rich_rs::{Console, Text};
 
 let mut console = Console::new();
-
-// Simple text
-console.print_text("Hello, World!").unwrap();
-
-// Styled text with markup
-let text = Text::from_markup("[bold blue]Hello[/] [italic]World[/]!", false).unwrap();
+let text = Text::from_markup("Hello, [bold magenta]World[/]!", false).unwrap();
 console.print(&text, None, None, None, false, "\n").unwrap();
 ```
+
+![Hello World](imgs/hello_world.svg)
 
 Rich will automatically word-wrap text to fit the terminal width and detect color support.
 
@@ -55,10 +52,15 @@ Rich will automatically word-wrap text to fit the terminal width and detect colo
 Rich uses a BBCode-like markup syntax for inline styling:
 
 ```rust
-console.print_markup("[bold red]Error:[/] Something went wrong").unwrap();
-console.print_markup("[link=https://example.com]Click here[/link]").unwrap();
-console.print_markup(":warning: [yellow]Warning[/] :warning:").unwrap();  // Emoji support
+use rich_rs::{Console, Text};
+
+let mut console = Console::new();
+console.print(&Text::from_markup("[bold red]Error:[/] Something went wrong", false).unwrap(), None, None, None, false, "\n").unwrap();
+console.print(&Text::from_markup("[link=https://example.com]Click here[/link]", false).unwrap(), None, None, None, false, "\n").unwrap();
+console.print(&Text::from_markup(":warning: [yellow]Warning[/] :warning:", true).unwrap(), None, None, None, false, "\n").unwrap();
 ```
+
+![Markup](imgs/markup.svg)
 
 # Rich Library
 
@@ -72,18 +74,23 @@ Click the headings below for details:
 Rich can render flexible tables with unicode box characters, borders, styles, and cell alignment.
 
 ```rust
-use rich_rs::{Console, Table};
+use rich_rs::{Console, Table, Column, Style, SimpleColor, JustifyMethod, Text};
 
 let mut console = Console::new();
-
 let mut table = Table::new();
-table.add_column_with_header("Name");
-table.add_column_with_header("Age");
-table.add_row(vec!["Alice", "30"]);
-table.add_row(vec!["Bob", "25"]);
+
+table.add_column(Column::with_header(Box::new(Text::styled("Name", Style::new().with_color(SimpleColor::Standard(6))))));
+table.add_column(Column::with_header(Box::new(Text::styled("Age", Style::new().with_color(SimpleColor::Standard(5))))).justify(JustifyMethod::Right));
+table.add_column(Column::with_header(Box::new(Text::styled("City", Style::new().with_color(SimpleColor::Standard(2))))));
+
+table.add_row_strs(&["Alice", "30", "New York"]);
+table.add_row_strs(&["Bob", "25", "Los Angeles"]);
+table.add_row_strs(&["Charlie", "35", "Chicago"]);
 
 console.print(&table, None, None, None, false, "\n").unwrap();
 ```
+
+![Table](imgs/table.svg)
 
 Tables automatically resize columns to fit the terminal width, wrapping text as needed.
 
@@ -151,9 +158,9 @@ use rich_rs::{Console, Syntax};
 
 let mut console = Console::new();
 
-let code = r#"
-fn main() {
-    println!("Hello, World!");
+let code = r#"fn main() {
+    let greeting = "Hello, World!";
+    println!("{}", greeting);
 }
 "#;
 
@@ -163,6 +170,8 @@ let syntax = Syntax::new(code, "rust")
 
 console.print(&syntax, None, None, None, false, "\n").unwrap();
 ```
+
+![Syntax Highlighting](imgs/syntax.svg)
 
 Available themes include `base16-ocean.dark`, `Solarized (dark)`, `InspiredGitHub`, and more.
 
@@ -178,11 +187,25 @@ use rich_rs::{Console, markdown::Markdown};
 
 let mut console = Console::new();
 
-let md = "# Hello World\n\nThis is **bold** and *italic*.\n\n```rust\nfn main() {}\n```";
-let markdown = Markdown::new(md);
+let md = r#"# Hello World
 
+This is **bold** and *italic*.
+
+- Item one
+- Item two
+
+```rust
+fn main() {
+    println!("Hello!");
+}
+```
+"#;
+
+let markdown = Markdown::new(md);
 console.print(&markdown, None, None, None, false, "\n").unwrap();
 ```
+
+![Markdown](imgs/markdown.svg)
 
 Supports CommonMark + GitHub Flavored Markdown including tables, task lists, and fenced code blocks.
 
@@ -194,17 +217,20 @@ Supports CommonMark + GitHub Flavored Markdown including tables, task lists, and
 Rich can render hierarchical data with guide lines.
 
 ```rust
-use rich_rs::{Console, Tree};
+use rich_rs::{Console, Tree, Text, Style, SimpleColor};
 
 let mut console = Console::new();
 
-let mut tree = Tree::new("Root");
-tree.add("Child 1");
-let mut child2 = tree.add_tree("Child 2");
-child2.add("Grandchild");
+let mut tree = Tree::new(Box::new(Text::from_markup("[bold]:open_file_folder: Project[/]", true).unwrap()));
+let src = tree.add(Box::new(Text::from_markup("[blue]:open_file_folder: src[/]", true).unwrap()));
+src.add(Box::new(Text::from_markup("[green]:page_facing_up: main.rs[/]", true).unwrap()));
+src.add(Box::new(Text::from_markup("[green]:page_facing_up: lib.rs[/]", true).unwrap()));
+tree.add(Box::new(Text::from_markup("[yellow]:page_facing_up: Cargo.toml[/]", true).unwrap()));
 
 console.print(&tree, None, None, None, false, "\n").unwrap();
 ```
+
+![Tree](imgs/tree.svg)
 
 </details>
 
@@ -214,15 +240,25 @@ console.print(&tree, None, None, None, false, "\n").unwrap();
 Rich can render content in bordered boxes with titles.
 
 ```rust
-use rich_rs::{Console, Panel, Text};
+use rich_rs::{Console, Panel, Text, Style, SimpleColor};
+use rich_rs::r#box::ROUNDED;
 
 let mut console = Console::new();
 
-let panel = Panel::new(Text::plain("Hello, World!"))
-    .with_title("Greeting");
+let content = Text::from_markup(
+    "This is a [bold cyan]Panel[/]!\n\nPanels are great for highlighting important content.",
+    true
+).unwrap();
+
+let panel = Panel::new(Box::new(content))
+    .with_title("Information")
+    .with_box(ROUNDED)
+    .with_border_style(Style::new().with_color(SimpleColor::Standard(4)));
 
 console.print(&panel, None, None, None, false, "\n").unwrap();
 ```
+
+![Panel](imgs/panel.svg)
 
 </details>
 
@@ -247,18 +283,20 @@ Tracebacks show the call stack with source code snippets and local variable valu
 <details>
 <summary>Pretty Printing</summary>
 
-Rich can pretty-print Rust data structures with syntax highlighting.
+Rich can pretty-print data structures with syntax highlighting.
 
 ```rust
 use rich_rs::{Console, Pretty};
 
 let mut console = Console::new();
 
-let data = vec![1, 2, 3, 4, 5];
-let pretty = Pretty::new(&data);
+let data = r#"{"name": "rich-rs", "version": "1.0.0", "features": ["tables", "syntax"]}"#;
+let pretty = Pretty::from_str(data).with_indent_guides(true);
 
 console.print(&pretty, None, None, None, false, "\n").unwrap();
 ```
+
+![Pretty Printing](imgs/pretty.svg)
 
 </details>
 
@@ -294,17 +332,23 @@ Supports password input, default values, and custom validation.
 Rich can render content in neat columns with equal or optimal width.
 
 ```rust
-use rich_rs::{Console, Columns, Text};
+use rich_rs::{Console, Columns, Text, Style, SimpleColor, Renderable};
 
 let mut console = Console::new();
 
-let items: Vec<Text> = (1..=12)
-    .map(|i| Text::plain(&format!("Item {}", i)))
+let items: Vec<Box<dyn Renderable + Send + Sync>> = (1..=9)
+    .map(|i| {
+        let color = SimpleColor::Standard((i % 7 + 1) as u8);
+        Box::new(Text::styled(&format!("Item {}", i), Style::new().with_color(color)))
+            as Box<dyn Renderable + Send + Sync>
+    })
     .collect();
 
-let columns = Columns::new(items);
+let columns = Columns::new(items).with_equal(true);
 console.print(&columns, None, None, None, false, "\n").unwrap();
 ```
+
+![Columns](imgs/columns.svg)
 
 </details>
 
