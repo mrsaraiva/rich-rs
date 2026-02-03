@@ -527,10 +527,10 @@ required for Rich's Live/Progress parity as implemented in `rich-rs` today.
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Cell grid buffer (`ScreenBuffer`) | `rich/screen.py` | Stores (char, style) per cell |
-| Todo | Render Segments → ScreenBuffer (wrapping + clipping) | `rich/screen.py` | Convert renderables to a buffer for diffing |
-| Todo | Diff ScreenBuffer → terminal updates | `rich/console.py` | Minimal redraw; cursor correctness |
-| Todo | ScreenBuffer parity tests (golden captures) | `rich/screen.py` | Validate stable rendering across widths |
+| Done | Cell grid buffer (`ScreenBuffer`) | N/A (Textual foundation) | Stores (cell text, style) per cell |
+| Done | Render → ScreenBuffer (clipping + padding) | `rich/console.py` | Converts rendered lines to a buffer |
+| Done | Diff ScreenBuffer → terminal updates | N/A (Textual foundation) | Cursor-safe control + styled segments (no `\n`) |
+| Done | ScreenBuffer tests (apply diff) | N/A | Validates diff output reproduces target buffer |
 
 ---
 

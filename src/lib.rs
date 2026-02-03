@@ -66,6 +66,7 @@ pub mod loop_helpers;
 pub mod prompt;
 pub mod region;
 pub mod screen;
+pub mod screen_buffer;
 
 // Builtin renderables
 mod renderables;
@@ -125,6 +126,7 @@ pub use live::{Live, LiveOptions, VerticalOverflowMethod};
 pub use live_render::LiveRender;
 pub use region::Region;
 pub use screen::Screen;
+pub use screen_buffer::{Cell, ScreenBuffer};
 pub use progress_bar::ProgressBar;
 pub use spinner::Spinner;
 pub use progress::{
