@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Console::print_traceback()` convenience method for rendering tracebacks
 - `screen.rs` example demonstrating ScreenContext usage
 - `cp_progress.rs` example - minimal file copy with progress bar
+- `downloader.rs` example - concurrent HTTP downloads with progress bars
 - `Bar` renderable for horizontal bars with smooth Unicode block characters
 - `Status` wrapper for spinner + text on long-running operations
 - `console.log()` method with timestamp and file/line support
