@@ -7,9 +7,11 @@
 //! - Alternate screen mode
 //! - Output capture for testing
 
+use std::collections::HashMap;
 use std::env;
 use std::io::{self, Stdout, Write};
-use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crossterm::terminal::{self, ClearType};
 use crossterm::{cursor, execute, terminal as ct};
@@ -19,9 +21,11 @@ use crate::color::ColorSystem;
 use crate::emoji::Emoji;
 use crate::highlighter::Highlighter;
 use crate::segment::{ControlType, Segment, Segments};
-use crate::style::Style;
+use crate::style::{Style, StyleMeta};
 use crate::text::Text;
 use crate::theme::{Theme, ThemeStack};
+
+static LINK_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ============================================================================
 // JustifyMethod
@@ -1138,6 +1142,9 @@ impl<W: Write> Console<W> {
 
         let mut current = StyleState::DEFAULT;
         let mut used_sgr = false;
+        let hyperlinks_enabled = self.is_terminal() && !self.is_dumb_terminal();
+        let mut current_link: Option<(Arc<str>, Option<Arc<str>>)> = None;
+        let mut generated_link_ids: HashMap<Arc<str>, Arc<str>> = HashMap::new();
 
         for segment in segments.iter() {
             if let Some(control) = &segment.control {
@@ -1161,19 +1168,67 @@ impl<W: Write> Console<W> {
                     ControlType::CursorBackward(n) => write!(self.writer, "\x1b[{}D", n)?,
                     ControlType::EraseInLine(mode) => write!(self.writer, "\x1b[{}K", mode)?,
                     ControlType::HyperlinkStart { url, id } => {
+                        if hyperlinks_enabled {
+                            if let Some(id) = id.as_deref() {
+                                write!(self.writer, "\x1b]8;id={};{}\x1b\\", id, url)?;
+                            } else {
+                                write!(self.writer, "\x1b]8;;{}\x1b\\", url)?;
+                            }
+                            current_link = Some((url.clone(), id.clone()));
+                        }
+                    }
+                    ControlType::HyperlinkEnd => {
+                        if hyperlinks_enabled {
+                            write!(self.writer, "\x1b]8;;\x1b\\")?;
+                            current_link = None;
+                        }
+                    }
+                    ControlType::MoveTo { x, y } => {
+                        // CSI row;col H (1-based)
+                        write!(
+                            self.writer,
+                            "\x1b[{};{}H",
+                            (*y as usize) + 1,
+                            (*x as usize) + 1
+                        )?
+                    }
+                }
+                continue;
+            }
+
+            if hyperlinks_enabled {
+                let desired_link: Option<(Arc<str>, Option<Arc<str>>)> =
+                    segment.meta.as_ref().and_then(|meta: &StyleMeta| {
+                        meta.link.as_ref().map(|url| {
+                            let url = url.clone();
+                            let id = meta.link_id.clone().or_else(|| {
+                                if let Some(existing) = generated_link_ids.get(&url) {
+                                    return Some(existing.clone());
+                                }
+                                let next = LINK_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+                                let new_id: Arc<str> = Arc::from(format!("richrs-{}", next));
+                                generated_link_ids.insert(url.clone(), new_id.clone());
+                                Some(new_id)
+                            });
+                            (url, id)
+                        })
+                    });
+
+                if desired_link != current_link {
+                    // Close any previous link.
+                    if current_link.is_some() {
+                        write!(self.writer, "\x1b]8;;\x1b\\")?;
+                    }
+                    // Open the new link.
+                    if let Some((url, id)) = &desired_link {
                         if let Some(id) = id.as_deref() {
                             write!(self.writer, "\x1b]8;id={};{}\x1b\\", id, url)?;
                         } else {
                             write!(self.writer, "\x1b]8;;{}\x1b\\", url)?;
                         }
                     }
-                    ControlType::HyperlinkEnd => write!(self.writer, "\x1b]8;;\x1b\\")?,
-                    ControlType::MoveTo { x, y } => {
-                        // CSI row;col H (1-based)
-                        write!(self.writer, "\x1b[{};{}H", (*y as usize) + 1, (*x as usize) + 1)?
-                    }
+                    current_link = desired_link;
                 }
-                continue;
             }
 
             if let Some(color_system) = self.color_system {
@@ -1188,6 +1243,11 @@ impl<W: Write> Console<W> {
             } else {
                 write!(self.writer, "{}", segment.text)?;
             }
+        }
+
+        // Close any active hyperlink so it doesn't leak past the renderable.
+        if hyperlinks_enabled && current_link.is_some() {
+            write!(self.writer, "\x1b]8;;\x1b\\")?;
         }
 
         // Reset at the end so terminal state doesn't leak past the renderable.
@@ -2115,15 +2175,21 @@ mod tests {
             return;
         }
 
-        let (_id, _is_root) =
-            console.live_start(Box::new(Text::plain("LIVE")), crate::live::VerticalOverflowMethod::Ellipsis);
+        let (_id, _is_root) = console.live_start(
+            Box::new(Text::plain("LIVE")),
+            crate::live::VerticalOverflowMethod::Ellipsis,
+        );
 
         // First render establishes the live shape but does not emit cursor positioning.
-        console.print(&Text::plain("A"), None, None, None, false, "\n").unwrap();
+        console
+            .print(&Text::plain("A"), None, None, None, false, "\n")
+            .unwrap();
         console.clear_captured();
 
         // Second render should reposition (erase line) before drawing.
-        console.print(&Text::plain("B"), None, None, None, false, "\n").unwrap();
+        console
+            .print(&Text::plain("B"), None, None, None, false, "\n")
+            .unwrap();
         let out = console.get_captured();
         assert!(out.contains("\x1b[2K"));
     }
@@ -2147,6 +2213,47 @@ mod tests {
         let out = console.get_captured();
         assert!(out.contains("\x1b[?1049h"));
         assert!(out.contains("\x1b[H"));
+    }
+
+    #[test]
+    fn test_print_segments_does_not_emit_osc8_when_not_terminal() {
+        let mut console = Console::capture();
+        let mut segments = Segments::new();
+        segments.push(Segment::new_with_meta(
+            "X",
+            StyleMeta::with_link("https://example.com"),
+        ));
+        console.print_segments(&segments).unwrap();
+        let out = console.get_captured();
+        assert!(out.contains("X"));
+        assert!(!out.contains("\x1b]8;"));
+    }
+
+    #[test]
+    fn test_print_segments_emits_osc8_for_segment_meta_link() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            // OSC8 is not meaningful on dumb terminals.
+            return;
+        }
+
+        let mut segments = Segments::new();
+        segments.push(Segment::new_with_meta(
+            "X",
+            StyleMeta::with_link("https://example.com"),
+        ));
+        console.print_segments(&segments).unwrap();
+        let out = console.get_captured();
+        assert!(out.contains("\x1b]8;"));
+        assert!(out.contains("https://example.com"));
+        assert!(out.contains("\x1b]8;;\x1b\\"));
     }
 
     // ==================== Console configuration tests ====================

@@ -22,10 +22,12 @@
 
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::emoji::Emoji;
 use crate::error::{ParseError, Result};
-use crate::style::Style;
+use crate::style::{Style, StyleMeta};
 use crate::text::{Span, Text};
 
 /// A parsed markup tag.
@@ -277,17 +279,38 @@ pub fn render(markup: &str, emoji: bool) -> Result<Text> {
 
                 // Create span for the closed region
                 if open_tag.name.starts_with('@') {
-                    // Metadata tag - for now, metadata is not rendered as visible style
-                    // Full metadata support requires StyleMeta integration (Phase 2.2+)
-                    // Python stores meta params via literal_eval, we skip for now
+                    // Metadata tag - used by Textual for event handlers.
+                    let mut meta_map = BTreeMap::new();
+                    meta_map.insert(
+                        open_tag.name.clone(),
+                        open_tag.parameters.clone().unwrap_or_default(),
+                    );
+                    let meta = StyleMeta {
+                        meta: Some(Arc::new(meta_map)),
+                        ..Default::default()
+                    };
+                    spans.push(Span::new_with_meta(
+                        start,
+                        text.len(),
+                        Style::new(),
+                        Some(meta),
+                    ));
                 } else if open_tag.name == "link" {
                     // Link tag - apply underline+cyan as visual indicator
-                    // Full hyperlink support requires StyleMeta integration (Phase 2.2+)
-                    // Python stores URL in StyleMeta.link, we just apply visible style
                     let link_style = Style::new()
                         .with_underline(true)
                         .with_color(crate::color::SimpleColor::Standard(6)); // cyan
-                    spans.push(Span::new(start, text.len(), link_style));
+                    let meta = open_tag
+                        .parameters
+                        .as_ref()
+                        .map(|url| StyleMeta::with_link(url.clone()))
+                        .unwrap_or_default();
+                    spans.push(Span::new_with_meta(
+                        start,
+                        text.len(),
+                        link_style,
+                        Some(meta),
+                    ));
                 } else {
                     // Regular style tag - parse and apply
                     let style_str = open_tag.to_string();
@@ -311,14 +334,34 @@ pub fn render(markup: &str, emoji: bool) -> Result<Text> {
     let text_length = text.len();
     while let Some((start, tag)) = style_stack.pop() {
         if tag.name.starts_with('@') {
-            // Metadata tag - no visible style (matches explicit close behavior)
-            continue;
+            let mut meta_map = BTreeMap::new();
+            meta_map.insert(tag.name.clone(), tag.parameters.clone().unwrap_or_default());
+            let meta = StyleMeta {
+                meta: Some(Arc::new(meta_map)),
+                ..Default::default()
+            };
+            spans.push(Span::new_with_meta(
+                start,
+                text_length,
+                Style::new(),
+                Some(meta),
+            ));
         } else if tag.name == "link" {
             // Link tag - apply underline+cyan (matches explicit close behavior)
             let link_style = Style::new()
                 .with_underline(true)
                 .with_color(crate::color::SimpleColor::Standard(6)); // cyan
-            spans.push(Span::new(start, text_length, link_style));
+            let meta = tag
+                .parameters
+                .as_ref()
+                .map(|url| StyleMeta::with_link(url.clone()))
+                .unwrap_or_default();
+            spans.push(Span::new_with_meta(
+                start,
+                text_length,
+                link_style,
+                Some(meta),
+            ));
         } else {
             // Regular style tag
             let style_str = tag.to_string();
@@ -337,7 +380,7 @@ pub fn render(markup: &str, emoji: bool) -> Result<Text> {
     spans.reverse();
     spans.sort_by(|a, b| a.start.cmp(&b.start)); // stable sort
     for span in spans {
-        text.stylize(span.start, span.end, span.style);
+        text.spans_mut().push(span);
     }
 
     Ok(text)
@@ -518,14 +561,25 @@ mod tests {
         assert!(!text.spans().is_empty());
         // Should have underline from link style
         assert!(text.spans()[0].style.underline == Some(true));
+        assert_eq!(
+            text.spans()[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.link.as_deref()),
+            Some("https://x")
+        );
     }
 
     #[test]
     fn test_render_unclosed_metadata() {
-        // Unclosed metadata tag should not create visible spans
+        // Unclosed metadata tag should create non-visible spans with metadata attached
         let text = render("[@foo]bar", false).unwrap();
         assert_eq!(text.plain_text(), "bar");
-        assert!(text.spans().is_empty());
+        assert_eq!(text.spans().len(), 1);
+        assert!(text.spans()[0].style.is_null());
+        let meta = text.spans()[0].meta.as_ref().unwrap();
+        let meta_map = meta.meta.as_ref().unwrap();
+        assert_eq!(meta_map.get("@foo").map(|s| s.as_str()), Some(""));
     }
 
     #[test]
@@ -566,6 +620,13 @@ mod tests {
         assert_eq!(text.plain_text(), "click here");
         // Link should create a span (underlined cyan)
         assert!(!text.spans().is_empty());
+        assert_eq!(
+            text.spans()[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.link.as_deref()),
+            Some("https://example.com")
+        );
     }
 
     #[test]

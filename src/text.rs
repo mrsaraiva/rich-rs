@@ -11,7 +11,7 @@ use crate::console::{Console, ConsoleOptions};
 use crate::error::Result;
 use crate::measure::Measurement;
 use crate::segment::{Segment, Segments};
-use crate::style::Style;
+use crate::style::{Style, StyleMeta};
 
 /// A span of styled text within a Text object.
 ///
@@ -24,12 +24,29 @@ pub struct Span {
     pub end: usize,
     /// Style to apply.
     pub style: Style,
+    /// Optional style metadata (hyperlinks, Textual handlers, etc.).
+    pub meta: Option<StyleMeta>,
 }
 
 impl Span {
     /// Create a new span.
     pub fn new(start: usize, end: usize, style: Style) -> Self {
-        Span { start, end, style }
+        Span {
+            start,
+            end,
+            style,
+            meta: None,
+        }
+    }
+
+    /// Create a new span with optional metadata.
+    pub fn new_with_meta(start: usize, end: usize, style: Style, meta: Option<StyleMeta>) -> Self {
+        Span {
+            start,
+            end,
+            style,
+            meta: meta.and_then(|m| if m.is_empty() { None } else { Some(m) }),
+        }
     }
 
     /// Check if the span has any content (end > start).
@@ -72,8 +89,13 @@ impl Span {
             return (self.clone(), None);
         }
 
-        let span1 = Span::new(self.start, offset.min(self.end), self.style);
-        let span2 = Span::new(span1.end, self.end, self.style);
+        let span1 = Span::new_with_meta(
+            self.start,
+            offset.min(self.end),
+            self.style,
+            self.meta.clone(),
+        );
+        let span2 = Span::new_with_meta(span1.end, self.end, self.style, self.meta.clone());
         (span1, Some(span2))
     }
 
@@ -91,7 +113,7 @@ impl Span {
     pub fn move_by(&self, offset: isize) -> Span {
         let new_start = (self.start as isize + offset).max(0) as usize;
         let new_end = (self.end as isize + offset).max(0) as usize;
-        Span::new(new_start, new_end, self.style)
+        Span::new_with_meta(new_start, new_end, self.style, self.meta.clone())
     }
 
     /// Crop the span at a given offset.
@@ -110,7 +132,12 @@ impl Span {
         if offset >= self.end {
             return self.clone();
         }
-        Span::new(self.start, offset.min(self.end), self.style)
+        Span::new_with_meta(
+            self.start,
+            offset.min(self.end),
+            self.style,
+            self.meta.clone(),
+        )
     }
 
     /// Extend the span by a given number of cells.
@@ -126,7 +153,7 @@ impl Span {
         if cells == 0 {
             return self.clone();
         }
-        Span::new(self.start, self.end + cells, self.style)
+        Span::new_with_meta(self.start, self.end + cells, self.style, self.meta.clone())
     }
 }
 
@@ -196,6 +223,8 @@ pub struct Text {
     spans: Vec<Span>,
     /// Base style for the entire text.
     style: Option<Style>,
+    /// Base metadata for the entire text.
+    meta: Option<StyleMeta>,
 }
 
 impl Text {
@@ -210,6 +239,7 @@ impl Text {
             text: text.into(),
             spans: Vec::new(),
             style: None,
+            meta: None,
         }
     }
 
@@ -225,6 +255,18 @@ impl Text {
             text,
             spans: Vec::new(),
             style: Some(style),
+            meta: None,
+        }
+    }
+
+    /// Create text with a base style and base metadata applied to the entire content.
+    pub fn styled_with_meta(text: impl Into<String>, style: Style, meta: StyleMeta) -> Self {
+        let text = text.into();
+        Text {
+            text,
+            spans: Vec::new(),
+            style: Some(style),
+            meta: if meta.is_empty() { None } else { Some(meta) },
         }
     }
 
@@ -351,18 +393,26 @@ impl Text {
         let other_len = other.len();
         self.text.push_str(&other.text);
 
-        // If the other text has a non-null base style, add a span for it
-        if let Some(base_style) = other.style.filter(|s| !s.is_null()) {
-            self.spans
-                .push(Span::new(offset, offset + other_len, base_style));
+        // If the other text has a base style/meta, add a span for it.
+        // This preserves region-specific base attributes when merging Text objects.
+        let other_base_style = other.style.unwrap_or_default();
+        let other_base_meta = other.meta.clone().unwrap_or_default();
+        if !other_base_style.is_null() || !other_base_meta.is_empty() {
+            self.spans.push(Span::new_with_meta(
+                offset,
+                offset + other_len,
+                other_base_style,
+                Some(other_base_meta),
+            ));
         }
 
         // Copy and offset spans from the other text
         for span in &other.spans {
-            self.spans.push(Span::new(
+            self.spans.push(Span::new_with_meta(
                 span.start + offset,
                 span.end + offset,
                 span.style,
+                span.meta.clone(),
             ));
         }
     }
@@ -649,6 +699,7 @@ impl Text {
                     text: substring,
                     spans: Vec::new(),
                     style: self.style,
+                    meta: self.meta.clone(),
                 }
             })
             .collect();
@@ -731,9 +782,12 @@ impl Text {
                     .min(line_end - line_start);
 
                 if new_end > new_start {
-                    result[line_no]
-                        .spans
-                        .push(Span::new(new_start, new_end, span.style));
+                    result[line_no].spans.push(Span::new_with_meta(
+                        new_start,
+                        new_end,
+                        span.style,
+                        span.meta.clone(),
+                    ));
                 }
             }
         }
@@ -772,6 +826,7 @@ impl Text {
             text: plain.to_string(),
             spans: Vec::new(),
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -853,13 +908,21 @@ impl Text {
         let shifted_spans: Vec<Span> = self
             .spans
             .iter()
-            .map(|span| Span::new(span.start + pad_count, span.end + pad_count, span.style))
+            .map(|span| {
+                Span::new_with_meta(
+                    span.start + pad_count,
+                    span.end + pad_count,
+                    span.style,
+                    span.meta.clone(),
+                )
+            })
             .collect();
 
         Text {
             text: format!("{}{}", spaces, self.text),
             spans: shifted_spans,
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -895,13 +958,21 @@ impl Text {
         let shifted_spans: Vec<Span> = self
             .spans
             .iter()
-            .map(|span| Span::new(span.start + left_pad, span.end + left_pad, span.style))
+            .map(|span| {
+                Span::new_with_meta(
+                    span.start + left_pad,
+                    span.end + left_pad,
+                    span.style,
+                    span.meta.clone(),
+                )
+            })
             .collect();
 
         Text {
             text: format!("{}{}{}", left_spaces, self.text, right_spaces),
             spans: shifted_spans,
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -997,7 +1068,12 @@ impl Text {
             };
 
             if new_end > new_start {
-                result_spans.push(Span::new(new_start, new_end, span.style));
+                result_spans.push(Span::new_with_meta(
+                    new_start,
+                    new_end,
+                    span.style,
+                    span.meta.clone(),
+                ));
             }
         }
 
@@ -1005,6 +1081,7 @@ impl Text {
             text: result_text,
             spans: result_spans,
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -1047,7 +1124,12 @@ impl Text {
                 if span.start >= new_len {
                     None
                 } else {
-                    Some(Span::new(span.start, span.end.min(new_len), span.style))
+                    Some(Span::new_with_meta(
+                        span.start,
+                        span.end.min(new_len),
+                        span.style,
+                        span.meta.clone(),
+                    ))
                 }
             })
             .filter(|span| !span.is_empty())
@@ -1057,6 +1139,7 @@ impl Text {
             text: trimmed.to_string(),
             spans: adjusted_spans,
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -1119,7 +1202,12 @@ impl Text {
                 if span.start >= new_len {
                     None
                 } else {
-                    Some(Span::new(span.start, span.end.min(new_len), span.style))
+                    Some(Span::new_with_meta(
+                        span.start,
+                        span.end.min(new_len),
+                        span.style,
+                        span.meta.clone(),
+                    ))
                 }
             })
             .filter(|span| !span.is_empty())
@@ -1129,6 +1217,7 @@ impl Text {
             text: new_text,
             spans: adjusted_spans,
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -1182,10 +1271,11 @@ impl Text {
                 if span.start >= new_char_len {
                     None
                 } else {
-                    Some(Span::new(
+                    Some(Span::new_with_meta(
                         span.start,
                         span.end.min(new_char_len),
                         span.style,
+                        span.meta.clone(),
                     ))
                 }
             })
@@ -1196,6 +1286,7 @@ impl Text {
             text: new_plain,
             spans: adjusted_spans,
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -1298,7 +1389,12 @@ impl Text {
                     let new_start = span.start.saturating_sub(start);
                     let new_end = span.end.min(end).saturating_sub(start);
                     if new_start < new_end {
-                        Some(Span::new(new_start, new_end, span.style))
+                        Some(Span::new_with_meta(
+                            new_start,
+                            new_end,
+                            span.style,
+                            span.meta.clone(),
+                        ))
                     } else {
                         None
                     }
@@ -1310,6 +1406,7 @@ impl Text {
             text: text.to_string(),
             spans: adjusted_spans,
             style: self.style,
+            meta: self.meta.clone(),
         }
     }
 
@@ -1579,9 +1676,15 @@ impl Text {
 
         // Fast path: no spans - still apply base style if present
         if self.spans.is_empty() {
-            let segment = match self.style {
-                Some(style) if !style.is_null() => Segment::styled(text.to_string(), style),
-                _ => Segment::new(text.to_string()),
+            let base_style = self.style.unwrap_or_default();
+            let base_meta = self.meta.clone().unwrap_or_default();
+            let segment = match (base_style.is_null(), base_meta.is_empty()) {
+                (true, true) => Segment::new(text.to_string()),
+                (true, false) => Segment::new_with_meta(text.to_string(), base_meta),
+                (false, true) => Segment::styled(text.to_string(), base_style),
+                (false, false) => {
+                    Segment::styled_with_meta(text.to_string(), base_style, base_meta)
+                }
             };
             return Segments::from(segment);
         }
@@ -1601,6 +1704,14 @@ impl Text {
         style_map.insert(0, self.style.unwrap_or_default());
         for (index, span) in &enumerated_spans {
             style_map.insert(*index, span.style);
+        }
+
+        // Build meta map: index -> meta
+        let mut meta_map: std::collections::HashMap<usize, StyleMeta> =
+            std::collections::HashMap::new();
+        meta_map.insert(0, self.meta.clone().unwrap_or_default());
+        for (index, span) in &enumerated_spans {
+            meta_map.insert(*index, span.meta.clone().unwrap_or_default());
         }
 
         // Build events
@@ -1642,18 +1753,29 @@ impl Text {
 
                 // Combine styles from stack (later styles override earlier ones)
                 let mut combined_style = Style::new();
+                let mut combined_meta = StyleMeta::new();
                 let mut sorted_stack = stack.clone();
                 sorted_stack.sort();
                 for &style_id in &sorted_stack {
                     if let Some(&style) = style_map.get(&style_id) {
                         combined_style = combined_style.combine(&style);
                     }
+                    if let Some(meta) = meta_map.get(&style_id) {
+                        combined_meta = combined_meta.combine(meta);
+                    }
                 }
 
-                if combined_style.is_null() {
-                    segments.push(Segment::new(segment_text));
-                } else {
-                    segments.push(Segment::styled(segment_text, combined_style));
+                match (combined_style.is_null(), combined_meta.is_empty()) {
+                    (true, true) => segments.push(Segment::new(segment_text)),
+                    (true, false) => {
+                        segments.push(Segment::new_with_meta(segment_text, combined_meta))
+                    }
+                    (false, true) => segments.push(Segment::styled(segment_text, combined_style)),
+                    (false, false) => segments.push(Segment::styled_with_meta(
+                        segment_text,
+                        combined_style,
+                        combined_meta,
+                    )),
                 }
             }
         }
@@ -2441,8 +2563,8 @@ mod tests {
 
     #[test]
     fn test_render_no_wrap_still_applies_justify() {
-        use crate::console::{ConsoleOptions, JustifyMethod};
         use crate::Console;
+        use crate::console::{ConsoleOptions, JustifyMethod};
 
         let console = Console::new();
         let options = ConsoleOptions {

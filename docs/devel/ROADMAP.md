@@ -569,12 +569,12 @@ These items are not required for demo parity, but would improve compatibility wi
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Style.link` + `Style.meta` | `rich/style.py` | Carry hyperlink + metadata at the style level |
-| Todo | OSC8 hyperlinks via style pipeline | `rich/style.py:Style.render()` | Emit `\x1b]8;id=...;url\x1b\\` around styled text (not demo-only controls) |
-| Todo | `link_id` generation + combine semantics | `rich/style.py` | Preserve link ids across style composition; needed for robust Live/Progress redraws |
-| Todo | Markup link tags | `rich/markup.py` | Parse `[link=...]...[/]` into `Style.link` |
-| Todo | Markup metadata handlers | `rich/markup.py` | Support `[@handler=params]` (currently parsed but ignored) |
-| Todo | Mouse / hyperlink tests in TTY captures | `rich/console.py` | Add parity tests that assert OSC8 sequences (where supported) |
+| Done | `Style.link` + `Style.meta` | `rich/style.py` | Implemented via `StyleMeta` carried on spans/segments (keeps `Style: Copy`) |
+| Done | OSC8 hyperlinks via style pipeline | `rich/style.py:Style.render()` | Emit OSC8 based on `Segment.meta.link` (not demo-only controls) |
+| Done | `link_id` generation + combine semantics | `rich/style.py` | `StyleMeta::combine` merges; missing `link_id` generated during `Console::print_segments` |
+| Done | Markup link tags | `rich/markup.py` | `[link=...]...[/link]` attaches `StyleMeta.link` (+ underline/cyan) |
+| Done | Markup metadata handlers | `rich/markup.py` | `[@handler=params]...[/@handler]` attaches `StyleMeta.meta` |
+| Done | Mouse / hyperlink tests in TTY captures | `rich/console.py` | Added unit tests asserting OSC8 emission when `is_terminal` |
 
 ---
 
