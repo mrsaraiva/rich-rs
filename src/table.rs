@@ -192,9 +192,37 @@ impl Column {
         self
     }
 
+    /// Set the footer content (builder pattern).
+    pub fn with_footer(mut self, footer: Box<dyn Renderable + Send + Sync>) -> Self {
+        self.footer = Some(footer);
+        self
+    }
+
     /// Check if this column is flexible (has a ratio set).
     pub fn flexible(&self) -> bool {
         self.ratio.is_some()
+    }
+
+    // Mutation methods for use with Live displays
+
+    /// Set the column justification.
+    pub fn set_justify(&mut self, justify: JustifyMethod) {
+        self.justify = justify;
+    }
+
+    /// Set the column style.
+    pub fn set_style(&mut self, style: Style) {
+        self.style = style;
+    }
+
+    /// Set the header style.
+    pub fn set_header_style(&mut self, style: Style) {
+        self.header_style = style;
+    }
+
+    /// Set the footer style.
+    pub fn set_footer_style(&mut self, style: Style) {
+        self.footer_style = style;
     }
 }
 
@@ -615,6 +643,55 @@ impl Table {
     /// Get the number of columns.
     pub fn column_count(&self) -> usize {
         self.columns.len()
+    }
+
+    // ========================================================================
+    // Mutation methods (for use with Live displays)
+    // ========================================================================
+
+    /// Set the table title.
+    pub fn set_title(&mut self, title: Option<Text>) {
+        self.title = title;
+    }
+
+    /// Set the table caption.
+    pub fn set_caption(&mut self, caption: Option<Text>) {
+        self.caption = caption;
+    }
+
+    /// Set whether to show the footer row.
+    pub fn set_show_footer(&mut self, show: bool) {
+        self.show_footer = show;
+    }
+
+    /// Set the border style.
+    pub fn set_border_style(&mut self, style: Style) {
+        self.border_style = style;
+    }
+
+    /// Set the box drawing style.
+    pub fn set_box(&mut self, box_type: Option<RichBox>) {
+        self.box_type = box_type;
+    }
+
+    /// Set alternating row styles.
+    pub fn set_row_styles(&mut self, styles: Vec<Style>) {
+        self.row_styles = styles;
+    }
+
+    /// Set whether to pad the edge cells.
+    pub fn set_pad_edge(&mut self, pad: bool) {
+        self.pad_edge = pad;
+    }
+
+    /// Set the fixed width (None for auto).
+    pub fn set_width(&mut self, width: Option<usize>) {
+        self.width = width;
+    }
+
+    /// Get a mutable reference to a column by index.
+    pub fn column_mut(&mut self, idx: usize) -> Option<&mut Column> {
+        self.columns.get_mut(idx)
     }
 
     // ========================================================================
