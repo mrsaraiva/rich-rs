@@ -1611,6 +1611,123 @@ impl<W: Write> Console<W> {
     }
 
     // ========================================================================
+    // Input Methods
+    // ========================================================================
+
+    /// Read a line of input from the user.
+    ///
+    /// This method displays a prompt and reads a line of input from stdin.
+    /// If `password` is true, input is masked (not echoed to the terminal).
+    ///
+    /// # Arguments
+    ///
+    /// * `prompt` - The text to display as a prompt.
+    /// * `password` - If true, input will be masked for password entry.
+    ///
+    /// # Returns
+    ///
+    /// The user's input as a string (without trailing newline).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading from stdin fails or if the input stream
+    /// reaches EOF unexpectedly.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rich_rs::{Console, Text};
+    ///
+    /// let mut console = Console::new();
+    /// let prompt = Text::plain("Enter your name: ");
+    /// let name = console.input(&prompt, false)?;
+    /// println!("Hello, {}!", name);
+    /// ```
+    pub fn input(&mut self, prompt: &Text, password: bool) -> io::Result<String> {
+        use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+        use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+        // Print the prompt
+        self.print(prompt, None, None, None, false, "")?;
+        self.writer.flush()?;
+
+        // For password input, use raw mode to capture without echo
+        if password && self.is_terminal() && !self.is_dumb_terminal() {
+            enable_raw_mode()?;
+
+            let result = (|| -> io::Result<String> {
+                let mut input = String::new();
+
+                loop {
+                    if let Event::Key(KeyEvent {
+                        code, modifiers, ..
+                    }) = event::read()?
+                    {
+                        match code {
+                            KeyCode::Enter => {
+                                // Print newline after password entry
+                                write!(self.writer, "\r\n")?;
+                                self.writer.flush()?;
+                                return Ok(input);
+                            }
+                            KeyCode::Backspace => {
+                                input.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                // Check for Ctrl+C
+                                if c == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
+                                    write!(self.writer, "\r\n")?;
+                                    self.writer.flush()?;
+                                    return Err(io::Error::new(
+                                        io::ErrorKind::Interrupted,
+                                        "Input cancelled",
+                                    ));
+                                }
+                                // Check for Ctrl+D (EOF)
+                                if c == 'd' && modifiers.contains(KeyModifiers::CONTROL) {
+                                    write!(self.writer, "\r\n")?;
+                                    self.writer.flush()?;
+                                    return Err(io::Error::new(
+                                        io::ErrorKind::UnexpectedEof,
+                                        "EOF",
+                                    ));
+                                }
+                                input.push(c);
+                            }
+                            KeyCode::Esc => {
+                                // ESC cancels input
+                                write!(self.writer, "\r\n")?;
+                                self.writer.flush()?;
+                                return Err(io::Error::new(
+                                    io::ErrorKind::Interrupted,
+                                    "Input cancelled",
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            })();
+
+            // Always restore terminal mode
+            let _ = disable_raw_mode();
+            result
+        } else {
+            // Normal input: read from stdin
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            // Remove trailing newline
+            if input.ends_with('\n') {
+                input.pop();
+                if input.ends_with('\r') {
+                    input.pop();
+                }
+            }
+            Ok(input)
+        }
+    }
+
+    // ========================================================================
     // Measurement
     // ========================================================================
 
@@ -1654,6 +1771,153 @@ impl Console<Stdout> {
         options: &ConsoleOptions,
     ) -> Segments {
         renderable.render(self, options)
+    }
+}
+
+// ============================================================================
+// Pager Context
+// ============================================================================
+
+/// Options for the pager context.
+#[derive(Debug, Clone, Default)]
+pub struct PagerOptions {
+    /// Whether to preserve ANSI styles in pager output.
+    pub styles: bool,
+}
+
+impl PagerOptions {
+    /// Create new pager options.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enable or disable styles in pager output.
+    pub fn with_styles(mut self, styles: bool) -> Self {
+        self.styles = styles;
+        self
+    }
+}
+
+/// A guard that captures console output and sends it to a pager on drop.
+///
+/// This struct is returned by `Console::pager()` and implements a context-manager
+/// pattern similar to Python's `with console.pager():`.
+///
+/// # Example
+///
+/// ```no_run
+/// use rich_rs::Console;
+///
+/// let mut console = Console::new();
+/// {
+///     let mut pager = console.pager(None);
+///     pager.print_text("Long content...").unwrap();
+///     // Content is sent to pager when `pager` is dropped
+/// }
+/// ```
+pub struct PagerContext {
+    /// Captured output buffer.
+    buffer: Vec<u8>,
+    /// Pager options.
+    options: PagerOptions,
+    /// Console options for rendering.
+    console_options: ConsoleOptions,
+}
+
+impl PagerContext {
+    /// Create a new pager context.
+    fn new(console_options: ConsoleOptions, options: Option<PagerOptions>) -> Self {
+        let options = options.unwrap_or_default();
+        // If styles are disabled, turn off color system so no ANSI escapes are emitted
+        let mut console_options = console_options;
+        if !options.styles {
+            console_options.is_terminal = false;
+            console_options.color_system = None;
+        }
+        Self {
+            buffer: Vec::new(),
+            options,
+            console_options,
+        }
+    }
+
+    /// Print plain text.
+    pub fn print_text(&mut self, text: &str) -> io::Result<()> {
+        writeln!(self.buffer, "{}", text)
+    }
+
+    /// Print a renderable.
+    pub fn print<R: crate::Renderable + ?Sized>(
+        &mut self,
+        renderable: &R,
+        style: Option<Style>,
+        justify: Option<JustifyMethod>,
+        overflow: Option<OverflowMethod>,
+        no_wrap: bool,
+        end: &str,
+    ) -> io::Result<()> {
+        // Create a capture console to render
+        let mut console = Console::with_writer(Vec::new(), self.console_options.clone());
+
+        // Render to the buffer
+        console.print(renderable, style, justify, overflow, no_wrap, end)?;
+
+        // Append to our buffer
+        self.buffer.extend_from_slice(console.get_captured_bytes());
+        Ok(())
+    }
+
+    /// Get the current buffer contents.
+    pub fn get_buffer(&self) -> &[u8] {
+        &self.buffer
+    }
+
+    /// Get the buffer as a string.
+    pub fn get_buffer_string(&self) -> String {
+        String::from_utf8_lossy(&self.buffer).to_string()
+    }
+
+    /// Manually send content to the pager.
+    pub fn show(&self) -> io::Result<()> {
+        use crate::pager::{Pager, SystemPager};
+        let pager = SystemPager::with_styles(self.options.styles);
+        let content = self.get_buffer_string();
+        pager.show(&content)
+    }
+}
+
+impl Drop for PagerContext {
+    fn drop(&mut self) {
+        if !self.buffer.is_empty() {
+            let _ = self.show();
+        }
+    }
+}
+
+impl Console<Stdout> {
+    /// Create a pager context that captures output and sends it to a pager.
+    ///
+    /// Similar to Python Rich's `with console.pager():` context manager.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Optional pager options. Use `PagerOptions::new().with_styles(true)`
+    ///   to preserve ANSI escape sequences in the pager.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use rich_rs::{Console, PagerOptions};
+    ///
+    /// let console = Console::new();
+    /// {
+    ///     let mut pager = console.pager(Some(PagerOptions::new().with_styles(true)));
+    ///     pager.print_text("Long content that should be paged...").unwrap();
+    ///     // Content is sent to pager when `pager` is dropped
+    /// }
+    /// ```
+    pub fn pager(&self, options: Option<PagerOptions>) -> PagerContext {
+        PagerContext::new(self.options.clone(), options)
     }
 }
 
@@ -2216,5 +2480,50 @@ mod tests {
         fn assert_sync<T: Sync>() {}
         assert_send::<ConsoleOptions>();
         assert_sync::<ConsoleOptions>();
+    }
+
+    // ==================== Pager context tests ====================
+
+    #[test]
+    fn test_pager_options_default() {
+        let opts = PagerOptions::default();
+        assert!(!opts.styles);
+    }
+
+    #[test]
+    fn test_pager_options_with_styles() {
+        let opts = PagerOptions::new().with_styles(true);
+        assert!(opts.styles);
+    }
+
+    #[test]
+    fn test_pager_context_captures_text() {
+        let console = Console::new();
+        let mut pager = console.pager(None);
+
+        pager.print_text("Hello").unwrap();
+        pager.print_text("World").unwrap();
+
+        let buffer = pager.get_buffer_string();
+        assert!(buffer.contains("Hello"));
+        assert!(buffer.contains("World"));
+
+        // Prevent the pager from actually running during the test
+        pager.buffer.clear();
+    }
+
+    #[test]
+    fn test_pager_context_captures_renderable() {
+        let console = Console::new();
+        let mut pager = console.pager(None);
+
+        let text = Text::plain("Rendered text");
+        pager.print(&text, None, None, None, false, "\n").unwrap();
+
+        let buffer = pager.get_buffer_string();
+        assert!(buffer.contains("Rendered text"));
+
+        // Prevent the pager from actually running during the test
+        pager.buffer.clear();
     }
 }

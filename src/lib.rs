@@ -32,6 +32,8 @@ mod theme;
 
 // Higher-level modules
 mod console;
+pub mod file_proxy;
+pub mod pager;
 pub mod highlighter;
 pub mod markup;
 pub mod text;
@@ -59,6 +61,7 @@ pub mod progress_bar;
 pub mod progress;
 pub mod constrain;
 pub mod loop_helpers;
+pub mod prompt;
 
 // Builtin renderables
 mod renderables;
@@ -69,7 +72,7 @@ pub use color::{
     ANSI_COLOR_NAMES, Color, ColorSystem, ColorTriplet, ColorType, EIGHT_BIT_PALETTE, Palette,
     STANDARD_PALETTE, SimpleColor, WINDOWS_PALETTE, blend_rgb, parse_rgb_hex,
 };
-pub use console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod};
+pub use console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod, PagerContext, PagerOptions};
 pub use error::{ParseError, Result as ParseResult};
 pub use measure::{Measurement, measure_renderables};
 pub use segment::{ControlType, Segment, Segments};
@@ -121,6 +124,13 @@ pub use progress::{
     ProgressTask, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn,
     TimeRemainingColumn, TrackConfig, TransferSpeedColumn, TotalFileSizeColumn,
 };
+
+// Prompt re-exports
+pub use prompt::{Confirm, FloatPrompt, IntPrompt, InvalidResponse, Prompt, PromptError, Result as PromptResult};
+
+// Pager re-exports
+pub use pager::{BufferPager, NullPager, Pager, SystemPager};
+pub use file_proxy::FileProxy;
 
 /// A type that can be rendered to the console.
 ///
