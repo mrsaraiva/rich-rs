@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Table/Column mutation API for runtime modification with Live displays
 - `spinner_names()` now public for enumerating available spinners
 - `escape_markup()` re-exported for escaping markup characters
-- 16 ported examples from Python Rich (table_movie, spinners, layout, calendar, etc.)
+- 25 ported examples from Python Rich (table_movie, spinners, layout, calendar, top_lite_simulator, etc.)
+- Example porting plan document (`docs/devel/EXAMPLE_PORTING_PLAN.md`)
 
 ## [1.0.0] - 2026-02-03
 
