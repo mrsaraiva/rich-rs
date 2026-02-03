@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::console::Console;
 use crate::console::ConsoleOptions;
+use crate::group::Group;
 use crate::loop_helpers::loop_last;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
@@ -42,6 +43,18 @@ impl Screen {
             style: None,
             application_mode: false,
         }
+    }
+
+    /// Create a new Screen from multiple renderables.
+    ///
+    /// Python Rich's `Screen(*renderables)` wraps the inputs in `Group`.
+    /// This is the closest Rust equivalent.
+    pub fn new_many<I, R>(renderables: I) -> Self
+    where
+        I: IntoIterator<Item = R>,
+        R: Renderable + 'static,
+    {
+        Self::new(Group::new(renderables))
     }
 
     /// Create a new Screen from an Arc<dyn Renderable>.
@@ -119,6 +132,29 @@ impl Renderable for Screen {
 mod tests {
     use super::*;
     use crate::Text;
+
+    #[test]
+    fn test_screen_new_many() {
+        let console = Console::new();
+        let options = ConsoleOptions {
+            size: (10, 3),
+            max_width: 10,
+            max_height: 3,
+            ..Default::default()
+        };
+
+        let screen = Screen::new_many([Text::plain("A"), Text::plain("B")]);
+        let output: String = screen
+            .render(&console, &options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
+
+        // Should contain both lines in order, separated by newline.
+        assert!(output.contains("A"));
+        assert!(output.contains("B"));
+        assert!(output.contains('\n'));
+    }
 
     #[test]
     fn test_screen_basic() {
