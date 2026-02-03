@@ -19,13 +19,16 @@ use crate::Renderable;
 use crate::cells::cell_len;
 use crate::color::{ColorSystem, ColorTriplet, SimpleColor};
 use crate::emoji::Emoji;
-use crate::export_format::CONSOLE_SVG_FORMAT;
+use crate::export_format::{CONSOLE_HTML_FORMAT, CONSOLE_SVG_FORMAT};
 use crate::highlighter::Highlighter;
 use crate::segment::{ControlType, Segment, Segments};
 use crate::style::Style;
-use crate::terminal_theme::{TerminalTheme, SVG_EXPORT_THEME};
+use crate::table::{Column, Row, Table};
+use crate::terminal_theme::{DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, TerminalTheme};
 use crate::text::Text;
 use crate::theme::{Theme, ThemeStack};
+
+use std::time::SystemTime;
 
 // ============================================================================
 // JustifyMethod
@@ -1423,6 +1426,116 @@ impl<W: Write> Console<W> {
         result
     }
 
+    /// Log a renderable with timestamp prefix.
+    ///
+    /// Similar to `print()`, but adds a timestamp prefix in `[HH:MM:SS]` format.
+    /// Optionally displays the source file and line number.
+    ///
+    /// # Arguments
+    ///
+    /// * `renderable` - The object to render and log.
+    /// * `file` - Optional source file name (use `file!()` macro at call site).
+    /// * `line` - Optional line number (use `line!()` macro at call site).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rich_rs::{Console, Text};
+    ///
+    /// let mut console = Console::new();
+    /// // Using the log! macro (recommended)
+    /// rich_rs::log!(console, &Text::plain("Server starting..."));
+    ///
+    /// // Or directly with file/line
+    /// console.log(&Text::plain("Message"), Some(file!()), Some(line!())).unwrap();
+    /// ```
+    pub fn log<R: Renderable + ?Sized>(
+        &mut self,
+        renderable: &R,
+        file: Option<&str>,
+        line: Option<u32>,
+    ) -> io::Result<()> {
+        if self.quiet {
+            return Ok(());
+        }
+
+        // Get current time
+        let now = SystemTime::now();
+        let duration = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        let secs = duration.as_secs();
+        let hours = (secs / 3600) % 24;
+        let minutes = (secs / 60) % 60;
+        let seconds = secs % 60;
+
+        // Create timestamp text with dim style
+        let timestamp = format!("[{:02}:{:02}:{:02}]", hours, minutes, seconds);
+        let time_style = self
+            .theme_stack
+            .get_style("log.time")
+            .unwrap_or_else(|| Style::new().with_dim(true));
+        let time_text = Text::styled(&timestamp, time_style);
+
+        // Create a grid table for layout: [time] [message] [path:line]
+        let mut grid = Table::grid().with_padding(0, 1).with_expand(true);
+
+        // Time column
+        grid.add_column(Column::new().style(time_style).no_wrap(true));
+
+        // Message column (ratio=1, expands to fill)
+        let message_style = self
+            .theme_stack
+            .get_style("log.message")
+            .unwrap_or_default();
+        grid.add_column(Column::new().style(message_style).ratio(1));
+
+        // Path column (optional)
+        let has_path = file.is_some();
+        if has_path {
+            let path_style = self
+                .theme_stack
+                .get_style("log.path")
+                .unwrap_or_else(|| Style::new().with_dim(true));
+            grid.add_column(Column::new().style(path_style).no_wrap(true));
+        }
+
+        // Build the row
+        let mut cells: Vec<Box<dyn Renderable + Send + Sync>> = vec![Box::new(time_text)];
+
+        // Wrap the renderable in a capturing approach
+        // We need to render the user's content and wrap it
+        let options = self.options.clone();
+        let temp_console = Console::<Stdout>::with_options(options.clone());
+        let segments = renderable.render(&temp_console, &options);
+
+        // Convert segments to Text for the cell
+        let mut message_text = Text::plain("");
+        for seg in segments.iter() {
+            if seg.control.is_none() {
+                message_text.append(&*seg.text, seg.style);
+            }
+        }
+        cells.push(Box::new(message_text));
+
+        // Add path:line if provided
+        if let Some(f) = file {
+            // Extract just the filename from the path
+            let filename = f.rsplit(['/', '\\']).next().unwrap_or(f);
+            let path_text = if let Some(l) = line {
+                Text::plain(format!("{}:{}", filename, l))
+            } else {
+                Text::plain(filename)
+            };
+            cells.push(Box::new(path_text));
+        }
+
+        grid.add_row(Row::new(cells));
+
+        // Print the grid
+        self.print(&grid, None, None, None, false, "\n")
+    }
+
     /// Render a line (horizontal rule).
     pub fn rule(&mut self, title: Option<&str>) -> io::Result<()> {
         if self.quiet {
@@ -2185,26 +2298,19 @@ impl Console<Stdout> {
         };
 
         // Generate unique ID if not provided
-        let unique_id = unique_id
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                let content: String = segments
-                    .iter()
-                    .map(|s| format!("{:?}", s))
-                    .collect::<Vec<_>>()
-                    .join("");
-                let hash = adler32(&format!("{}{}", content, title));
-                format!("terminal-{}", hash)
-            });
+        let unique_id = unique_id.map(|s| s.to_string()).unwrap_or_else(|| {
+            let content: String = segments
+                .iter()
+                .map(|s| format!("{:?}", s))
+                .collect::<Vec<_>>()
+                .join("");
+            let hash = adler32(&format!("{}{}", content, title));
+            format!("terminal-{}", hash)
+        });
 
         // Split segments into lines
-        let lines = Segment::split_and_crop_lines(
-            Segments::from_iter(segments),
-            width,
-            None,
-            false,
-            false,
-        );
+        let lines =
+            Segment::split_and_crop_lines(Segments::from_iter(segments), width, None, false, false);
 
         let mut y = 0usize;
         for line in &lines {
@@ -2265,7 +2371,10 @@ impl Console<Stdout> {
                             ("class", &format!("{}-{}", unique_id, class_name)),
                             ("x", &format_number(x as f64 * char_width)),
                             ("y", &format_number(y as f64 * line_height + char_height)),
-                            ("textLength", &format_number(char_width * text_length as f64)),
+                            (
+                                "textLength",
+                                &format_number(char_width * text_length as f64),
+                            ),
                             ("clip-path", &format!("url(#{}-line-{})", unique_id, y)),
                         ],
                     ));
@@ -2351,13 +2460,15 @@ impl Console<Stdout> {
         }
 
         // Add window buttons
-        chrome.push_str(r##"
+        chrome.push_str(
+            r##"
             <g transform="translate(26,22)">
             <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
             <circle cx="22" cy="0" r="7" fill="#febc2e"/>
             <circle cx="44" cy="0" r="7" fill="#28c840"/>
             </g>
-        "##);
+        "##,
+        );
 
         // Generate final SVG
         code_format
@@ -2365,8 +2476,14 @@ impl Console<Stdout> {
             .replace("{char_width}", &format_number(char_width))
             .replace("{char_height}", &format_number(char_height))
             .replace("{line_height}", &format_number(line_height))
-            .replace("{terminal_width}", &format_number(char_width * width as f64 - 1.0))
-            .replace("{terminal_height}", &format_number((y as f64 + 1.0) * line_height - 1.0))
+            .replace(
+                "{terminal_width}",
+                &format_number(char_width * width as f64 - 1.0),
+            )
+            .replace(
+                "{terminal_height}",
+                &format_number((y as f64 + 1.0) * line_height - 1.0),
+            )
             .replace("{width}", &format_number(terminal_width + margin_width))
             .replace("{height}", &format_number(terminal_height + margin_height))
             .replace("{terminal_x}", &format_number(margin_left + padding_left))
@@ -2376,6 +2493,176 @@ impl Console<Stdout> {
             .replace("{backgrounds}", &backgrounds)
             .replace("{matrix}", &matrix)
             .replace("{lines}", &lines_svg)
+    }
+
+    /// Export console contents as HTML.
+    ///
+    /// Generates an HTML document from the recorded console output. Requires
+    /// `record=true` to have been set (via `new_with_record()` or `set_record(true)`).
+    ///
+    /// This is modeled after Python Rich's `Console.export_html()`. Hyperlinks are
+    /// emitted as `<a href="...">` when `StyleMeta.link` is present on segments.
+    ///
+    /// # Arguments
+    ///
+    /// * `theme` - Optional terminal theme for colors. Defaults to `DEFAULT_TERMINAL_THEME`.
+    /// * `clear` - Whether to clear the record buffer after exporting.
+    /// * `code_format` - Optional custom HTML template. Defaults to `CONSOLE_HTML_FORMAT`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::Console;
+    ///
+    /// let mut console = Console::new_with_record();
+    /// console.print_text("Hello, World!").unwrap();
+    /// let html = console.export_html(None, true, None);
+    /// assert!(html.contains("<!DOCTYPE html>"));
+    /// assert!(html.contains("Hello, World!"));
+    /// ```
+    pub fn export_html(
+        &mut self,
+        theme: Option<&TerminalTheme>,
+        clear: bool,
+        code_format: Option<&str>,
+    ) -> String {
+        let theme = theme.unwrap_or(&*DEFAULT_TERMINAL_THEME);
+        let code_format = code_format.unwrap_or(CONSOLE_HTML_FORMAT);
+
+        // CSS rules cache - uses string key instead of Style (which doesn't implement Hash).
+        let mut classes: HashMap<String, usize> = HashMap::new();
+        let mut style_no = 1usize;
+
+        // Get segments from record buffer.
+        let segments: Vec<Segment> = {
+            let mut buffer = self.record_buffer.lock().unwrap();
+            let segments: Vec<Segment> = buffer
+                .iter()
+                .filter(|s| s.control.is_none())
+                .cloned()
+                .collect();
+            if clear {
+                buffer.clear();
+            }
+            segments
+        };
+
+        // First pass: collect CSS classes needed.
+        for segment in &segments {
+            let style = segment.style.unwrap_or_default();
+            let rules = get_html_style_for_segment(&style, theme);
+            if !rules.is_empty() && !classes.contains_key(&rules) {
+                classes.insert(rules, style_no);
+                style_no += 1;
+            }
+        }
+
+        // Generate CSS styles.
+        let stylesheet: String = classes
+            .iter()
+            .map(|(css, rule_no)| format!(".r{} {{ {} }}", rule_no, css))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Render HTML-encoded console content.
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        enum OpenTag {
+            Span {
+                class_no: usize,
+            },
+            Link {
+                class_no: Option<usize>,
+                href: Arc<str>,
+            },
+        }
+
+        let mut code = String::new();
+        let mut open: Option<OpenTag> = None;
+
+        let close_open = |code: &mut String, open: &mut Option<OpenTag>| {
+            if let Some(tag) = open.take() {
+                match tag {
+                    OpenTag::Span { .. } => code.push_str("</span>"),
+                    OpenTag::Link { .. } => code.push_str("</a>"),
+                }
+            }
+        };
+
+        let open_tag = |code: &mut String, tag: &OpenTag| match tag {
+            OpenTag::Span { class_no } => {
+                code.push_str(&format!("<span class=\"r{}\">", class_no));
+            }
+            OpenTag::Link { class_no, href } => {
+                let href_escaped = escape_html_attr(href);
+                if let Some(class_no) = class_no {
+                    code.push_str(&format!(
+                        "<a class=\"r{}\" href=\"{}\">",
+                        class_no, href_escaped
+                    ));
+                } else {
+                    code.push_str(&format!("<a href=\"{}\">", href_escaped));
+                }
+            }
+        };
+
+        for segment in &segments {
+            let text = segment.text.as_ref();
+            if text.is_empty() {
+                continue;
+            }
+
+            let style = segment.style.unwrap_or_default();
+            let rules = get_html_style_for_segment(&style, theme);
+            let class_no = if rules.is_empty() {
+                None
+            } else {
+                Some(classes[&rules])
+            };
+
+            let href = segment.meta.as_ref().and_then(|m| m.link.as_ref()).cloned();
+
+            let desired: Option<OpenTag> = if let Some(href) = href {
+                Some(OpenTag::Link { class_no, href })
+            } else if let Some(class_no) = class_no {
+                Some(OpenTag::Span { class_no })
+            } else {
+                None
+            };
+
+            if desired != open {
+                close_open(&mut code, &mut open);
+                if let Some(tag) = &desired {
+                    open_tag(&mut code, tag);
+                }
+                open = desired;
+            }
+
+            // HTML-escape text (do not replace spaces; <pre> preserves them).
+            code.push_str(&escape_html_text(text));
+        }
+
+        close_open(&mut code, &mut open);
+
+        // Generate final HTML.
+        code_format
+            .replace("{stylesheet}", &stylesheet)
+            .replace("{foreground}", &theme.foreground_color.hex())
+            .replace("{background}", &theme.background_color.hex())
+            .replace("{code}", &code)
+    }
+
+    /// Save console contents to an HTML file.
+    ///
+    /// This is a convenience method that calls `export_html()` and writes the result to a file.
+    pub fn save_html(
+        &mut self,
+        path: &str,
+        theme: Option<&TerminalTheme>,
+        clear: bool,
+        code_format: Option<&str>,
+    ) -> io::Result<()> {
+        let html = self.export_html(theme, clear, code_format);
+        std::fs::write(path, html)
     }
 
     /// Save console contents to an SVG file.
@@ -2467,8 +2754,80 @@ fn get_svg_style_for_segment(style: &Style, theme: &TerminalTheme) -> String {
     css_rules.join(";")
 }
 
+/// Get CSS style rules for a segment style in HTML export.
+fn get_html_style_for_segment(style: &Style, theme: &TerminalTheme) -> String {
+    let mut css_rules: Vec<String> = Vec::new();
+
+    // Get foreground color
+    let fg_color = style
+        .color
+        .map(|c| resolve_color_for_svg(c, theme, true))
+        .unwrap_or(theme.foreground_color);
+
+    // Get background color
+    let bg_color = style
+        .bgcolor
+        .map(|c| resolve_color_for_svg(c, theme, false))
+        .unwrap_or(theme.background_color);
+
+    // Handle reverse
+    let (fg_color, bg_color) = if style.reverse.unwrap_or(false) {
+        (bg_color, fg_color)
+    } else {
+        (fg_color, bg_color)
+    };
+
+    // Handle dim (match Python Rich export_html: blend 50% towards background)
+    let fg_color = if style.dim.unwrap_or(false) {
+        blend_rgb_for_svg(fg_color, bg_color, 0.5)
+    } else {
+        fg_color
+    };
+
+    // Foreground color
+    if style.color.is_some() || style.reverse.unwrap_or(false) || style.dim.unwrap_or(false) {
+        css_rules.push(format!("color: {}", fg_color.hex()));
+        css_rules.push(format!("text-decoration-color: {}", fg_color.hex()));
+    }
+
+    // Background color only when explicitly set (or reverse forces it)
+    let has_background = if style.reverse.unwrap_or(false) {
+        true
+    } else {
+        style.bgcolor.is_some() && !is_default_color(style.bgcolor)
+    };
+    if has_background {
+        css_rules.push(format!("background-color: {}", bg_color.hex()));
+    }
+
+    // Attributes
+    if style.bold.unwrap_or(false) {
+        css_rules.push("font-weight: bold".to_string());
+    }
+    if style.italic.unwrap_or(false) {
+        css_rules.push("font-style: italic".to_string());
+    }
+
+    let mut decorations = Vec::new();
+    if style.underline.unwrap_or(false) {
+        decorations.push("underline");
+    }
+    if style.strike.unwrap_or(false) {
+        decorations.push("line-through");
+    }
+    if !decorations.is_empty() {
+        css_rules.push(format!("text-decoration: {}", decorations.join(" ")));
+    }
+
+    css_rules.join("; ")
+}
+
 /// Resolve a SimpleColor to a ColorTriplet using the terminal theme.
-fn resolve_color_for_svg(color: SimpleColor, theme: &TerminalTheme, is_foreground: bool) -> ColorTriplet {
+fn resolve_color_for_svg(
+    color: SimpleColor,
+    theme: &TerminalTheme,
+    is_foreground: bool,
+) -> ColorTriplet {
     match color {
         SimpleColor::Default => {
             if is_foreground {
@@ -2477,9 +2836,7 @@ fn resolve_color_for_svg(color: SimpleColor, theme: &TerminalTheme, is_foregroun
                 theme.background_color
             }
         }
-        SimpleColor::Standard(index) => {
-            theme.get_ansi_color(index as usize)
-        }
+        SimpleColor::Standard(index) => theme.get_ansi_color(index as usize),
         SimpleColor::EightBit(index) => {
             // For 8-bit colors, use the 256-color palette lookup
             if let Some(triplet) = crate::color::EIGHT_BIT_PALETTE.get(index as usize) {
@@ -2488,9 +2845,7 @@ fn resolve_color_for_svg(color: SimpleColor, theme: &TerminalTheme, is_foregroun
                 theme.foreground_color
             }
         }
-        SimpleColor::Rgb { r, g, b } => {
-            ColorTriplet::new(r, g, b)
-        }
+        SimpleColor::Rgb { r, g, b } => ColorTriplet::new(r, g, b),
     }
 }
 
@@ -2529,12 +2884,30 @@ fn escape_text(text: &str) -> String {
         .replace(' ', "&#160;")
 }
 
+/// Escape text content for HTML (does not replace spaces; `<pre>` preserves them).
+fn escape_html_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Escape a string for use in an HTML attribute value (double-quoted).
+fn escape_html_attr(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Format a number for SVG attributes (removes trailing zeros).
 fn format_number(value: f64) -> String {
     if value.fract() == 0.0 {
         format!("{}", value as i64)
     } else {
-        format!("{:.2}", value).trim_end_matches('0').trim_end_matches('.').to_string()
+        format!("{:.2}", value)
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
     }
 }
 
@@ -3357,5 +3730,48 @@ mod tests {
         // Buffer should still contain data
         let buffer = console.get_record_buffer();
         assert!(!buffer.is_empty());
+    }
+
+    #[test]
+    fn test_export_html_basic() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+        console.options_mut().max_width = 40;
+
+        console.print_text("Hello, World!").unwrap();
+
+        let html = console.export_html(None, true, None);
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("Hello, World!"));
+
+        // Buffer should be cleared
+        let buffer = console.get_record_buffer();
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_export_html_link_emits_anchor_tag() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+
+        let text =
+            Text::from_markup("[link=https://textualize.io]Textualize.io[/link]", false).unwrap();
+        console.print(&text, None, None, None, false, "\n").unwrap();
+
+        let html = console.export_html(None, true, None);
+        assert!(html.contains("<a"));
+        assert!(html.contains("href=\"https://textualize.io\""));
+        assert!(html.contains("Textualize.io"));
+    }
+
+    #[test]
+    fn test_export_html_escapes_text() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+
+        console.print_text("<script>alert('XSS')</script>").unwrap();
+        let html = console.export_html(None, true, None);
+        assert!(html.contains("&lt;script&gt;"));
+        assert!(!html.contains("<script>"));
     }
 }
