@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use std::borrow::Cow;
 
 use crate::cells::{cell_len, char_width, set_cell_size};
-use crate::style::Style;
+use crate::style::{Style, StyleMeta};
 use std::sync::Arc;
 
 /// Control codes that can be embedded in output.
@@ -62,6 +62,8 @@ pub struct Segment {
     pub text: Cow<'static, str>,
     /// Optional style to apply.
     pub style: Option<Style>,
+    /// Optional style metadata (hyperlinks, Textual handlers, etc.).
+    pub meta: Option<StyleMeta>,
     /// Optional control code (if set, text is typically empty).
     pub control: Option<ControlType>,
 }
@@ -72,6 +74,7 @@ impl Segment {
         Segment {
             text: text.into(),
             style: None,
+            meta: None,
             control: None,
         }
     }
@@ -81,6 +84,31 @@ impl Segment {
         Segment {
             text: text.into(),
             style: Some(style),
+            meta: None,
+            control: None,
+        }
+    }
+
+    /// Create a new styled segment with metadata.
+    pub fn styled_with_meta(
+        text: impl Into<Cow<'static, str>>,
+        style: Style,
+        meta: StyleMeta,
+    ) -> Self {
+        Segment {
+            text: text.into(),
+            style: Some(style),
+            meta: if meta.is_empty() { None } else { Some(meta) },
+            control: None,
+        }
+    }
+
+    /// Create a new segment with metadata and no style.
+    pub fn new_with_meta(text: impl Into<Cow<'static, str>>, meta: StyleMeta) -> Self {
+        Segment {
+            text: text.into(),
+            style: None,
+            meta: if meta.is_empty() { None } else { Some(meta) },
             control: None,
         }
     }
@@ -90,6 +118,7 @@ impl Segment {
         Segment {
             text: Cow::Borrowed(""),
             style: None,
+            meta: None,
             control: Some(control),
         }
     }
@@ -117,6 +146,7 @@ impl Segment {
                 Some(existing) => existing.combine(style),
                 None => *style,
             }),
+            meta: self.meta.clone(),
             control: self.control.clone(),
         }
     }
@@ -147,13 +177,14 @@ impl Segment {
     pub fn split_cells(&self, cut: usize) -> (Segment, Segment) {
         let text = &self.text;
         let style = self.style;
+        let meta = self.meta.clone();
         let control = self.control.clone();
 
         // Control segments have no visual width
         if control.is_some() {
             return (
                 self.clone(),
-                Segment::new_with_style_control("", style, control),
+                Segment::new_with_style_control("", style, meta, control),
             );
         }
 
@@ -163,14 +194,14 @@ impl Segment {
         if cut >= segment_cell_len {
             return (
                 self.clone(),
-                Segment::new_with_style_control("", style, control),
+                Segment::new_with_style_control("", style, meta, control),
             );
         }
 
         // If cut is at the start, return empty and original
         if cut == 0 {
             return (
-                Segment::new_with_style_control("", style, control),
+                Segment::new_with_style_control("", style, meta, control),
                 self.clone(),
             );
         }
@@ -181,8 +212,13 @@ impl Segment {
             let before = &text[..cut];
             let after = &text[cut..];
             return (
-                Segment::new_with_style_control(before.to_string(), style, control.clone()),
-                Segment::new_with_style_control(after.to_string(), style, control),
+                Segment::new_with_style_control(
+                    before.to_string(),
+                    style,
+                    meta.clone(),
+                    control.clone(),
+                ),
+                Segment::new_with_style_control(after.to_string(), style, meta, control),
             );
         }
 
@@ -197,8 +233,18 @@ impl Segment {
                 let before = &text[..byte_idx];
                 let after = &text[byte_idx..];
                 return (
-                    Segment::new_with_style_control(before.to_string(), style, control.clone()),
-                    Segment::new_with_style_control(after.to_string(), style, control),
+                    Segment::new_with_style_control(
+                        before.to_string(),
+                        style,
+                        meta.clone(),
+                        control.clone(),
+                    ),
+                    Segment::new_with_style_control(
+                        after.to_string(),
+                        style,
+                        meta.clone(),
+                        control,
+                    ),
                 );
             }
 
@@ -214,8 +260,13 @@ impl Segment {
                 let after_with_space = format!(" {}", after);
 
                 return (
-                    Segment::new_with_style_control(before_with_space, style, control.clone()),
-                    Segment::new_with_style_control(after_with_space, style, control),
+                    Segment::new_with_style_control(
+                        before_with_space,
+                        style,
+                        meta.clone(),
+                        control.clone(),
+                    ),
+                    Segment::new_with_style_control(after_with_space, style, meta.clone(), control),
                 );
             }
 
@@ -225,7 +276,7 @@ impl Segment {
         // Shouldn't reach here, but return original and empty as fallback
         (
             self.clone(),
-            Segment::new_with_style_control("", style, control),
+            Segment::new_with_style_control("", style, meta, control),
         )
     }
 
@@ -233,11 +284,13 @@ impl Segment {
     fn new_with_style_control(
         text: impl Into<Cow<'static, str>>,
         style: Option<Style>,
+        meta: Option<StyleMeta>,
         control: Option<ControlType>,
     ) -> Self {
         Segment {
             text: text.into(),
             style,
+            meta,
             control,
         }
     }
@@ -263,6 +316,7 @@ impl Segment {
             if segment.text.contains('\n') && segment.control.is_none() {
                 let text = segment.text.to_string();
                 let style = segment.style;
+                let meta = segment.meta.clone();
                 let mut remaining = text.as_str();
 
                 while !remaining.is_empty() {
@@ -272,6 +326,7 @@ impl Segment {
                             current_line.push(Segment::new_with_style_control(
                                 before.to_string(),
                                 style,
+                                meta.clone(),
                                 None,
                             ));
                         }
@@ -283,6 +338,7 @@ impl Segment {
                             current_line.push(Segment::new_with_style_control(
                                 remaining.to_string(),
                                 style,
+                                meta.clone(),
                                 None,
                             ));
                         }
@@ -330,6 +386,7 @@ impl Segment {
             if segment.text.contains('\n') && segment.control.is_none() {
                 let text = segment.text.to_string();
                 let segment_style = segment.style;
+                let segment_meta = segment.meta.clone();
                 let mut remaining = text.as_str();
 
                 while !remaining.is_empty() {
@@ -339,6 +396,7 @@ impl Segment {
                             current_line.push(Segment::new_with_style_control(
                                 before.to_string(),
                                 segment_style,
+                                segment_meta.clone(),
                                 None,
                             ));
                         }
@@ -355,6 +413,7 @@ impl Segment {
                             current_line.push(Segment::new_with_style_control(
                                 remaining.to_string(),
                                 segment_style,
+                                segment_meta.clone(),
                                 None,
                             ));
                         }
@@ -399,15 +458,12 @@ impl Segment {
             if pad {
                 let mut new_line = line.to_vec();
                 let padding = " ".repeat(length - line_length);
-                let end_style = line
-                    .iter()
-                    .rev()
-                    .find_map(|seg| {
-                        if seg.control.is_some() {
-                            return None;
-                        }
-                        seg.style
-                    });
+                let end_style = line.iter().rev().find_map(|seg| {
+                    if seg.control.is_some() {
+                        return None;
+                    }
+                    seg.style
+                });
                 // Padding should extend *background* colors to avoid hairlines, but should not
                 // inherit decoration attributes like underline/bold/dim from the preceding text.
                 let padding_style = match (style, end_style) {
@@ -423,7 +479,12 @@ impl Segment {
                     (None, Some(end)) => end.bgcolor.map(|bg| Style::new().with_bgcolor(bg)),
                     (None, None) => None,
                 };
-                new_line.push(Segment::new_with_style_control(padding, padding_style, None));
+                new_line.push(Segment::new_with_style_control(
+                    padding,
+                    padding_style,
+                    None,
+                    None,
+                ));
                 new_line
             } else {
                 line.to_vec()
@@ -454,6 +515,7 @@ impl Segment {
                         new_line.push(Segment::new_with_style_control(
                             cropped_text,
                             segment.style,
+                            segment.meta.clone(),
                             None,
                         ));
                     }
@@ -473,9 +535,13 @@ impl Segment {
     /// This is useful for determining the "end of line" style when padding with spaces,
     /// so background colors extend to the full width.
     pub fn get_last_style(line: &[Segment]) -> Option<Style> {
-        line.iter()
-            .rev()
-            .find_map(|seg| if seg.control.is_some() { None } else { seg.style })
+        line.iter().rev().find_map(|seg| {
+            if seg.control.is_some() {
+                None
+            } else {
+                seg.style
+            }
+        })
     }
 
     /// Simplify segments by merging adjacent segments with the same style.
@@ -498,13 +564,18 @@ impl Segment {
         for segment in iter {
             // Only merge non-control segments with same style
             if last_segment.style == segment.style
+                && last_segment.meta == segment.meta
                 && last_segment.control.is_none()
                 && segment.control.is_none()
             {
                 // Merge text
                 let merged_text = format!("{}{}", last_segment.text, segment.text);
-                last_segment =
-                    Segment::new_with_style_control(merged_text, last_segment.style, None);
+                last_segment = Segment::new_with_style_control(
+                    merged_text,
+                    last_segment.style,
+                    last_segment.meta.clone(),
+                    None,
+                );
             } else {
                 result.push(last_segment);
                 last_segment = segment;
@@ -692,6 +763,7 @@ impl Segment {
             result.push(Segment {
                 text: segment.text,
                 style: new_style,
+                meta: segment.meta,
                 control: None,
             });
         }
@@ -734,6 +806,7 @@ impl Segment {
             .map(|s| Segment {
                 text: s.text,
                 style: None,
+                meta: None,
                 control: s.control,
             })
             .collect()
@@ -805,7 +878,9 @@ impl Segment {
         } else {
             " ".repeat(width)
         };
-        let blank = vec![Segment::new_with_style_control(blank_text, style, None)];
+        let blank = vec![Segment::new_with_style_control(
+            blank_text, style, None, None,
+        )];
 
         let mut result: Vec<Vec<Segment>> = lines
             .iter()
@@ -1187,8 +1262,7 @@ mod tests {
 
     #[test]
     fn test_adjust_line_length_pad_inherits_end_style() {
-        let end_style =
-            Style::new().with_bgcolor(crate::SimpleColor::Rgb { r: 1, g: 2, b: 3 });
+        let end_style = Style::new().with_bgcolor(crate::SimpleColor::Rgb { r: 1, g: 2, b: 3 });
         let line = vec![Segment::styled("x", end_style)];
         let result = Segment::adjust_line_length(&line, 3, None, true);
         assert_eq!(Segment::get_line_length(&result), 3);
@@ -1200,8 +1274,7 @@ mod tests {
     #[test]
     fn test_adjust_line_length_pad_combines_base_and_end_style() {
         let base = Style::new().with_bold(true);
-        let end_style =
-            Style::new().with_bgcolor(crate::SimpleColor::Rgb { r: 4, g: 5, b: 6 });
+        let end_style = Style::new().with_bgcolor(crate::SimpleColor::Rgb { r: 4, g: 5, b: 6 });
         let line = vec![Segment::styled("x", end_style)];
         let result = Segment::adjust_line_length(&line, 3, Some(base), true);
         let padding = result.last().unwrap().style.unwrap();
