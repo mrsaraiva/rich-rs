@@ -46,6 +46,7 @@ pub mod r#box;
 
 // Simple renderables
 pub mod align;
+pub mod bar;
 pub mod columns;
 pub mod padding;
 pub mod panel;
@@ -61,6 +62,7 @@ pub mod markdown;
 pub mod live;
 pub mod live_render;
 pub mod spinner;
+pub mod status;
 pub mod progress_bar;
 pub mod progress;
 pub mod constrain;
@@ -104,6 +106,7 @@ pub use highlighter::{
 
 // Simple renderable re-exports
 pub use align::{Align, VerticalAlignMethod};
+pub use bar::Bar;
 pub use columns::Columns;
 pub use padding::{Padding, PaddingDimensions};
 pub use panel::Panel;
@@ -132,7 +135,8 @@ pub use screen::Screen;
 pub use screen_buffer::{Cell, ScreenBuffer};
 pub use layout::{Layout, LayoutRender, SplitterKind};
 pub use progress_bar::ProgressBar;
-pub use spinner::Spinner;
+pub use spinner::{Spinner, spinner_names};
+pub use status::Status;
 pub use progress::{
     BarColumn, DownloadColumn, FileSizeColumn, MofNCompleteColumn, Progress, ProgressColumn,
     ProgressTask, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn,
@@ -151,6 +155,9 @@ pub use terminal_theme::{
     TerminalTheme, DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, MONOKAI, DIMMED_MONOKAI, NIGHT_OWLISH,
 };
 pub use export_format::{CONSOLE_SVG_FORMAT, CONSOLE_HTML_FORMAT};
+
+// Markup re-export
+pub use markup::escape as escape_markup;
 
 /// A type that can be rendered to the console.
 ///
@@ -193,4 +200,24 @@ impl Renderable for String {
     fn render(&self, _console: &Console, _options: &ConsoleOptions) -> Segments {
         Segments::from(Segment::new(self.clone()))
     }
+}
+
+/// Log a renderable to the console with automatic timestamp and source location.
+///
+/// This macro calls `Console::log()` and automatically captures the file and line
+/// number using `file!()` and `line!()` macros.
+///
+/// # Example
+///
+/// ```ignore
+/// use rich_rs::{Console, Text, log};
+///
+/// let mut console = Console::new();
+/// rich_rs::log!(console, &Text::plain("Server starting..."));
+/// ```
+#[macro_export]
+macro_rules! log {
+    ($console:expr, $renderable:expr) => {
+        $console.log($renderable, Some(file!()), Some(line!()))
+    };
 }

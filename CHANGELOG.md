@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `Bar` renderable for horizontal bars with smooth Unicode block characters
+- `Status` wrapper for spinner + text on long-running operations
+- `console.log()` method with timestamp and file/line support
+- `log!` macro for ergonomic logging with automatic file/line capture
+- Table/Column mutation API for runtime modification with Live displays
+- `spinner_names()` now public for enumerating available spinners
+- `escape_markup()` re-exported for escaping markup characters
+- 16 ported examples from Python Rich (table_movie, spinners, layout, calendar, etc.)
+
 ## [1.0.0] - 2026-02-03
 
 ### Highlights

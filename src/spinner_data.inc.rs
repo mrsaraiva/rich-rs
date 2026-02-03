@@ -2,7 +2,7 @@
 // Do not edit by hand.
 
 #[allow(dead_code)]
-pub(crate) fn spinner_names() -> &'static [&'static str] {
+pub fn spinner_names() -> &'static [&'static str] {
     &[
         "aesthetic",
         "arc",
