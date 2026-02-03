@@ -2265,7 +2265,7 @@ impl Console<Stdout> {
                             ("class", &format!("{}-{}", unique_id, class_name)),
                             ("x", &format_number(x as f64 * char_width)),
                             ("y", &format_number(y as f64 * line_height + char_height)),
-                            ("textLength", &format_number(char_width * segment.text.len() as f64)),
+                            ("textLength", &format_number(char_width * text_length as f64)),
                             ("clip-path", &format!("url(#{}-line-{})", unique_id, y)),
                         ],
                     ));
