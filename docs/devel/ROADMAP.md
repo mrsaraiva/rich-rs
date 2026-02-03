@@ -495,34 +495,42 @@ the remaining work is focused on regression-proofing (parity tests) and completi
 
 ---
 
-## Phase 7: Screen & Region (Foundation for Textual)
+## Phase 7: Screen & Region (Done)
 
-Textual-style TUIs require a screen model (a 2D grid of “cells” with style) and robust region math.
-Python Rich provides these building blocks; for a Rust port of Textual, these are core, not optional.
+Textual-style TUIs require robust region math, a way to render to a bounded screen, and cursor-safe live updates.
+This phase implements the direct Rich equivalents used by Live / Progress (`Region`, `Screen`, `LiveRender`).
 
 ### 7.1 Region
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Region` struct (x, y, width, height) | `rich/region.py` | Core rectangle math |
-| Todo | Intersection / union / contains / crop | `rich/region.py` | Required for clipping and layout |
-| Todo | Region tests | `rich/region.py` | Deterministic unit tests |
+| Done | `Region` struct (x, y, width, height) | `rich/region.py` | Core rectangle math |
+| Done | Intersection / union / contains / crop | `rich/region.py` | Required for clipping and layout |
+| Done | Region tests | `rich/region.py` | Deterministic unit tests |
 
-### 7.2 Screen Buffer
-
-| Status | Task | Python Reference | Notes |
-|--------|------|------------------|-------|
-| Todo | `Screen` / buffer type (Cell grid) | `rich/screen.py` | Stores (char, style) per cell |
-| Todo | Render Segments → Screen (wrapping + clipping) | `rich/screen.py` | Convert renderables to a buffer for diffing |
-| Todo | Diff Screen → terminal updates | `rich/live_render.py` + `rich/console.py` | Minimizes redraw; cursor correctness |
-| Todo | Screen parity tests (golden captures) | `rich/screen.py` | Validate stable rendering across widths |
-
-### 7.3 Console integration
+### 7.2 Screen
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Console.screen()` API parity | `rich/console.py` | Context / lifecycle API; integrates with Live |
-| Todo | `LiveRender` equivalent | `rich/live_render.py` | Owns render region and update logic |
+| Done | `Screen` renderable (fill + crop) | `rich/screen.py` | Pads/crops render output to terminal size |
+
+### 7.3 Live render
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Done | `LiveRender` equivalent | `rich/live_render.py` | Tracks shape; provides cursor controls |
+
+### Future: Screen buffer + diffing (Textual foundation)
+
+The following items are required for a full Textual-style render engine (cell grid + diff updates), but are not
+required for Rich's Live/Progress parity as implemented in `rich-rs` today.
+
+| Status | Task | Python Reference | Notes |
+|--------|------|------------------|-------|
+| Todo | Cell grid buffer (`ScreenBuffer`) | `rich/screen.py` | Stores (char, style) per cell |
+| Todo | Render Segments → ScreenBuffer (wrapping + clipping) | `rich/screen.py` | Convert renderables to a buffer for diffing |
+| Todo | Diff ScreenBuffer → terminal updates | `rich/console.py` | Minimal redraw; cursor correctness |
+| Todo | ScreenBuffer parity tests (golden captures) | `rich/screen.py` | Validate stable rendering across widths |
 
 ---
 

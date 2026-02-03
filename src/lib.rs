@@ -56,12 +56,15 @@ pub mod traceback;
 pub mod tree;
 pub mod markdown;
 pub mod live;
+pub mod live_render;
 pub mod spinner;
 pub mod progress_bar;
 pub mod progress;
 pub mod constrain;
 pub mod loop_helpers;
 pub mod prompt;
+pub mod region;
+pub mod screen;
 
 // Builtin renderables
 mod renderables;
@@ -117,6 +120,9 @@ pub use scope::{ScopeRenderable, render_scope};
 // Traceback re-exports
 pub use traceback::{Frame, Stack, SyntaxErrorInfo, Trace, Traceback, TracebackBuilder};
 pub use live::{Live, LiveOptions, VerticalOverflowMethod};
+pub use live_render::LiveRender;
+pub use region::Region;
+pub use screen::Screen;
 pub use progress_bar::ProgressBar;
 pub use spinner::Spinner;
 pub use progress::{
