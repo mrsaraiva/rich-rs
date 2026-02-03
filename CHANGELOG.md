@@ -66,6 +66,15 @@ This release includes complete implementations of all major Rich features:
 - `AnsiDecoder` for parsing ANSI escape sequences back to styled text
 - `Text::from_ansi()` for converting ANSI-styled strings to Text
 
+#### Console Export
+- `Console::export_svg()` for programmatic SVG screenshot generation
+  - Record mode captures segments via `Console::new_with_record()`
+  - Customizable terminal chrome with title
+  - `TerminalTheme` struct for export color schemes
+  - Built-in themes: `SVG_EXPORT_THEME`, `MONOKAI`, `DIMMED_MONOKAI`, `NIGHT_OWLISH`
+  - `save_svg()` convenience method for file output
+  - XSS-safe HTML escaping for text content
+
 #### Demo & Examples
 - `cargo run --example demo` - Full feature showcase matching `python -m rich`
 - `cargo run --example progress` - Progress bar demonstrations
