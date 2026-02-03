@@ -18,6 +18,8 @@ Rich text and beautiful formatting for the terminal — a Rust port of Python's 
 - **Trees** — Hierarchical data with guide lines
 - **Panels** — Bordered boxes with titles
 - **Tracebacks** — Beautiful panic backtraces with source context
+- **Prompts** — Interactive user input with validation and choices
+- **Pager** — Less-style content paging for long output
 
 ## Quick Start
 
@@ -121,6 +123,32 @@ fn main() {
 }
 ```
 
+### Interactive Prompts
+
+```rust
+use rich_rs::prompt::{Prompt, Confirm, IntPrompt};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Simple text prompt
+    let name = Prompt::ask("What is your name?")?;
+
+    // Prompt with choices
+    let color = Prompt::new("Favorite color?")
+        .with_choices(&["red", "green", "blue"])
+        .run()?;
+
+    // Numeric prompt with validation
+    let age: i64 = IntPrompt::ask("How old are you?")?;
+
+    // Yes/No confirmation
+    if Confirm::ask("Continue?")? {
+        println!("Proceeding...");
+    }
+
+    Ok(())
+}
+```
+
 ## Demo
 
 See all features in action:
@@ -149,13 +177,14 @@ rich-rs provides complete feature parity with Python Rich's core rendering capab
 | Live Display | ✅ Complete |
 | Spinners | ✅ Complete |
 | Emoji | ✅ Complete |
+| Prompts | ✅ Complete |
+| Pager | ✅ Complete |
+| Screen & Region | ✅ Complete |
 
-### Not Included (Python-specific or niche)
+### Not Included (Python-specific)
 
 - `logging.py` — Python logging integration (use `tracing` crate for Rust)
 - `jupyter.py` — Jupyter notebook support
-- `prompt.py` — Interactive prompts (see `dialoguer` crate)
-- `pager.py` — Less-style paging
 
 ## Minimum Supported Rust Version
 
