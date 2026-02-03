@@ -542,11 +542,11 @@ and compatibility layer for Rich-based TUIs.
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Layout` tree (name, children, ratio, minimum_size) | `rich/layout.py` | Node-based composition |
-| Todo | `split_row` / `split_column` | `rich/layout.py` | Primary API for region partitioning |
-| Todo | Region assignment / refresh | `rich/layout.py` | Recompute regions on size changes |
-| Todo | Render Layout → Screen | `rich/layout.py` + `rich/screen.py` | Requires Phase 7 |
-| Todo | Layout parity tests | `rich/layout.py` | Snapshot tests + dimension cases |
+| Done | `Layout` tree (name, children, ratio, minimum_size) | `rich/layout.py` | Node-based composition |
+| Done | `split_row` / `split_column` | `rich/layout.py` | Primary API for region partitioning |
+| Done | Region assignment / refresh | `rich/layout.py` | Region map + `refresh_screen()` |
+| Done | Render Layout → Screen | `rich/layout.py` + `rich/screen.py` | Uses `ScreenBuffer` + blitting |
+| Done | Layout parity tests | `rich/layout.py` | Unit tests for splits + nesting |
 
 ---
 

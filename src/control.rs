@@ -39,6 +39,12 @@ impl Control {
         }
     }
 
+    pub fn move_to(x: u16, y: u16) -> Self {
+        Self {
+            controls: vec![ControlType::MoveTo { x, y }],
+        }
+    }
+
     pub fn extend(&mut self, controls: impl IntoIterator<Item = ControlType>) {
         self.controls.extend(controls);
     }
