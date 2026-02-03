@@ -542,16 +542,16 @@ and compatibility layer for Rich-based TUIs.
 
 ---
 
-## Phase 9: Interactive Utilities (Optional)
+## Phase 9: Interactive Utilities (Done)
 
-These are user-facing terminal UX features. They’re useful for end-user CLI apps, but not strictly required
+These are user-facing terminal UX features. They're useful for end-user CLI apps, but not strictly required
 for the rendering engine; decide based on product goals.
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Prompt` / `Confirm` equivalents | `rich/prompt.py` | Interactive stdin; validation |
-| Todo | `Pager` equivalent | `rich/pager.py` | Less-style paging; often platform-specific |
-| Todo | Stdout proxy during Live | `rich/file_proxy.py` | Prevent external prints from corrupting live region |
+| Done | `Prompt` / `Confirm` equivalents | `rich/prompt.py` | Interactive stdin; validation |
+| Done | `Pager` equivalent | `rich/pager.py` | Less-style paging; often platform-specific |
+| Done | Stdout proxy during Live | `rich/file_proxy.py` | Prevent external prints from corrupting live region |
 
 ---
 
