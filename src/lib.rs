@@ -66,6 +66,7 @@ pub mod rule;
 pub mod scope;
 pub mod screen;
 pub mod screen_buffer;
+pub mod screen_context;
 pub mod spinner;
 pub mod status;
 pub mod syntax;
@@ -134,13 +135,15 @@ pub use live::{Live, LiveOptions, VerticalOverflowMethod};
 pub use live_render::LiveRender;
 pub use progress::{
     BarColumn, DownloadColumn, FileSizeColumn, MofNCompleteColumn, Progress, ProgressColumn,
-    ProgressTask, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn,
-    TimeRemainingColumn, TotalFileSizeColumn, TrackConfig, TransferSpeedColumn,
+    ProgressReader, ProgressTask, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn,
+    TimeElapsedColumn, TimeRemainingColumn, TotalFileSizeColumn, TrackConfig, TransferSpeedColumn,
+    WrapFileBuilder,
 };
 pub use progress_bar::ProgressBar;
 pub use region::Region;
 pub use screen::Screen;
 pub use screen_buffer::{Cell, ScreenBuffer};
+pub use screen_context::ScreenContext;
 pub use spinner::{Spinner, spinner_names};
 pub use status::Status;
 pub use traceback::{Frame, Stack, SyntaxErrorInfo, Trace, Traceback, TracebackBuilder};

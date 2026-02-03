@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ScreenContext` for RAII alternate screen mode with automatic cleanup on drop
+- `Console::screen()` method to enter alternate screen mode with context guard
+- `ProgressReader<R: Read>` wrapper for file I/O progress tracking
+- `Progress::open()` to open files with automatic progress tracking
+- `Progress::wrap_file()` to wrap any reader with progress tracking
+- `WrapFileBuilder` for flexible progress reader configuration
+- `Console::print_traceback()` convenience method for rendering tracebacks
+- `screen.rs` example demonstrating ScreenContext usage
+- `cp_progress.rs` example - minimal file copy with progress bar
 - `Bar` renderable for horizontal bars with smooth Unicode block characters
 - `Status` wrapper for spinner + text on long-running operations
 - `console.log()` method with timestamp and file/line support

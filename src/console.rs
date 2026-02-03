@@ -27,6 +27,7 @@ use crate::table::{Column, Row, Table};
 use crate::terminal_theme::{DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, TerminalTheme};
 use crate::text::Text;
 use crate::theme::{Theme, ThemeStack};
+use crate::traceback::Traceback;
 
 use std::time::SystemTime;
 
@@ -1059,6 +1060,28 @@ impl<W: Write> Console<W> {
         self.writer.flush()
     }
 
+    /// Print a traceback.
+    ///
+    /// This renders the given `Traceback` to the console with appropriate
+    /// styling. It's the Rust equivalent of Python Rich's `console.print_exception()`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use rich_rs::{Console, traceback::{Traceback, Trace, Stack, Frame}};
+    ///
+    /// let frame = Frame::new("main.rs", 42, "main");
+    /// let stack = Stack::new("Error", "Something went wrong").with_frame(frame);
+    /// let trace = Trace::new(vec![stack]);
+    /// let tb = Traceback::new(trace);
+    ///
+    /// let mut console = Console::new();
+    /// console.print_traceback(&tb).unwrap();
+    /// ```
+    pub fn print_traceback(&mut self, traceback: &Traceback) -> io::Result<()> {
+        self.print(traceback, None, None, None, false, "\n")
+    }
+
     /// Print a segment.
     pub fn print_segment(&mut self, segment: &Segment) -> io::Result<()> {
         if self.quiet {
@@ -1671,6 +1694,34 @@ impl<W: Write> Console<W> {
         }
         self.print_segments(&segs)?;
         Ok(true)
+    }
+
+    /// Enter alternate screen mode with a context guard.
+    ///
+    /// This returns a [`ScreenContext`] that automatically leaves alternate screen
+    /// mode when dropped, providing RAII semantics for full-screen applications.
+    ///
+    /// # Arguments
+    ///
+    /// * `hide_cursor` - Whether to hide the cursor while in alternate screen mode.
+    /// * `style` - Optional background style for the screen.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rich_rs::{Console, Text};
+    ///
+    /// let mut console = Console::new();
+    /// let mut screen = console.screen(true, None)?;
+    /// screen.update(Text::plain("Hello!"))?;
+    /// // Screen is automatically exited when `screen` is dropped
+    /// ```
+    pub fn screen(
+        &mut self,
+        hide_cursor: bool,
+        style: Option<Style>,
+    ) -> io::Result<crate::screen_context::ScreenContext<'_, W>> {
+        crate::screen_context::ScreenContext::new(self, hide_cursor, style)
     }
 
     /// Set the window title.
