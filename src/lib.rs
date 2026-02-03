@@ -29,6 +29,8 @@ mod segment;
 mod control;
 mod style;
 mod theme;
+pub mod terminal_theme;
+pub mod export_format;
 
 // Higher-level modules
 mod console;
@@ -143,6 +145,12 @@ pub use prompt::{Confirm, FloatPrompt, IntPrompt, InvalidResponse, Prompt, Promp
 // Pager re-exports
 pub use pager::{BufferPager, NullPager, Pager, SystemPager};
 pub use file_proxy::FileProxy;
+
+// Terminal theme and export re-exports
+pub use terminal_theme::{
+    TerminalTheme, DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, MONOKAI, DIMMED_MONOKAI, NIGHT_OWLISH,
+};
+pub use export_format::{CONSOLE_SVG_FORMAT, CONSOLE_HTML_FORMAT};
 
 /// A type that can be rendered to the console.
 ///

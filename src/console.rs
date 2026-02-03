@@ -10,17 +10,20 @@
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, Stdout, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crossterm::terminal::{self, ClearType};
 use crossterm::{cursor, execute, terminal as ct};
 
 use crate::Renderable;
-use crate::color::ColorSystem;
+use crate::cells::cell_len;
+use crate::color::{ColorSystem, ColorTriplet, SimpleColor};
 use crate::emoji::Emoji;
+use crate::export_format::CONSOLE_SVG_FORMAT;
 use crate::highlighter::Highlighter;
 use crate::segment::{ControlType, Segment, Segments};
 use crate::style::Style;
+use crate::terminal_theme::{TerminalTheme, SVG_EXPORT_THEME};
 use crate::text::Text;
 use crate::theme::{Theme, ThemeStack};
 
@@ -377,6 +380,10 @@ pub struct Console<W: Write = Stdout> {
     link_ids: HashMap<Arc<str>, Arc<str>>,
     /// Next id counter for generated hyperlinks.
     next_link_id: u64,
+    /// Whether recording is enabled.
+    record: bool,
+    /// Buffer for recorded segments (protected by mutex for thread safety).
+    record_buffer: Arc<Mutex<Vec<Segment>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -432,7 +439,29 @@ impl Console<Stdout> {
             live: LiveManager::default(),
             link_ids: HashMap::new(),
             next_link_id: 1,
+            record: false,
+            record_buffer: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Create a new console with recording enabled.
+    ///
+    /// When recording is enabled, all segments written via `print()` are
+    /// captured in an internal buffer that can be exported as SVG/HTML.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::Console;
+    ///
+    /// let mut console = Console::new_with_record();
+    /// console.print_text("Hello, World!").unwrap();
+    /// let svg = console.export_svg("Example", None, true, None, 0.61, None);
+    /// ```
+    pub fn new_with_record() -> Self {
+        let mut console = Self::new();
+        console.record = true;
+        console
     }
 
     /// Set the console theme by name.
@@ -485,6 +514,8 @@ impl Console<Stdout> {
             live: LiveManager::default(),
             link_ids: HashMap::new(),
             next_link_id: 1,
+            record: false,
+            record_buffer: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -634,6 +665,8 @@ impl<W: Write> Console<W> {
             live: LiveManager::default(),
             link_ids: HashMap::new(),
             next_link_id: 1,
+            record: false,
+            record_buffer: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -996,7 +1029,8 @@ impl<W: Write> Console<W> {
         if self.quiet {
             return Ok(());
         }
-        if self.is_terminal() && !self.is_dumb_terminal() && self.has_live() {
+        // Use the full print() path if recording or live mode is active
+        if self.record || (self.is_terminal() && !self.is_dumb_terminal() && self.has_live()) {
             return self.print(&Text::plain(text), None, None, None, false, "\n");
         }
         writeln!(self.writer, "{}", text)?;
@@ -1008,7 +1042,8 @@ impl<W: Write> Console<W> {
         if self.quiet {
             return Ok(());
         }
-        if self.is_terminal() && !self.is_dumb_terminal() && self.has_live() {
+        // Use the full print() path if recording or live mode is active
+        if self.record || (self.is_terminal() && !self.is_dumb_terminal() && self.has_live()) {
             return self.print(&Text::styled(text, style), None, None, None, false, "\n");
         }
         // Only apply ANSI styling if color system is available
@@ -1354,6 +1389,18 @@ impl<W: Write> Console<W> {
             // Disable automatic line wrap (DECAWM) so output can use full width
             // without terminals inserting an extra wrapped line.
             write!(self.writer, "\x1b[?7l")?;
+        }
+
+        // Record segments if recording is enabled
+        if self.record {
+            if let Ok(mut buffer) = self.record_buffer.lock() {
+                for seg in segments.iter() {
+                    buffer.push(seg.clone());
+                }
+                if !end_to_write.is_empty() {
+                    buffer.push(Segment::new(end_to_write.to_string()));
+                }
+            }
         }
 
         let result = (|| {
@@ -2024,6 +2071,485 @@ impl Console<Stdout> {
     /// ```
     pub fn pager(&self, options: Option<PagerOptions>) -> PagerContext {
         PagerContext::new(self.options.clone(), options)
+    }
+
+    // ========================================================================
+    // Recording and Export Methods
+    // ========================================================================
+
+    /// Check if recording is enabled.
+    pub fn is_recording(&self) -> bool {
+        self.record
+    }
+
+    /// Enable or disable recording.
+    ///
+    /// When recording is enabled, all segments written via `print()` are
+    /// captured in an internal buffer that can be exported as SVG/HTML.
+    pub fn set_record(&mut self, record: bool) {
+        self.record = record;
+    }
+
+    /// Clear the record buffer.
+    pub fn clear_record_buffer(&mut self) {
+        if let Ok(mut buffer) = self.record_buffer.lock() {
+            buffer.clear();
+        }
+    }
+
+    /// Get the current record buffer contents.
+    ///
+    /// Returns a clone of the recorded segments.
+    pub fn get_record_buffer(&self) -> Vec<Segment> {
+        self.record_buffer
+            .lock()
+            .map(|buf| buf.clone())
+            .unwrap_or_default()
+    }
+
+    /// Export console contents as SVG.
+    ///
+    /// Generates an SVG image from the recorded console output. Requires
+    /// `record=true` to have been set (via `new_with_record()` or `set_record(true)`).
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - The title shown in the terminal window chrome.
+    /// * `theme` - Optional terminal theme for colors. Defaults to `SVG_EXPORT_THEME`.
+    /// * `clear` - Whether to clear the record buffer after exporting.
+    /// * `code_format` - Optional custom SVG template. Defaults to `CONSOLE_SVG_FORMAT`.
+    /// * `font_aspect_ratio` - Width/height ratio of the font. Defaults to 0.61 (Fira Code).
+    /// * `unique_id` - Optional unique ID for CSS classes. Auto-generated if not provided.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rich_rs::Console;
+    ///
+    /// let mut console = Console::new_with_record();
+    /// console.print_text("Hello, World!").unwrap();
+    /// let svg = console.export_svg("Example", None, true, None, 0.61, None);
+    /// assert!(svg.contains("Hello"));
+    /// ```
+    pub fn export_svg(
+        &mut self,
+        title: &str,
+        theme: Option<&TerminalTheme>,
+        clear: bool,
+        code_format: Option<&str>,
+        font_aspect_ratio: f64,
+        unique_id: Option<&str>,
+    ) -> String {
+        let theme = theme.unwrap_or(&*SVG_EXPORT_THEME);
+        let code_format = code_format.unwrap_or(CONSOLE_SVG_FORMAT);
+
+        // CSS rules cache - uses string key instead of Style (which doesn't implement Hash)
+        let mut classes: HashMap<String, usize> = HashMap::new();
+        let mut style_no = 1usize;
+
+        let width = self.width();
+        let char_height = 20.0;
+        let char_width = char_height * font_aspect_ratio;
+        let line_height = char_height * 1.22;
+
+        let margin_top = 1.0;
+        let margin_right = 1.0;
+        let margin_bottom = 1.0;
+        let margin_left = 1.0;
+
+        let padding_top = 40.0;
+        let padding_right = 8.0;
+        let padding_bottom = 8.0;
+        let padding_left = 8.0;
+
+        let padding_width = padding_left + padding_right;
+        let padding_height = padding_top + padding_bottom;
+        let margin_width = margin_left + margin_right;
+        let margin_height = margin_top + margin_bottom;
+
+        let mut text_backgrounds: Vec<String> = Vec::new();
+        let mut text_group: Vec<String> = Vec::new();
+
+        // Get segments from record buffer
+        let segments: Vec<Segment> = {
+            let mut buffer = self.record_buffer.lock().unwrap();
+            let segments: Vec<Segment> = buffer
+                .iter()
+                .filter(|s| s.control.is_none())
+                .cloned()
+                .collect();
+            if clear {
+                buffer.clear();
+            }
+            segments
+        };
+
+        // Generate unique ID if not provided
+        let unique_id = unique_id
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                let content: String = segments
+                    .iter()
+                    .map(|s| format!("{:?}", s))
+                    .collect::<Vec<_>>()
+                    .join("");
+                let hash = adler32(&format!("{}{}", content, title));
+                format!("terminal-{}", hash)
+            });
+
+        // Split segments into lines
+        let lines = Segment::split_and_crop_lines(
+            Segments::from_iter(segments),
+            width,
+            None,
+            false,
+            false,
+        );
+
+        let mut y = 0usize;
+        for line in &lines {
+            let mut x = 0usize;
+
+            for segment in line {
+                let style = segment.style.unwrap_or_default();
+                let rules = get_svg_style_for_segment(&style, theme);
+
+                if !classes.contains_key(&rules) {
+                    classes.insert(rules.clone(), style_no);
+                    style_no += 1;
+                }
+                let class_name = format!("r{}", classes[&rules]);
+
+                // Check for background
+                let has_background = if style.reverse.unwrap_or(false) {
+                    true
+                } else {
+                    style.bgcolor.is_some() && !is_default_color(style.bgcolor)
+                };
+
+                let background = if style.reverse.unwrap_or(false) {
+                    style
+                        .color
+                        .map(|c| resolve_color_for_svg(c, theme, true))
+                        .unwrap_or(theme.foreground_color)
+                } else {
+                    style
+                        .bgcolor
+                        .map(|c| resolve_color_for_svg(c, theme, false))
+                        .unwrap_or(theme.background_color)
+                };
+
+                let text_length = cell_len(&segment.text);
+
+                if has_background {
+                    text_backgrounds.push(make_tag(
+                        "rect",
+                        None,
+                        &[
+                            ("fill", &background.hex()),
+                            ("x", &format_number(x as f64 * char_width)),
+                            ("y", &format_number(y as f64 * line_height + 1.5)),
+                            ("width", &format_number(char_width * text_length as f64)),
+                            ("height", &format_number(line_height + 0.25)),
+                            ("shape-rendering", "crispEdges"),
+                        ],
+                    ));
+                }
+
+                // Only add text if it's not all spaces
+                if !segment.text.chars().all(|c| c == ' ') {
+                    text_group.push(make_tag(
+                        "text",
+                        Some(&escape_text(&segment.text)),
+                        &[
+                            ("class", &format!("{}-{}", unique_id, class_name)),
+                            ("x", &format_number(x as f64 * char_width)),
+                            ("y", &format_number(y as f64 * line_height + char_height)),
+                            ("textLength", &format_number(char_width * segment.text.len() as f64)),
+                            ("clip-path", &format!("url(#{}-line-{})", unique_id, y)),
+                        ],
+                    ));
+                }
+
+                x += text_length;
+            }
+            y += 1;
+        }
+
+        // Generate clip paths for lines
+        let line_offsets: Vec<f64> = (0..y)
+            .map(|line_no| line_no as f64 * line_height + 1.5)
+            .collect();
+
+        let lines_svg: String = line_offsets
+            .iter()
+            .enumerate()
+            .map(|(line_no, offset)| {
+                format!(
+                    r#"<clipPath id="{}-line-{}">
+    {}
+            </clipPath>"#,
+                    unique_id,
+                    line_no,
+                    make_tag(
+                        "rect",
+                        None,
+                        &[
+                            ("x", "0"),
+                            ("y", &format_number(*offset)),
+                            ("width", &format_number(char_width * width as f64)),
+                            ("height", &format_number(line_height + 0.25)),
+                        ],
+                    )
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Generate CSS styles
+        let styles: String = classes
+            .iter()
+            .map(|(css, rule_no)| format!(".{}-r{} {{ {} }}", unique_id, rule_no, css))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let backgrounds = text_backgrounds.join("");
+        let matrix = text_group.join("\n");
+
+        let terminal_width = (width as f64 * char_width + padding_width).ceil();
+        let terminal_height = (y as f64 + 1.0) * line_height + padding_height;
+
+        // Generate terminal chrome
+        let mut chrome = make_tag(
+            "rect",
+            None,
+            &[
+                ("fill", &theme.background_color.hex()),
+                ("stroke", "rgba(255,255,255,0.35)"),
+                ("stroke-width", "1"),
+                ("x", &format_number(margin_left)),
+                ("y", &format_number(margin_top)),
+                ("width", &format_number(terminal_width)),
+                ("height", &format_number(terminal_height)),
+                ("rx", "8"),
+            ],
+        );
+
+        // Add title if provided
+        if !title.is_empty() {
+            chrome.push_str(&make_tag(
+                "text",
+                Some(&escape_text(title)),
+                &[
+                    ("class", &format!("{}-title", unique_id)),
+                    ("fill", &theme.foreground_color.hex()),
+                    ("text-anchor", "middle"),
+                    ("x", &format_number(terminal_width / 2.0)),
+                    ("y", &format_number(margin_top + char_height + 6.0)),
+                ],
+            ));
+        }
+
+        // Add window buttons
+        chrome.push_str(r##"
+            <g transform="translate(26,22)">
+            <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
+            <circle cx="22" cy="0" r="7" fill="#febc2e"/>
+            <circle cx="44" cy="0" r="7" fill="#28c840"/>
+            </g>
+        "##);
+
+        // Generate final SVG
+        code_format
+            .replace("{unique_id}", &unique_id)
+            .replace("{char_width}", &format_number(char_width))
+            .replace("{char_height}", &format_number(char_height))
+            .replace("{line_height}", &format_number(line_height))
+            .replace("{terminal_width}", &format_number(char_width * width as f64 - 1.0))
+            .replace("{terminal_height}", &format_number((y as f64 + 1.0) * line_height - 1.0))
+            .replace("{width}", &format_number(terminal_width + margin_width))
+            .replace("{height}", &format_number(terminal_height + margin_height))
+            .replace("{terminal_x}", &format_number(margin_left + padding_left))
+            .replace("{terminal_y}", &format_number(margin_top + padding_top))
+            .replace("{styles}", &styles)
+            .replace("{chrome}", &chrome)
+            .replace("{backgrounds}", &backgrounds)
+            .replace("{matrix}", &matrix)
+            .replace("{lines}", &lines_svg)
+    }
+
+    /// Save console contents to an SVG file.
+    ///
+    /// This is a convenience method that calls `export_svg()` and writes
+    /// the result to a file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The file path to write to.
+    /// * `title` - The title shown in the terminal window chrome.
+    /// * `theme` - Optional terminal theme for colors.
+    /// * `clear` - Whether to clear the record buffer after exporting.
+    /// * `font_aspect_ratio` - Width/height ratio of the font. Defaults to 0.61.
+    /// * `unique_id` - Optional unique ID for CSS classes.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use rich_rs::Console;
+    ///
+    /// let mut console = Console::new_with_record();
+    /// console.print_text("Hello, World!").unwrap();
+    /// console.save_svg("output.svg", "Example", None, true, 0.61, None).unwrap();
+    /// ```
+    pub fn save_svg(
+        &mut self,
+        path: &str,
+        title: &str,
+        theme: Option<&TerminalTheme>,
+        clear: bool,
+        font_aspect_ratio: f64,
+        unique_id: Option<&str>,
+    ) -> io::Result<()> {
+        let svg = self.export_svg(title, theme, clear, None, font_aspect_ratio, unique_id);
+        std::fs::write(path, svg)
+    }
+}
+
+// ============================================================================
+// SVG Export Helper Functions
+// ============================================================================
+
+/// Get CSS style rules for a segment style.
+fn get_svg_style_for_segment(style: &Style, theme: &TerminalTheme) -> String {
+    let mut css_rules = Vec::new();
+
+    // Get foreground color
+    let fg_color = style
+        .color
+        .map(|c| resolve_color_for_svg(c, theme, true))
+        .unwrap_or(theme.foreground_color);
+
+    // Get background color
+    let bg_color = style
+        .bgcolor
+        .map(|c| resolve_color_for_svg(c, theme, false))
+        .unwrap_or(theme.background_color);
+
+    // Handle reverse
+    let (fg_color, bg_color) = if style.reverse.unwrap_or(false) {
+        (bg_color, fg_color)
+    } else {
+        (fg_color, bg_color)
+    };
+
+    // Handle dim
+    let fg_color = if style.dim.unwrap_or(false) {
+        blend_rgb_for_svg(fg_color, bg_color, 0.4)
+    } else {
+        fg_color
+    };
+
+    css_rules.push(format!("fill: {}", fg_color.hex()));
+
+    if style.bold.unwrap_or(false) {
+        css_rules.push("font-weight: bold".to_string());
+    }
+    if style.italic.unwrap_or(false) {
+        css_rules.push("font-style: italic".to_string());
+    }
+    if style.underline.unwrap_or(false) {
+        css_rules.push("text-decoration: underline".to_string());
+    }
+    if style.strike.unwrap_or(false) {
+        css_rules.push("text-decoration: line-through".to_string());
+    }
+
+    css_rules.join(";")
+}
+
+/// Resolve a SimpleColor to a ColorTriplet using the terminal theme.
+fn resolve_color_for_svg(color: SimpleColor, theme: &TerminalTheme, is_foreground: bool) -> ColorTriplet {
+    match color {
+        SimpleColor::Default => {
+            if is_foreground {
+                theme.foreground_color
+            } else {
+                theme.background_color
+            }
+        }
+        SimpleColor::Standard(index) => {
+            theme.get_ansi_color(index as usize)
+        }
+        SimpleColor::EightBit(index) => {
+            // For 8-bit colors, use the 256-color palette lookup
+            if let Some(triplet) = crate::color::EIGHT_BIT_PALETTE.get(index as usize) {
+                triplet
+            } else {
+                theme.foreground_color
+            }
+        }
+        SimpleColor::Rgb { r, g, b } => {
+            ColorTriplet::new(r, g, b)
+        }
+    }
+}
+
+/// Check if a color is the default color.
+fn is_default_color(color: Option<SimpleColor>) -> bool {
+    matches!(color, None | Some(SimpleColor::Default))
+}
+
+/// Blend two colors for dim effect.
+fn blend_rgb_for_svg(color: ColorTriplet, background: ColorTriplet, factor: f64) -> ColorTriplet {
+    let r = (color.red as f64 + (background.red as f64 - color.red as f64) * factor) as u8;
+    let g = (color.green as f64 + (background.green as f64 - color.green as f64) * factor) as u8;
+    let b = (color.blue as f64 + (background.blue as f64 - color.blue as f64) * factor) as u8;
+    ColorTriplet::new(r, g, b)
+}
+
+/// Simple Adler-32 checksum for generating unique IDs.
+fn adler32(data: &str) -> u32 {
+    let mut a: u32 = 1;
+    let mut b: u32 = 0;
+    const MOD_ADLER: u32 = 65521;
+
+    for byte in data.bytes() {
+        a = (a + byte as u32) % MOD_ADLER;
+        b = (b + a) % MOD_ADLER;
+    }
+
+    (b << 16) | a
+}
+
+/// Escape text for SVG/HTML.
+fn escape_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace(' ', "&#160;")
+}
+
+/// Format a number for SVG attributes (removes trailing zeros).
+fn format_number(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{}", value as i64)
+    } else {
+        format!("{:.2}", value).trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+/// Make an SVG tag with attributes.
+fn make_tag(name: &str, content: Option<&str>, attribs: &[(&str, &str)]) -> String {
+    let attribs_str: String = attribs
+        .iter()
+        .map(|(k, v)| format!("{}=\"{}\"", k, v))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if let Some(content) = content {
+        format!("<{} {}>{}</{}>", name, attribs_str, content, name)
+    } else {
+        format!("<{} {}/>", name, attribs_str)
     }
 }
 
@@ -2709,5 +3235,127 @@ mod tests {
 
         // Prevent the pager from actually running during the test
         pager.buffer.clear();
+    }
+
+    // ==================== Recording and SVG export tests ====================
+
+    #[test]
+    fn test_console_new_with_record() {
+        let console = Console::new_with_record();
+        assert!(console.is_recording());
+    }
+
+    #[test]
+    fn test_console_set_record() {
+        let mut console = Console::new();
+        assert!(!console.is_recording());
+
+        console.set_record(true);
+        assert!(console.is_recording());
+
+        console.set_record(false);
+        assert!(!console.is_recording());
+    }
+
+    #[test]
+    fn test_console_record_buffer() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+        console.options_mut().max_width = 80;
+
+        // Print something
+        console.print_text("Hello").unwrap();
+
+        // Check that something was recorded
+        let buffer = console.get_record_buffer();
+        assert!(!buffer.is_empty());
+
+        // Find the segment containing "Hello"
+        let has_hello = buffer.iter().any(|s| s.text.contains("Hello"));
+        assert!(has_hello, "Record buffer should contain 'Hello'");
+
+        // Clear the buffer
+        console.clear_record_buffer();
+        let buffer = console.get_record_buffer();
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_export_svg_basic() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+        console.options_mut().max_width = 40;
+
+        console.print_text("Hello, World!").unwrap();
+
+        let svg = console.export_svg("Test", None, true, None, 0.61, None);
+
+        // Check SVG structure
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("</svg>"));
+        assert!(svg.contains("Hello"));
+        assert!(svg.contains("rich-terminal"));
+
+        // Buffer should be cleared
+        let buffer = console.get_record_buffer();
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_export_svg_with_custom_title() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+        console.options_mut().max_width = 40;
+
+        console.print_text("Test").unwrap();
+
+        let svg = console.export_svg("My Custom Title", None, true, None, 0.61, None);
+
+        assert!(svg.contains("My&#160;Custom&#160;Title"));
+    }
+
+    #[test]
+    fn test_export_svg_with_unique_id() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+        console.options_mut().max_width = 40;
+
+        console.print_text("Test").unwrap();
+
+        let svg = console.export_svg("Test", None, true, None, 0.61, Some("my-unique-id"));
+
+        assert!(svg.contains("my-unique-id"));
+    }
+
+    #[test]
+    fn test_export_svg_escape_text() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+        console.options_mut().max_width = 80;
+
+        console.print_text("<script>alert('XSS')</script>").unwrap();
+
+        let svg = console.export_svg("Test", None, true, None, 0.61, None);
+
+        // Should be escaped
+        assert!(svg.contains("&lt;"));
+        assert!(svg.contains("&gt;"));
+        assert!(!svg.contains("<script>"));
+    }
+
+    #[test]
+    fn test_export_svg_no_clear() {
+        let mut console = Console::new_with_record();
+        console.options_mut().is_terminal = false;
+        console.options_mut().max_width = 40;
+
+        console.print_text("Hello").unwrap();
+
+        // Export without clearing
+        let _svg = console.export_svg("Test", None, false, None, 0.61, None);
+
+        // Buffer should still contain data
+        let buffer = console.get_record_buffer();
+        assert!(!buffer.is_empty());
     }
 }
