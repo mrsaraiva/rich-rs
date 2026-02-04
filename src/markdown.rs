@@ -31,12 +31,10 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, T
 
 use crate::Renderable;
 use crate::align::Align;
-use crate::r#box::DOUBLE;
 use crate::cells::cell_len;
 use crate::console::{Console, ConsoleOptions, JustifyMethod};
 use crate::measure::Measurement;
 use crate::padding::{Padding, PaddingDimensions};
-use crate::panel::Panel;
 use crate::rule::Rule;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
@@ -65,40 +63,37 @@ mod styles {
         SimpleColor::parse("blue").unwrap_or(SimpleColor::Default)
     }
 
-    fn yellow() -> SimpleColor {
-        SimpleColor::parse("yellow").unwrap_or(SimpleColor::Default)
-    }
-
     fn black() -> SimpleColor {
         SimpleColor::parse("black").unwrap_or(SimpleColor::Default)
     }
 
+    fn bright_blue() -> SimpleColor {
+        SimpleColor::parse("bright_blue").unwrap_or(SimpleColor::Default)
+    }
+
     pub fn heading1() -> Style {
-        Style::new().with_bold(true)
-    }
-
-    pub fn heading1_border() -> Style {
-        Style::new() // Default/white border like Python Rich
-    }
-
-    pub fn heading2() -> Style {
+        // Python Rich default: bold + underline
         Style::new().with_bold(true).with_underline(true)
     }
 
+    pub fn heading2() -> Style {
+        Style::new().with_color(magenta()).with_underline(true)
+    }
+
     pub fn heading3() -> Style {
-        Style::new().with_bold(true)
+        Style::new().with_color(magenta()).with_bold(true)
     }
 
     pub fn heading4() -> Style {
-        Style::new().with_bold(true).with_dim(true)
+        Style::new().with_color(magenta()).with_italic(true)
     }
 
     pub fn heading5() -> Style {
-        Style::new().with_underline(true)
+        Style::new().with_italic(true)
     }
 
     pub fn heading6() -> Style {
-        Style::new().with_italic(true)
+        Style::new().with_dim(true)
     }
 
     pub fn emphasis() -> Style {
@@ -118,7 +113,7 @@ mod styles {
     }
 
     pub fn block_quote() -> Style {
-        Style::new().with_color(magenta()).with_italic(true)
+        Style::new().with_color(magenta())
     }
 
     pub fn block_quote_border() -> Style {
@@ -126,7 +121,7 @@ mod styles {
     }
 
     pub fn link() -> Style {
-        Style::new().with_color(blue()).with_underline(true)
+        Style::new().with_color(bright_blue())
     }
 
     pub fn link_url() -> Style {
@@ -138,11 +133,11 @@ mod styles {
     }
 
     pub fn item_bullet() -> Style {
-        Style::new().with_color(yellow()).with_bold(true)
+        Style::new().with_bold(true)
     }
 
     pub fn item_number() -> Style {
-        Style::new().with_color(cyan()).with_bold(true)
+        Style::new().with_color(cyan())
     }
 
     pub fn horizontal_rule() -> Style {
@@ -277,18 +272,13 @@ impl BlockElement {
 
                 match level {
                     HeadingLevel::H1 => {
-                        // H1 gets wrapped in a Panel with a double border, text centered (Python Rich parity)
+                        // Python Rich: centered h1 with bold + underline (no panel).
                         let mut styled = text.clone();
                         styled.stylize(0, styled.len(), styles::heading1());
                         let centered = Align::center(Box::new(styled));
-                        let panel = Panel::new(Box::new(centered))
-                            .with_box(DOUBLE)
-                            .with_border_style(styles::heading1_border());
-                        result = panel.render(console, options);
+                        result = centered.render(console, options);
                     }
                     HeadingLevel::H2 => {
-                        // Add blank line before h2
-                        result.push(Segment::line());
                         let mut styled = text.clone();
                         styled.stylize(0, styled.len(), styles::heading2());
                         let segs = styled.render(console, options);

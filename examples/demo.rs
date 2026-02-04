@@ -5,17 +5,13 @@
 //! This demonstrates the major features of rich-rs, mirroring the Python Rich demo.
 
 use std::io::Stdout;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rich_rs::r#box::SIMPLE;
 use rich_rs::markdown::Markdown;
 use rich_rs::{
-    Column, Console, ConsoleOptions, ControlType, JustifyMethod, Measurement, Panel, Pretty,
-    Renderable, Row, Segment, Segments, SimpleColor, Style, Syntax, Table, Text,
-    VerticalAlignMethod,
+    Column, Console, ConsoleOptions, JustifyMethod, Measurement, Panel, Pretty, Renderable, Row,
+    Segment, Segments, SimpleColor, Style, Syntax, Table, Text, VerticalAlignMethod,
 };
 
 // ============================================================================
@@ -109,113 +105,6 @@ impl Renderable for ColorBox {
 }
 
 // ============================================================================
-// OSC 8 Hyperlinks (used in the footer panel)
-// ============================================================================
-
-#[derive(Debug, Clone)]
-struct Hyperlink {
-    id: Arc<str>,
-    url: Arc<str>,
-    text: Arc<str>,
-    style: Option<Style>,
-}
-
-impl Hyperlink {
-    fn next_id() -> Arc<str> {
-        static NEXT: once_cell::sync::Lazy<AtomicU32> = once_cell::sync::Lazy::new(|| {
-            let seed = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_micros();
-            AtomicU32::new(seed % 1_000_000)
-        });
-
-        let id = NEXT.fetch_add(1, Ordering::Relaxed) % 1_000_000;
-        Arc::<str>::from(id.to_string())
-    }
-
-    fn new(url: impl Into<Arc<str>>, text: impl Into<Arc<str>>, style: Option<Style>) -> Self {
-        Self {
-            id: Self::next_id(),
-            url: url.into(),
-            text: text.into(),
-            style,
-        }
-    }
-}
-
-impl Renderable for Hyperlink {
-    fn render(&self, console: &Console<Stdout>, _options: &ConsoleOptions) -> Segments {
-        if !console.is_terminal() || console.is_dumb_terminal() {
-            if let Some(style) = self.style {
-                return Segments::from(Segment::styled(self.text.to_string(), style));
-            }
-            return Segments::from(Segment::new(self.text.to_string()));
-        }
-
-        let mut segments = Segments::new();
-        segments.push(Segment::control(ControlType::HyperlinkStart {
-            url: self.url.clone(),
-            id: Some(self.id.clone()),
-        }));
-        if let Some(style) = self.style {
-            segments.push(Segment::styled(self.text.to_string(), style));
-        } else {
-            segments.push(Segment::new(self.text.to_string()));
-        }
-        segments.push(Segment::control(ControlType::HyperlinkEnd));
-        segments
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ThanksIntro;
-
-impl Renderable for ThanksIntro {
-    fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
-        let mut segments = Segments::new();
-
-        segments.push(Segment::new("We hope you enjoy using Rich!"));
-        segments.push(Segment::line());
-        segments.push(Segment::line());
-
-        segments.push(Segment::new("Rich is maintained with "));
-        let heart = Text::from_markup("[red]:heart:[/]", true).unwrap();
-        segments.extend(heart.render(console, options));
-        segments.push(Segment::new(" by "));
-
-        let textualize = Hyperlink::new("https://www.textualize.io", "Textualize.io", None);
-        segments.extend(textualize.render(console, options));
-
-        segments.push(Segment::line());
-        segments.push(Segment::line());
-        segments.push(Segment::new("- Will McGugan"));
-        segments.push(Segment::line());
-        segments.push(Segment::line());
-        segments.push(Segment::new("Rust port: "));
-        let marcos = Hyperlink::new("https://github.com/mrsaraiva", "Marcos Saraiva", None);
-        segments.extend(marcos.render(console, options));
-
-        segments
-    }
-
-    fn measure(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
-        // Default `Measurement::from_segments` assumes single-line, so compute a
-        // multi-line measurement by splitting and taking the union.
-        let lines = Segment::split_lines(self.render(console, options).into_iter());
-
-        let mut measurement = Measurement::new(0, 0);
-        for line in lines {
-            let mut segs = Segments::new();
-            segs.extend(line);
-            measurement = measurement.union(&Measurement::from_segments(&segs));
-        }
-
-        measurement
-    }
-}
-
-// ============================================================================
 // Demo Test Card
 // ============================================================================
 
@@ -224,7 +113,10 @@ fn make_test_card() -> Table {
     let mut table = Table::grid()
         .with_padding(1, 1)
         .with_pad_edge(true)
-        .with_title("Rich features");
+        .with_title_text(Text::styled(
+            "Rich features",
+            Style::new().with_italic(true),
+        ));
 
     // Add columns: Feature name and Demonstration
     table.add_column(
@@ -462,7 +354,7 @@ fn make_test_card() -> Table {
         ],
         vec![
             "May 19, 1999",
-            "Star Wars Ep. [b]I[/b]: [i]The Phantom Menace",
+            "Star Wars Ep. [b]I[/b]: [i]The phantom Menace",
             "$115,000,000",
             "$1,027,044,677",
         ],
@@ -572,10 +464,12 @@ Supports much of the *markdown* __syntax__!
         vec![Box::new(Text::plain("Markdown")), Box::new(md_comparison)];
     table.add_row(Row::new(markdown_cells));
 
-    // Blank row
-    let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
-        vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
-    table.add_row(Row::new(blank_row));
+    // Blank rows
+    for _ in 0..2 {
+        let blank_row: Vec<Box<dyn Renderable + Send + Sync>> =
+            vec![Box::new(Text::plain("")), Box::new(Text::plain(""))];
+        table.add_row(Row::new(blank_row));
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // +more! Section
@@ -623,7 +517,7 @@ fn main() {
     let _ = console.line(1);
     let timing_cold = Text::from_markup(
         &format!(
-            "[dim]rendered in [not dim]{:.1}ms[/] (cold cache)",
+            "[dim]rendered in [not dim][cyan]{:.1}[/cyan]ms[/] (cold cache)",
             cold_time.as_secs_f64() * 1000.0
         ),
         false,
@@ -631,7 +525,7 @@ fn main() {
     .unwrap();
     let timing_warm = Text::from_markup(
         &format!(
-            "[dim]rendered in [not dim]{:.1}ms[/] (warm cache)",
+            "[dim]rendered in [not dim][cyan]{:.1}[/cyan]ms[/] (warm cache)",
             warm_time.as_secs_f64() * 1000.0
         ),
         false,
@@ -640,66 +534,22 @@ fn main() {
 
     let _ = console.print(&timing_cold, None, None, None, false, "\n");
     let _ = console.print(&timing_warm, None, None, None, false, "\n");
+    let _ = console.line(1);
 
-    // "Thanks" panel (mirrors Python Rich demo output).
-    let mut sponsor_message = Table::grid().with_padding(1, 1);
-    sponsor_message.add_column(
-        Column::new()
-            .style(Style::new().with_color(SimpleColor::Standard(2))) // green
-            .justify(JustifyMethod::Right),
-    );
-    sponsor_message.add_column(Column::new().no_wrap(true));
+    // "Help ensure Rich is maintained" panel (matches Python Rich demo output).
+    let sponsor_body = Text::from_markup(
+        "[b magenta]Hope you enjoy using Rich-rs![/]\n\n\
+Consider sponsoring to ensure the upstream project is maintained.\n\n\
+[cyan]https://github.com/sponsors/willmcgugan[/cyan] | [b]Rust port: [/b]\
+[green]Marcos Saraiva - https://github.com/mrsaraiva/rich-rs[/green]",
+        false,
+    )
+    .unwrap();
 
-    let underline_blue = Style::parse("underline blue").unwrap_or_else(Style::new);
-    let textualize_link = Hyperlink::new(
-        "https://github.com/textualize",
-        "https://github.com/textualize",
-        Some(underline_blue),
-    );
-    let twitter_link = Hyperlink::new(
-        "https://twitter.com/willmcgugan",
-        "https://twitter.com/willmcgugan",
-        Some(underline_blue),
-    );
-    let github_link = Hyperlink::new(
-        "https://github.com/mrsaraiva/rich-rs",
-        "https://github.com/mrsaraiva/rich-rs",
-        Some(underline_blue),
-    );
+    let sponsor_panel = Panel::new(Box::new(sponsor_body))
+        .with_title("Help ensure Rich is maintained")
+        .with_border_style(Style::parse("green").unwrap_or_else(Style::new))
+        .with_padding((1, 2));
 
-    sponsor_message.add_row(Row::new(vec![
-        Box::new(Text::plain("Textualize")) as Box<dyn Renderable + Send + Sync>,
-        Box::new(textualize_link),
-    ]));
-    sponsor_message.add_row_strs(&["", ""]);
-    sponsor_message.add_row(Row::new(vec![
-        Box::new(Text::plain("Twitter")) as Box<dyn Renderable + Send + Sync>,
-        Box::new(twitter_link),
-    ]));
-    sponsor_message.add_row_strs(&["", ""]);
-    sponsor_message.add_row(Row::new(vec![
-        Box::new(Text::plain("Github")) as Box<dyn Renderable + Send + Sync>,
-        Box::new(github_link),
-    ]));
-
-    let intro_message = ThanksIntro;
-
-    let mut message = Table::grid().with_padding(2, 2);
-    message.add_column(Column::new());
-    message.add_column(Column::new().no_wrap(true));
-    message.add_row(Row::new(vec![
-        Box::new(intro_message) as Box<dyn Renderable + Send + Sync>,
-        Box::new(sponsor_message),
-    ]));
-
-    let title = Text::from_markup("[b red]Thanks for trying out Rich!", false).unwrap();
-
-    let panel = Panel::fit(Box::new(message))
-        .with_box(rich_rs::r#box::ROUNDED)
-        .with_padding((1, 2))
-        .with_title_text(title)
-        .with_border_style(Style::parse("bright_blue").unwrap_or_else(Style::new));
-
-    let centered = rich_rs::Align::center(Box::new(panel));
-    let _ = console.print(&centered, None, None, None, false, "\n");
+    let _ = console.print(&sponsor_panel, None, None, None, false, "\n");
 }

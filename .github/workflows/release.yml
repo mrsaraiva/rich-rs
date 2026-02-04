@@ -55,11 +55,53 @@ jobs:
           CARGO_INCREMENTAL: "0"
         run: cargo package
 
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    needs: [test, parity, package]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Read crate version
+        id: crate_version
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --no-deps --format-version 1 | \
+            python3 -c "import json,sys; print(json.load(sys.stdin)['packages'][0]['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Check if version exists on crates.io
+        id: version_check
+        run: |
+          set -euo pipefail
+          crate_name=$(cargo metadata --no-deps --format-version 1 | \
+            python3 -c "import json,sys; print(json.load(sys.stdin)['packages'][0]['name'])")
+          version="${{ steps.crate_version.outputs.version }}"
+          if curl -sfL "https://crates.io/api/v1/crates/${crate_name}/${version}"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip publish (version exists)
+        if: steps.version_check.outputs.exists == 'true'
+        run: echo "crate version already published; skipping cargo publish"
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+        if: steps.version_check.outputs.exists != 'true'
+      - name: Publish to crates.io
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked
+        if: steps.version_check.outputs.exists != 'true'
+
   create-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [test, parity, package]
+    needs: [test, parity, package, publish]
     steps:
       - uses: actions/checkout@v4
       - name: Create GitHub Release
