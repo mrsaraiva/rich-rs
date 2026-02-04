@@ -1,7 +1,11 @@
 [package]
-name = "phase4-parity"
+name = "parity-phase4"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 rich-rs = { path = "../../../.." }
+
+[[bin]]
+name = "parity-phase4"
+path = "src/main.rs"

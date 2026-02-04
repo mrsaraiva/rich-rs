@@ -1698,7 +1698,7 @@ impl<W: Write> Console<W> {
 
     /// Enter alternate screen mode with a context guard.
     ///
-    /// This returns a [`ScreenContext`] that automatically leaves alternate screen
+    /// This returns a [`crate::ScreenContext`] that automatically leaves alternate screen
     /// mode when dropped, providing RAII semantics for full-screen applications.
     ///
     /// # Arguments

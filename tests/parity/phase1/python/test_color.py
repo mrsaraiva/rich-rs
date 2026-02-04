@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
 """Parity test for color module."""
 
+import inspect
 import sys
 sys.path.insert(0, "/home/msaraiva/dev/mark/Proj/Libs/rich")
 
 from rich.color import Color, ColorSystem
+
+_SIG = inspect.signature(Color.get_ansi_codes)
+_HAS_COLOR_SYSTEM = "color_system" in _SIG.parameters
+
+
+def get_codes(color: Color, color_system: ColorSystem, foreground: bool = True):
+    if _HAS_COLOR_SYSTEM:
+        return color.get_ansi_codes(color_system, foreground=foreground)
+    return color.get_ansi_codes(foreground=foreground)
 
 
 def main():
@@ -42,25 +52,25 @@ def main():
     print("\n=== ANSI Codes (foreground) ===")
 
     c = Color.parse("red")
-    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR)
+    codes = get_codes(c, ColorSystem.TRUECOLOR)
     print(f'Standard red -> {";".join(codes)}')
 
     c = Color.parse("color(196)")
-    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR)
+    codes = get_codes(c, ColorSystem.TRUECOLOR)
     print(f'EightBit(196) -> {";".join(codes)}')
 
     c = Color.parse("#ff0000")
-    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR)
+    codes = get_codes(c, ColorSystem.TRUECOLOR)
     print(f'TrueColor(255,0,0) -> {";".join(codes)}')
 
     print("\n=== ANSI Codes (background) ===")
 
     c = Color.parse("red")
-    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR, foreground=False)
+    codes = get_codes(c, ColorSystem.TRUECOLOR, foreground=False)
     print(f'Standard red bg -> {";".join(codes)}')
 
     c = Color.parse("#ff0000")
-    codes = c.get_ansi_codes(ColorSystem.TRUECOLOR, foreground=False)
+    codes = get_codes(c, ColorSystem.TRUECOLOR, foreground=False)
     print(f'TrueColor(255,0,0) bg -> {";".join(codes)}')
 
     print("\n=== Color Downgrade ===")

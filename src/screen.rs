@@ -57,7 +57,7 @@ impl Screen {
         Self::new(Group::new(renderables))
     }
 
-    /// Create a new Screen from an Arc<dyn Renderable>.
+    /// Create a new Screen from an `Arc<dyn Renderable>`.
     ///
     /// This avoids an extra Arc allocation when you already have one.
     pub fn from_arc(renderable: Arc<dyn Renderable>) -> Self {

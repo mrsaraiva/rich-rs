@@ -1402,7 +1402,10 @@ impl Renderable for Table {
 
         // Render caption
         if let Some(ref caption) = self.caption {
-            let caption_lines = console.render_lines(caption, Some(options), None, false, false);
+            let mut caption_options = options.clone();
+            caption_options.max_width = table_width;
+            let caption_lines =
+                console.render_lines(caption, Some(&caption_options), None, false, false);
             for line in caption_lines {
                 let line_width = Segment::get_line_length(&line);
                 let padding = table_width.saturating_sub(line_width);

@@ -1,179 +1,156 @@
 //! Parity test for markup module.
 
-use rich_rs::markup::{escape, parse, render, Tag};
+use rich_rs::markup::{escape, render};
 
-fn format_token(position: usize, text: &Option<String>, tag: &Option<Tag>) -> String {
-    if let Some(t) = text {
-        // Use single quotes to match Python output
-        format!("({}, Text('{}'))", position, t.replace('\'', "\\'"))
-    } else if let Some(t) = tag {
-        match &t.parameters {
-            Some(p) => format!("({}, Tag('{}', '{}'))", position, t.name, p),
-            None => format!("({}, Tag('{}', None))", position, t.name),
-        }
+fn bool_lower(value: bool) -> &'static str {
+    if value {
+        "true"
     } else {
-        format!("({}, None, None)", position)
+        "false"
     }
-}
-
-fn format_span(start: usize, end: usize, style: &str) -> String {
-    // Use single quotes to match Python output
-    format!("Span({}, {}, '{}')", start, end, style)
-}
-
-/// Format a string value with Python-style single quotes
-fn py_repr(s: &str) -> String {
-    format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 pub fn run() {
-    println!("=== _parse (tokenizer) ===");
+    println!("=== Markup escape() ===");
 
-    // Plain text
-    let tokens = parse("hello world");
-    println!("_parse(\"hello world\"):");
-    for (pos, text, tag) in &tokens {
-        println!("  {}", format_token(*pos, text, tag));
-    }
+    let result = escape("[bold]");
+    println!("escape(\"[bold]\") -> \"{}\"", result);
 
-    // Single tag
-    let tokens = parse("[bold]hello[/bold]");
-    println!("_parse(\"[bold]hello[/bold]\"):");
-    for (pos, text, tag) in &tokens {
-        println!("  {}", format_token(*pos, text, tag));
-    }
+    let result = escape("\\[bold]");
+    println!("escape(\"\\\\[bold]\") -> \"{}\"", result);
 
-    // Tag with parameters
-    let tokens = parse("[link=https://example.com]click[/link]");
-    println!("_parse(\"[link=https://example.com]click[/link]\"):");
-    for (pos, text, tag) in &tokens {
-        println!("  {}", format_token(*pos, text, tag));
-    }
+    let result = escape("hello world");
+    println!("escape(\"hello world\") -> \"{}\"", result);
 
-    // Escaped bracket
-    let tokens = parse("\\[not a tag]");
-    println!("_parse(\"\\\\[not a tag]\"):");
-    for (pos, text, tag) in &tokens {
-        println!("  {}", format_token(*pos, text, tag));
-    }
+    let result = escape("[123]");
+    println!("escape(\"[123]\") -> \"{}\"", result);
 
-    // Mixed content
-    let tokens = parse("Hello [bold]World[/bold]!");
-    println!("_parse(\"Hello [bold]World[/bold]!\"):");
-    for (pos, text, tag) in &tokens {
-        println!("  {}", format_token(*pos, text, tag));
-    }
+    let result = escape("[red]text[/red]");
+    println!("escape(\"[red]text[/red]\") -> \"{}\"", result);
 
-    println!("\n=== escape ===");
-    println!("escape(\"hello world\") -> {}", py_repr(&escape("hello world")));
-    println!("escape(\"[bold]\") -> {}", py_repr(&escape("[bold]")));
-    println!("escape(\"\\\\[bold]\") -> {}", py_repr(&escape("\\[bold]")));
+    println!("\n=== Markup render() - Basic ===");
+
+    let text = render("plain text", false).unwrap();
     println!(
-        "escape(\"[not a tag because 123]\") -> {}",
-        py_repr(&escape("[not a tag because 123]"))
+        "render(\"plain text\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
     );
-    println!("escape(\"[red]hello[/red]\") -> {}", py_repr(&escape("[red]hello[/red]")));
 
-    println!("\n=== render (plain text) ===");
-
-    // Plain text (no markup)
-    let text = render("hello world", false).unwrap();
-    println!("render(\"hello world\").plain -> {}", py_repr(text.plain_text()));
-
-    // Bold text
     let text = render("[bold]hello[/bold]", false).unwrap();
-    println!("render(\"[bold]hello[/bold]\").plain -> {}", py_repr(text.plain_text()));
+    println!(
+        "render(\"[bold]hello[/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
 
-    // Implicit close
+    let text = render("[italic]world[/italic]", false).unwrap();
+    println!(
+        "render(\"[italic]world[/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
+
+    let text = render("[bold][italic]both[/italic][/bold]", false).unwrap();
+    println!(
+        "render(\"[bold][italic]both[/][/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
+
+    println!("\n=== Markup render() - Colors ===");
+
+    let text = render("[red]red text[/red]", false).unwrap();
+    println!(
+        "render(\"[red]red text[/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
+
+    let text = render("[bold red]styled[/bold red]", false).unwrap();
+    println!(
+        "render(\"[bold red]styled[/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
+
+    let text = render("[on blue]bg color[/on blue]", false).unwrap();
+    println!(
+        "render(\"[on blue]bg color[/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
+
+    println!("\n=== Markup render() - Implicit close ===");
+
     let text = render("[bold]hello[/]", false).unwrap();
-    println!("render(\"[bold]hello[/]\").plain -> {}", py_repr(text.plain_text()));
-
-    // Nested tags
-    let text = render("[bold][italic]hello[/italic][/bold]", false).unwrap();
     println!(
-        "render(\"[bold][italic]hello[/italic][/bold]\").plain -> {}",
-        py_repr(text.plain_text())
+        "render(\"[bold]hello[/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
     );
 
-    // Color
-    let text = render("[red]hello[/red]", false).unwrap();
-    println!("render(\"[red]hello[/red]\").plain -> {}", py_repr(text.plain_text()));
-
-    // Link
-    let text = render("[link=https://example.com]click here[/link]", false).unwrap();
+    let text = render("[red][bold]nested[/][/]", false).unwrap();
     println!(
-        "render(\"[link=https://example.com]click here[/link]\").plain -> {}",
-        py_repr(text.plain_text())
+        "render(\"[red][bold]nested[/][/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
     );
 
-    // Escaped bracket
-    let text = render("\\[not bold]", false).unwrap();
-    println!("render(\"\\\\[not bold]\").plain -> {}", py_repr(text.plain_text()));
+    println!("\n=== Markup render() - Escaped brackets ===");
 
-    // Unclosed tag (applies to end)
-    let text = render("[bold]hello", false).unwrap();
-    println!("render(\"[bold]hello\").plain -> {}", py_repr(text.plain_text()));
-
-    // Multiple styles
-    let text = render("[bold red on blue]styled[/]", false).unwrap();
+    let text = render("\\[not a tag]", false).unwrap();
     println!(
-        "render(\"[bold red on blue]styled[/]\").plain -> {}",
-        py_repr(text.plain_text())
+        "render(\"\\\\[not a tag]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
     );
 
-    // Overlapping styles
-    let text = render("[bold]Hello [italic]World[/italic]![/bold]", false).unwrap();
+    let text = render("before \\[escaped] after", false).unwrap();
     println!(
-        "render(\"[bold]Hello [italic]World[/italic]![/bold]\").plain -> {}",
-        py_repr(text.plain_text())
+        "render(\"before \\\\[escaped] after\") -> plain=\"{}\"",
+        text.plain_text()
     );
 
-    println!("\n=== render (spans) ===");
+    println!("\n=== Markup render() - Links ===");
 
-    // Bold text spans
-    let text = render("[bold]hello[/bold]", false).unwrap();
-    println!("render(\"[bold]hello[/bold]\").spans:");
-    for span in text.spans() {
-        // Convert style to string representation for comparison
-        // Note: Rust stores actual Style, Python stores style string
-        println!("  {}", format_span(span.start, span.end, "bold"));
-    }
+    let text = render("[link=https://example.com]click[/link]", false).unwrap();
+    println!(
+        "render(\"[link=url]click[/link]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
 
-    // Nested tags spans
-    let text = render("[bold][italic]hello[/italic][/bold]", false).unwrap();
-    println!("render(\"[bold][italic]hello[/italic][/bold]\").spans:");
-    let mut spans: Vec<_> = text.spans().iter().collect();
-    spans.sort_by_key(|s| (s.start, s.end));
-    // Note: We emit both spans but style names may differ in representation
-    for (i, span) in spans.iter().enumerate() {
-        let style_name = if i == 0 { "bold" } else { "italic" };
-        println!("  {}", format_span(span.start, span.end, style_name));
-    }
+    println!("\n=== Markup render() - Emoji ===");
 
-    // Multiple tags
-    let text = render("[red]Hello[/red] [blue]World[/blue]", false).unwrap();
-    println!("render(\"[red]Hello[/red] [blue]World[/blue]\").spans:");
-    let mut spans: Vec<_> = text.spans().iter().collect();
-    spans.sort_by_key(|s| (s.start, s.end));
-    for (i, span) in spans.iter().enumerate() {
-        let style_name = if i == 0 { "red" } else { "blue" };
-        println!("  {}", format_span(span.start, span.end, style_name));
-    }
-
-    println!("\n=== render with emoji ===");
-
-    // Emoji replacement
     let text = render(":smile:", true).unwrap();
-    println!("render(\":smile:\", emoji=True).plain -> {}", py_repr(text.plain_text()));
-
-    // Emoji in styled text
-    let text = render("[bold]:+1:[/bold]", true).unwrap();
+    let has_emoji = text.plain_text().contains('😄');
     println!(
-        "render(\"[bold]:+1:[/bold]\", emoji=True).plain -> {}",
-        py_repr(text.plain_text())
+        "render(\":smile:\") -> has_emoji={}",
+        bool_lower(has_emoji)
     );
 
-    // No emoji replacement
-    let text = render(":smile:", false).unwrap();
-    println!("render(\":smile:\", emoji=False).plain -> {}", py_repr(text.plain_text()));
+    let text = render("[bold]:+1:[/bold]", true).unwrap();
+    let has_emoji = text.plain_text().contains('👍');
+    println!(
+        "render(\"[bold]:+1:[/]\") -> has_emoji={}, spans={}",
+        bool_lower(has_emoji),
+        text.spans().len()
+    );
+
+    println!("\n=== Markup render() - Mixed content ===");
+
+    let text = render("Hello [bold]World[/bold]!", false).unwrap();
+    println!(
+        "render(\"Hello [bold]World[/] !\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
+
+    let text = render("[red]A[/red] [blue]B[/blue] [green]C[/green]", false).unwrap();
+    println!(
+        "render(\"[red]A[/] [blue]B[/] [green]C[/]\") -> plain=\"{}\", spans={}",
+        text.plain_text(),
+        text.spans().len()
+    );
 }

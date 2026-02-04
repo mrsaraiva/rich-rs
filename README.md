@@ -4,9 +4,9 @@
 [![Documentation](https://docs.rs/rich-rs/badge.svg)](https://docs.rs/rich-rs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Rich text and beautiful formatting for the terminal — a Rust port of Python's [Rich](https://github.com/Textualize/rich) library.
+Rich text and beautiful formatting for the terminal: a Rust port of Python's [Rich](https://github.com/Textualize/rich) library.
 
-The rich-rs API makes it easy to add color and style to terminal output. Rich can also render pretty tables, progress bars, markdown, syntax highlighted source code, tracebacks, and more — out of the box.
+rich-rs focuses on expressive terminal output with a small, composable API. It supports tables, progress bars, Markdown, syntax highlighting, tracebacks, and more without extra setup.
 
 ![Features](imgs/features.svg)
 
@@ -45,11 +45,11 @@ console.print(&text, None, None, None, false, "\n").unwrap();
 
 ![Hello World](imgs/hello_world.svg)
 
-Rich will automatically word-wrap text to fit the terminal width and detect color support.
+rich-rs will automatically word-wrap text to fit the terminal width and detect color support.
 
 ## Markup
 
-Rich uses a BBCode-like markup syntax for inline styling:
+rich-rs uses a BBCode-like markup syntax for inline styling:
 
 ```rust
 use rich_rs::{Console, Text};
@@ -62,16 +62,16 @@ console.print(&Text::from_markup(":warning: [yellow]Warning[/] :warning:", true)
 
 ![Markup](imgs/markup.svg)
 
-# Rich Library
+# rich-rs Library
 
-Rich contains a number of builtin *renderables* you can use to create elegant output in your CLI.
+rich-rs ships with a set of built-in *renderables* you can combine to produce clean, beautiful CLI output.
 
 Click the headings below for details:
 
 <details>
 <summary>Tables</summary>
 
-Rich can render flexible tables with unicode box characters, borders, styles, and cell alignment.
+rich-rs can render flexible tables with unicode box characters, borders, styles, and cell alignment.
 
 ```rust
 use rich_rs::{Console, Table, Column, Style, SimpleColor, JustifyMethod, Text};
@@ -99,7 +99,7 @@ Tables automatically resize columns to fit the terminal width, wrapping text as 
 <details>
 <summary>Progress Bars</summary>
 
-Rich can render multiple flicker-free progress bars to track long-running tasks.
+rich-rs can render multiple flicker-free progress bars to track long-running tasks.
 
 ```rust
 use rich_rs::progress::{Progress, ProgressIteratorExt};
@@ -127,7 +127,7 @@ Built-in columns include percentage, file size, transfer speed, time elapsed, an
 <details>
 <summary>Live Display</summary>
 
-Rich can update content in-place for real-time displays.
+rich-rs can update content in-place for real-time displays.
 
 ```rust
 use rich_rs::{Console, Live, Text};
@@ -151,7 +151,7 @@ Live display supports transient mode (clears on exit), alt-screen mode, and vert
 <details>
 <summary>Syntax Highlighting</summary>
 
-Rich uses [syntect](https://github.com/trishume/syntect) to implement syntax highlighting with multiple themes.
+rich-rs uses [syntect](https://github.com/trishume/syntect) to implement syntax highlighting with multiple themes.
 
 ```rust
 use rich_rs::{Console, Syntax};
@@ -180,7 +180,7 @@ Available themes include `base16-ocean.dark`, `Solarized (dark)`, `InspiredGitHu
 <details>
 <summary>Markdown</summary>
 
-Rich can render markdown with syntax-highlighted code blocks.
+rich-rs can render markdown with syntax-highlighted code blocks.
 
 ```rust
 use rich_rs::{Console, markdown::Markdown};
@@ -214,7 +214,7 @@ Supports CommonMark + GitHub Flavored Markdown including tables, task lists, and
 <details>
 <summary>Trees</summary>
 
-Rich can render hierarchical data with guide lines.
+rich-rs can render hierarchical data with guide lines.
 
 ```rust
 use rich_rs::{Console, Tree, Text, Style, SimpleColor};
@@ -237,7 +237,7 @@ console.print(&tree, None, None, None, false, "\n").unwrap();
 <details>
 <summary>Panels</summary>
 
-Rich can render content in bordered boxes with titles.
+rich-rs can render content in bordered boxes with titles.
 
 ```rust
 use rich_rs::{Console, Panel, Text, Style, SimpleColor};
@@ -265,7 +265,7 @@ console.print(&panel, None, None, None, false, "\n").unwrap();
 <details>
 <summary>Tracebacks</summary>
 
-Rich can render beautiful panic backtraces with syntax-highlighted source context.
+rich-rs can render beautiful panic backtraces with syntax-highlighted source context.
 
 ```rust
 use rich_rs::traceback;
@@ -283,7 +283,7 @@ Tracebacks show the call stack with source code snippets and local variable valu
 <details>
 <summary>Pretty Printing</summary>
 
-Rich can pretty-print data structures with syntax highlighting.
+rich-rs can pretty-print data structures with syntax highlighting.
 
 ```rust
 use rich_rs::{Console, Pretty};
@@ -303,7 +303,7 @@ console.print(&pretty, None, None, None, false, "\n").unwrap();
 <details>
 <summary>Prompts</summary>
 
-Rich provides interactive prompts with validation and choices.
+rich-rs provides interactive prompts with validation and choices.
 
 ```rust
 use rich_rs::prompt::{Prompt, Confirm, IntPrompt};
@@ -329,7 +329,7 @@ Supports password input, default values, and custom validation.
 <details>
 <summary>Columns</summary>
 
-Rich can render content in neat columns with equal or optimal width.
+rich-rs can render content in neat columns with equal or optimal width.
 
 ```rust
 use rich_rs::{Console, Columns, Text, Style, SimpleColor, Renderable};

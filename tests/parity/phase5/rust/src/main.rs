@@ -78,7 +78,7 @@ fn dump_segments(label: &str, segments: Segments) {
     let simplified = Segment::simplify(segments);
     println!("COUNT|{}", simplified.len());
     for seg in simplified.iter() {
-        if let Some(control) = seg.control {
+        if let Some(control) = &seg.control {
             println!("CTL|{control:?}");
             continue;
         }

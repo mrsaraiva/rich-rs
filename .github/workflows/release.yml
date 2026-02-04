@@ -1,0 +1,68 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Tests
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: cargo test
+
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python Rich
+        run: python3 -m pip install --upgrade pip && python3 -m pip install "rich==14.3.2"
+      - name: Parity tests
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          bash tests/parity/run_parity.sh phase1
+          bash tests/parity/run_parity.sh phase2
+          bash tests/parity/run_parity.sh phase3
+          bash tests/parity/run_parity.sh phase4
+          bash tests/parity/run_parity.sh phase5
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Package (dry run)
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: cargo package
+
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [test, parity, package]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

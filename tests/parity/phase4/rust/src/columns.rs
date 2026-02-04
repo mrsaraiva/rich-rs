@@ -8,11 +8,28 @@ use rich_rs::{Console, ConsoleOptions, Renderable};
 fn render_columns(columns: &Columns, width: usize) -> String {
     let console = Console::with_options(ConsoleOptions {
         max_width: width,
+        is_terminal: true,
+        color_system: None,
         ..Default::default()
     });
     let options = console.options().clone();
-    let segments = columns.render(&console, &options);
-    segments.iter().map(|s| s.text.to_string()).collect()
+    let lines = console.render_lines(columns, Some(&options), None, false, false);
+    let mut out = String::new();
+    for line in lines {
+        for segment in line {
+            out.push_str(&segment.text);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn bool_py(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
 }
 
 pub fn run() {
@@ -33,7 +50,7 @@ pub fn run() {
     let all_present = ["apple", "banana", "cherry", "date", "elderberry", "fig"]
         .iter()
         .all(|item| output.contains(item));
-    println!("  all items present: {}", all_present);
+    println!("  all items present: {}", bool_py(all_present));
 
     println!("\n=== Columns with expand ===");
 
@@ -68,7 +85,7 @@ pub fn run() {
     let all_present = ["Short", "Much Longer Text", "X"]
         .iter()
         .all(|item| output.contains(item));
-    println!("  all items present: {}", all_present);
+    println!("  all items present: {}", bool_py(all_present));
 
     println!("\n=== Columns with column_first ===");
 
@@ -93,7 +110,10 @@ pub fn run() {
     let output_normal = render_columns(&columns_normal, 20);
     let output_cf = render_columns(&columns_cf, 20);
     let same = output_normal == output_cf;
-    println!("Columns(column_first=True) differs from normal: {}", !same);
+    println!(
+        "Columns(column_first=True) differs from normal: {}",
+        bool_py(!same)
+    );
 
     println!("\n=== Columns with right_to_left ===");
 
@@ -116,7 +136,7 @@ pub fn run() {
     let same = output_ltr == output_rtl;
     println!(
         "Columns(right_to_left=True) differs from normal: {}",
-        !same
+        bool_py(!same)
     );
 
     println!("\n=== Narrow width columns ===");
@@ -129,5 +149,8 @@ pub fn run() {
     let output = render_columns(&columns, 15);
     let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
     println!("Columns at narrow width=15: lines={}", lines.len());
-    println!("  items stacked vertically: {}", lines.len() >= 2);
+    println!(
+        "  items stacked vertically: {}",
+        bool_py(lines.len() >= 2)
+    );
 }

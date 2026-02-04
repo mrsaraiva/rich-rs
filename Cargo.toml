@@ -2,10 +2,25 @@
 name = "rich-rs"
 version = "1.0.0"
 edition = "2024"
+rust-version = "1.85.0"
 description = "Rich text and beautiful formatting for the terminal"
 license = "MIT"
 keywords = ["terminal", "console", "ansi", "color", "formatting"]
 categories = ["command-line-interface"]
+repository = "https://github.com/mrsaraiva/rich-rs"
+documentation = "https://docs.rs/rich-rs"
+readme = "README.md"
+exclude = [
+    ".idea/",
+    "*.dat",
+    "docs/devel/",
+    "tests/parity/",
+    "tools/",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 crossterm = "0.28"
