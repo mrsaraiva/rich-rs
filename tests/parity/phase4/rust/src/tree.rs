@@ -2,17 +2,34 @@
 
 use rich_rs::text::Text;
 use rich_rs::tree::Tree;
-use rich_rs::{Console, ConsoleOptions, Renderable};
+use rich_rs::{Console, ConsoleOptions};
 
 /// Helper to render tree to plain text
 fn render_tree(tree: &Tree, width: usize) -> String {
     let console = Console::with_options(ConsoleOptions {
         max_width: width,
+        is_terminal: true,
+        color_system: None,
         ..Default::default()
     });
     let options = console.options().clone();
-    let segments = tree.render(&console, &options);
-    segments.iter().map(|s| s.text.to_string()).collect()
+    let lines = console.render_lines(tree, Some(&options), None, false, false);
+    let mut out = String::new();
+    for line in lines {
+        for segment in line {
+            out.push_str(&segment.text);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn bool_py(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
 }
 
 pub fn run() {
@@ -37,7 +54,7 @@ pub fn run() {
     println!("Tree with 2 children lines={}", lines.len());
     for (i, line) in lines.iter().enumerate() {
         let has_branch = line.contains("├") || line.contains("└");
-        println!("  line[{}]: has_branch={}", i, has_branch);
+        println!("  line[{}]: has_branch={}", i, bool_py(has_branch));
     }
 
     println!("\n=== Nested tree ===");

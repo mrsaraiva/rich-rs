@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [1.0.0] - 2026-02-03
+
+### Highlights
+
+**rich-rs reaches feature parity with Python Rich's core rendering capabilities and is ready for crates.io.**
+
+### Crates.io Release Preparation
+- MIT LICENSE file
+- Complete Cargo.toml metadata (repository, documentation, readme, rust-version)
+- Package exclusions for development files (.idea/, *.dat, docs/devel/, tests/parity/, tools/)
+- docs.rs configuration for documentation builds
+- Demo attribution for Rust port author
+
+### Added (Recent)
 - `ScreenContext` for RAII alternate screen mode with automatic cleanup on drop
 - `Console::screen()` method to enter alternate screen mode with context guard
 - `ProgressReader<R: Read>` wrapper for file I/O progress tracking
@@ -28,11 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 25 ported examples from Python Rich (table_movie, spinners, layout, calendar, top_lite_simulator, etc.)
 - Example porting plan document (`docs/devel/EXAMPLE_PORTING_PLAN.md`)
 
-## [1.0.0] - 2026-02-03
-
-### Highlights
-
-**rich-rs reaches feature parity with Python Rich's core rendering capabilities.**
+### Highlights (Features)
 
 This release includes complete implementations of all major Rich features:
 - Full color system (16/256/TrueColor)

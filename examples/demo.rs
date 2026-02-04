@@ -190,6 +190,11 @@ impl Renderable for ThanksIntro {
         segments.push(Segment::line());
         segments.push(Segment::line());
         segments.push(Segment::new("- Will McGugan"));
+        segments.push(Segment::line());
+        segments.push(Segment::line());
+        segments.push(Segment::new("Rust port: "));
+        let marcos = Hyperlink::new("https://github.com/mrsaraiva", "Marcos Saraiva", None);
+        segments.extend(marcos.render(console, options));
 
         segments
     }
@@ -656,6 +661,11 @@ fn main() {
         "https://twitter.com/willmcgugan",
         Some(underline_blue),
     );
+    let github_link = Hyperlink::new(
+        "https://github.com/mrsaraiva/rich-rs",
+        "https://github.com/mrsaraiva/rich-rs",
+        Some(underline_blue),
+    );
 
     sponsor_message.add_row(Row::new(vec![
         Box::new(Text::plain("Textualize")) as Box<dyn Renderable + Send + Sync>,
@@ -665,6 +675,11 @@ fn main() {
     sponsor_message.add_row(Row::new(vec![
         Box::new(Text::plain("Twitter")) as Box<dyn Renderable + Send + Sync>,
         Box::new(twitter_link),
+    ]));
+    sponsor_message.add_row_strs(&["", ""]);
+    sponsor_message.add_row(Row::new(vec![
+        Box::new(Text::plain("Github")) as Box<dyn Renderable + Send + Sync>,
+        Box::new(github_link),
     ]));
 
     let intro_message = ThanksIntro;

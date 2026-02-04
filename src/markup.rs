@@ -37,7 +37,7 @@ use crate::text::{Span, Text};
 pub struct Tag {
     /// The tag name (e.g., "bold", "link", "@click").
     pub name: String,
-    /// Optional parameters after `=` (e.g., "https://example.com" in `[link=https://example.com]`).
+    /// Optional parameters after `=` (e.g., "<https://example.com>" in `[link=https://example.com]`).
     pub parameters: Option<String>,
 }
 

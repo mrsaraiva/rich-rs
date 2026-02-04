@@ -1,17 +1,34 @@
 //! Table module parity tests.
 
 use rich_rs::table::Table;
-use rich_rs::{Console, ConsoleOptions, Renderable};
+use rich_rs::{Console, ConsoleOptions};
 
 /// Helper to render table to plain text
 fn render_table(table: &Table, width: usize) -> String {
     let console = Console::with_options(ConsoleOptions {
         max_width: width,
+        is_terminal: true,
+        color_system: None,
         ..Default::default()
     });
     let options = console.options().clone();
-    let segments = table.render(&console, &options);
-    segments.iter().map(|s| s.text.to_string()).collect()
+    let lines = console.render_lines(table, Some(&options), None, false, false);
+    let mut out = String::new();
+    for line in lines {
+        for segment in line {
+            out.push_str(&segment.text);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn bool_py(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
 }
 
 pub fn run() {
@@ -26,9 +43,9 @@ pub fn run() {
     let lines: Vec<&str> = output.lines().filter(|l| !l.is_empty()).collect();
     println!("Simple table lines={}", lines.len());
     let has_header = lines.iter().any(|l| l.contains("Name") && l.contains("Age"));
-    println!("  has header row: {}", has_header);
+    println!("  has header row: {}", bool_py(has_header));
     let has_data = lines.iter().any(|l| l.contains("Alice"));
-    println!("  has data row: {}", has_data);
+    println!("  has data row: {}", bool_py(has_data));
 
     println!("\n=== Table.grid ===");
 
@@ -41,7 +58,7 @@ pub fn run() {
     let lines: Vec<&str> = output.lines().filter(|l| !l.is_empty()).collect();
     println!("Table.grid() lines={}", lines.len());
     let has_border = lines.iter().any(|l| l.contains("│") || l.contains("─"));
-    println!("  has borders: {}", has_border);
+    println!("  has borders: {}", bool_py(has_border));
 
     println!("\n=== Table with title ===");
 
@@ -51,7 +68,7 @@ pub fn run() {
     let output = render_table(&table, 40);
     let lines: Vec<&str> = output.lines().filter(|l| !l.is_empty()).collect();
     let has_title = lines.iter().any(|l| l.contains("My Table"));
-    println!("Table(title='My Table') has_title={}", has_title);
+    println!("Table(title='My Table') has_title={}", bool_py(has_title));
 
     println!("\n=== Table with caption ===");
 
@@ -61,7 +78,10 @@ pub fn run() {
     let output = render_table(&table, 40);
     let lines: Vec<&str> = output.lines().filter(|l| !l.is_empty()).collect();
     let has_caption = lines.iter().any(|l| l.contains("Table caption"));
-    println!("Table(caption='Table caption') has_caption={}", has_caption);
+    println!(
+        "Table(caption='Table caption') has_caption={}",
+        bool_py(has_caption)
+    );
 
     println!("\n=== Table column count ===");
 

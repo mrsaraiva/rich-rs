@@ -1256,7 +1256,7 @@ impl Text {
         // Truncate the text
         let new_plain = if overflow == OverflowMethod::Ellipsis && max_width > 0 {
             let truncated = set_cell_size(&self.text, max_width.saturating_sub(1));
-            format!("{}…", truncated.trim_end())
+            format!("{}…", truncated)
         } else {
             set_cell_size(&self.text, max_width)
         };

@@ -150,15 +150,26 @@ impl Style {
         while let Some(word) = words.next() {
             let word_lower = word.to_lowercase();
 
+            if word_lower == "on" {
+                on_background = true;
+                continue;
+            }
+
+            if on_background {
+                if let Some(color) = Color::parse(&word_lower) {
+                    style.bgcolor = Some(color);
+                    on_background = false;
+                    continue;
+                }
+                // If the token wasn't a valid color, drop the background flag and
+                // continue processing it normally.
+                on_background = false;
+            }
+
             // Support Rich-style named styles from the default theme, e.g. "progress.percentage".
             // If a token matches a default style name, merge it into the current style.
             if let Some(named) = crate::theme::get_default_style(&word_lower) {
                 style = style.combine(&named);
-                continue;
-            }
-
-            if word_lower == "on" {
-                on_background = true;
                 continue;
             }
 
@@ -222,12 +233,7 @@ impl Style {
                 _ => {
                     // Try to parse as color
                     if let Some(color) = Color::parse(&word_lower) {
-                        if on_background {
-                            style.bgcolor = Some(color);
-                            on_background = false;
-                        } else {
-                            style.color = Some(color);
-                        }
+                        style.color = Some(color);
                     }
                 }
             }
@@ -801,6 +807,18 @@ mod tests {
         let style = Style::parse("bold red").unwrap();
         assert_eq!(style.bold, Some(true));
         assert_eq!(style.color, Some(Color::Standard(1)));
+    }
+
+    #[test]
+    fn test_style_parse_background() {
+        let style = Style::parse("on blue").unwrap();
+        assert_eq!(style.color, None);
+        assert_eq!(style.bgcolor, Some(Color::Standard(4)));
+
+        let style = Style::parse("bold red on blue").unwrap();
+        assert_eq!(style.bold, Some(true));
+        assert_eq!(style.color, Some(Color::Standard(1)));
+        assert_eq!(style.bgcolor, Some(Color::Standard(4)));
     }
 
     // --- NULL_STYLE tests ---

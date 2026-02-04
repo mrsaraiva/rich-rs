@@ -7,6 +7,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PHASE="${1:-phase1}"
 MODULE="${2:-all}"
+RICH_VERSION="${RICH_VERSION:-14.3.2}"
+PARITY_AUTO_INSTALL="${PARITY_AUTO_INSTALL:-0}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -45,8 +47,10 @@ run_test() {
     local python_file="$PHASE_DIR/python/test_${module}.py"
     local tmp_python=$(mktemp)
     local tmp_rust=$(mktemp)
+    local module_title
+    module_title="$(printf "%s" "$module" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
 
-    echo -e "\n${CYAN}=== ${module^} Tests ===${NC}"
+    echo -e "\n${CYAN}=== ${module_title} Tests ===${NC}"
 
     if [ ! -f "$python_file" ]; then
         echo -e "${YELLOW}[SKIP] Python test not found: $python_file${NC}"
@@ -84,8 +88,50 @@ run_test() {
     rm -f "$tmp_python" "$tmp_rust"
 }
 
+check_rich_version() {
+    local installed
+    installed="$(python3 - <<'PY'
+import importlib.util
+spec = importlib.util.find_spec("rich")
+if spec is None:
+    print("")
+else:
+    try:
+        from importlib import metadata
+    except Exception:
+        import importlib_metadata as metadata  # type: ignore
+    print(metadata.version("rich"))
+PY
+)"
+
+    if [ -z "$installed" ]; then
+        if [ "$PARITY_AUTO_INSTALL" = "1" ]; then
+            echo -e "${YELLOW}rich not installed; installing rich==$RICH_VERSION...${NC}"
+            python3 -m pip install --quiet "rich==${RICH_VERSION}"
+            return
+        fi
+        echo -e "${RED}Error:${NC} Python rich is not installed."
+        echo -e "Install with: python3 -m pip install \"rich==${RICH_VERSION}\""
+        exit 1
+    fi
+
+    if [ "$installed" != "$RICH_VERSION" ]; then
+        if [ "$PARITY_AUTO_INSTALL" = "1" ]; then
+            echo -e "${YELLOW}rich version ${installed} != ${RICH_VERSION}; installing expected version...${NC}"
+            python3 -m pip install --quiet "rich==${RICH_VERSION}"
+            return
+        fi
+        echo -e "${RED}Error:${NC} Python rich version mismatch."
+        echo -e "Expected: ${RICH_VERSION}"
+        echo -e "Installed: ${installed}"
+        echo -e "Install with: python3 -m pip install \"rich==${RICH_VERSION}\""
+        exit 1
+    fi
+}
+
 # Run tests
 if [ "$MODULE" = "all" ]; then
+    check_rich_version
     modules=()
     for python_file in "$PHASE_DIR/python"/test_*.py; do
         if [ ! -f "$python_file" ]; then
@@ -108,6 +154,7 @@ if [ "$MODULE" = "all" ]; then
         run_test "$mod"
     done
 else
+    check_rich_version
     run_test "$MODULE"
 fi
 
