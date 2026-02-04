@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Align ordered list markers with Python Rich spacing (no trailing dot).
+- Clamp Text measurement to `max_width` to improve table column sizing parity.
+
 ## [1.0.0] - 2026-02-03
 
 ### Highlights

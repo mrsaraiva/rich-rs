@@ -392,7 +392,7 @@ impl BlockElement {
                 for (i, item) in items.iter().enumerate() {
                     let bullet = if *ordered {
                         let num = start_usize.saturating_add(i);
-                        format!("{:>width$}. ", num, width = num_width)
+                        format!(" {:>width$} ", num, width = num_width)
                     } else {
                         // Python Rich uses " • " (space-bullet-space) for unordered lists
                         " • ".to_string()

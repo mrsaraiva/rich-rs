@@ -1653,18 +1653,27 @@ impl Renderable for Text {
         segments
     }
 
-    fn measure(&self, _console: &Console, _options: &ConsoleOptions) -> Measurement {
+    fn measure(&self, _console: &Console, options: &ConsoleOptions) -> Measurement {
         let text = self.plain_text();
         let lines: Vec<&str> = text.lines().collect();
 
-        let max_width = lines.iter().map(|line| cell_len(line)).max().unwrap_or(0);
+        let mut max_width = lines.iter().map(|line| cell_len(line)).max().unwrap_or(0);
 
         let words: Vec<&str> = text.split_whitespace().collect();
-        let min_width = words
+        let mut min_width = words
             .iter()
             .map(|word| cell_len(word))
             .max()
             .unwrap_or(max_width);
+
+        if options.max_width > 0 {
+            if max_width > options.max_width {
+                max_width = options.max_width;
+            }
+            if min_width > options.max_width {
+                min_width = options.max_width;
+            }
+        }
 
         Measurement::new(min_width, max_width)
     }
