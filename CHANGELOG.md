@@ -7,9 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-02-04
+
 ### Fixed
 - Align ordered list markers with Python Rich spacing (no trailing dot).
 - Clamp Text measurement to `max_width` to improve table column sizing parity.
+
+## [1.0.1] - 2026-02-04
+
+### Changed
+- Aligned all markdown heading styles (H1–H6) with Python Rich 14.3.2 defaults.
+- H1 now renders as bold + underline centered text instead of a double-bordered Panel.
+- Block quote style simplified to magenta only (removed italic).
+- Link style changed to bright blue without underline to match Python Rich.
+- List bullet style simplified to bold only (removed yellow color).
+- List number style simplified to cyan only (removed bold).
+- Simplified demo example by removing manual OSC 8 hyperlink code.
+
+### Added
+- Automated crates.io publish job in release workflow with OIDC token auth and version-exists check.
 
 ## [1.0.0] - 2026-02-03
 
