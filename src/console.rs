@@ -525,59 +525,73 @@ impl Console<Stdout> {
 
     /// Detect color system from environment variables.
     fn detect_color_system_static(is_terminal: bool) -> Option<ColorSystem> {
-        // Check NO_COLOR environment variable (takes precedence)
+        // Explicit override wins.
+        if let Ok(value) = env::var("RICH_RS_COLOR_SYSTEM") {
+            match value.to_ascii_lowercase().as_str() {
+                "none" | "off" | "0" => return None,
+                "16" | "standard" => return Some(ColorSystem::Standard),
+                "256" | "eightbit" | "8bit" => return Some(ColorSystem::EightBit),
+                "truecolor" | "24bit" | "rgb" => return Some(ColorSystem::TrueColor),
+                "auto" => {}
+                _ => {}
+            }
+        }
+
+        // NO_COLOR disables color unconditionally.
         if env::var("NO_COLOR").is_ok() {
             return None;
         }
 
-        // Check FORCE_COLOR to enable colors even when not a terminal
         let force_color = env::var("FORCE_COLOR").is_ok();
-
         if !is_terminal && !force_color {
             return None;
         }
 
-        // Check COLORTERM for truecolor support
         if let Ok(colorterm) = env::var("COLORTERM") {
-            let ct = colorterm.to_lowercase();
-            if ct == "truecolor" || ct == "24bit" {
+            let ct = colorterm.to_ascii_lowercase();
+            if ct == "truecolor" || ct == "24bit" || ct == "yes" || ct == "true" {
                 return Some(ColorSystem::TrueColor);
             }
         }
 
-        // Check TERM for color capabilities
-        if let Ok(term) = env::var("TERM") {
-            let term_lower = term.to_lowercase();
+        // Known modern terminal markers should win over TERM=*256color.
+        if env::var("WT_SESSION").is_ok()
+            || env::var("KITTY_WINDOW_ID").is_ok()
+            || env::var("WEZTERM_PANE").is_ok()
+        {
+            return Some(ColorSystem::TrueColor);
+        }
+        if let Ok(term_program) = env::var("TERM_PROGRAM") {
+            let tp = term_program.to_ascii_lowercase();
+            if tp == "wezterm" || tp == "ghostty" || tp == "iterm.app" {
+                return Some(ColorSystem::TrueColor);
+            }
+        }
 
-            // Truecolor terminals
+        if let Ok(term) = env::var("TERM") {
+            let term_lower = term.to_ascii_lowercase();
             if term_lower.contains("truecolor")
                 || term_lower.contains("24bit")
                 || term_lower.contains("direct")
             {
                 return Some(ColorSystem::TrueColor);
             }
-
-            // 256 color terminals
-            if term_lower.contains("256color")
-                || term_lower.contains("kitty")
-                || term_lower.contains("alacritty")
-            {
+            if term_lower.contains("256color") {
                 return Some(ColorSystem::EightBit);
             }
-
-            // 16 color terminals
-            if term_lower.contains("16color") || term_lower == "xterm" || term_lower == "linux" {
-                return Some(ColorSystem::Standard);
-            }
-
-            // Dumb terminal
             if term_lower == "dumb" || term_lower == "unknown" {
                 return None;
             }
         }
 
-        // Default to 256 colors if terminal is detected
-        Some(ColorSystem::EightBit)
+        // Interactive default: modern assumption.
+        if is_terminal {
+            return Some(ColorSystem::TrueColor);
+        }
+        if force_color {
+            return Some(ColorSystem::EightBit);
+        }
+        None
     }
 }
 

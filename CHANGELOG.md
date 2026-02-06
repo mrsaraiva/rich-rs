@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-02-06
+
+### Changed
+- Updated terminal color-system auto-detection to prefer truecolor on modern interactive terminals.
+- Added `WT_SESSION` as a truecolor marker (Windows Terminal) and prioritized modern terminal markers before `TERM=*256color`.
+- Added `RICH_RS_COLOR_SYSTEM` override (`auto|none|16|256|truecolor`) for deterministic color behavior in apps and benchmarks.
+
 ## [1.0.2] - 2026-02-04
 
 ### Fixed
