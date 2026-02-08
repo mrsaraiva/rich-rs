@@ -155,9 +155,6 @@ impl ScopeRenderable {
     }
 }
 
-// SAFETY: ScopeRenderable is Send + Sync because all fields are Send + Sync.
-unsafe impl Send for ScopeRenderable {}
-unsafe impl Sync for ScopeRenderable {}
 
 impl Renderable for ScopeRenderable {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {

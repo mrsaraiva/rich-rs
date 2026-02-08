@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Removed redundant `unsafe impl Send/Sync` declarations from core renderables and examples where auto-traits are already satisfied by field types and trait bounds.
+
 ## [1.0.3] - 2026-02-06
 
 ### Changed

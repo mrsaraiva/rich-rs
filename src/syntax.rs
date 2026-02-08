@@ -1065,11 +1065,6 @@ impl Syntax {
     }
 }
 
-// SAFETY: Syntax is Send + Sync because:
-// - All fields are Send + Sync or owned types
-// - theme: Box<dyn SyntaxTheme> where SyntaxTheme: Send + Sync
-unsafe impl Send for Syntax {}
-unsafe impl Sync for Syntax {}
 
 impl Renderable for Syntax {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {

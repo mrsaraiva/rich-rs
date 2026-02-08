@@ -617,9 +617,6 @@ impl Traceback {
     }
 }
 
-// SAFETY: Traceback is Send + Sync because all fields are Send + Sync.
-unsafe impl Send for Traceback {}
-unsafe impl Sync for Traceback {}
 
 // ============================================================================
 // Styles

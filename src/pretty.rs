@@ -1215,12 +1215,6 @@ impl Pretty {
     }
 }
 
-// SAFETY: Pretty is Send + Sync because:
-// - debug_str is String (Send + Sync)
-// - highlighter is Box<dyn Highlighter> where Highlighter: Send + Sync
-// - All other fields are primitive types that are Send + Sync
-unsafe impl Send for Pretty {}
-unsafe impl Sync for Pretty {}
 
 impl Renderable for Pretty {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {

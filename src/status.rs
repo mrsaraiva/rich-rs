@@ -86,9 +86,6 @@ impl Renderable for StatusRenderable {
     }
 }
 
-// SAFETY: StatusRenderable contains only Send+Sync fields
-unsafe impl Send for StatusRenderable {}
-unsafe impl Sync for StatusRenderable {}
 
 /// Internal state for Status that can be updated.
 struct StatusState {

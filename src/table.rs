@@ -1028,12 +1028,6 @@ impl Table {
     }
 }
 
-// SAFETY: Table is Send + Sync because:
-// - columns: Vec<Column> where Column contains Box<dyn Renderable + Send + Sync>
-// - rows: Vec<Row> where Row contains Vec<Box<dyn Renderable + Send + Sync>>
-// - All other fields are Send + Sync
-unsafe impl Send for Table {}
-unsafe impl Sync for Table {}
 
 impl Renderable for Table {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {

@@ -272,12 +272,6 @@ impl Tree {
     }
 }
 
-// SAFETY: Tree is Send + Sync because:
-// - label: Box<dyn Renderable + Send + Sync> is explicitly Send + Sync
-// - children: Vec<Tree> is Send + Sync when Tree is
-// - All other fields (Style, bool) are Send + Sync
-unsafe impl Send for Tree {}
-unsafe impl Sync for Tree {}
 
 /// State for each node during stack-based traversal.
 struct TraversalState<'a> {

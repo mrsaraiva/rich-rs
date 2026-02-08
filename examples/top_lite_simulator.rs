@@ -186,9 +186,6 @@ impl Renderable for ProcessTableRenderer {
     }
 }
 
-// SAFETY: ProcessTableRenderer is Send + Sync because it only contains usize
-unsafe impl Send for ProcessTableRenderer {}
-unsafe impl Sync for ProcessTableRenderer {}
 
 fn main() -> std::io::Result<()> {
     // Get console height to determine number of processes to display

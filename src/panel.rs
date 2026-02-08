@@ -393,11 +393,6 @@ impl Panel {
     }
 }
 
-// SAFETY: Panel is Send + Sync because:
-// - renderable: Box<dyn Renderable + Send + Sync> is explicitly Send + Sync
-// - All other fields are Send + Sync (RichBox is Copy, Text is Send+Sync, etc.)
-unsafe impl Send for Panel {}
-unsafe impl Sync for Panel {}
 
 impl Renderable for Panel {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {

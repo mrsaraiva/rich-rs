@@ -260,13 +260,6 @@ impl Align {
     }
 }
 
-// SAFETY: Align is Send + Sync because:
-// - renderable: Box<dyn Renderable + Send + Sync> is explicitly Send + Sync
-// - All other fields (AlignMethod, Option<VerticalAlignMethod>, Style, bool, Option<usize>)
-//   are all Send + Sync
-// The unsafe impl is technically redundant but makes the guarantees explicit.
-unsafe impl Send for Align {}
-unsafe impl Sync for Align {}
 
 impl Renderable for Align {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {

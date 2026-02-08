@@ -139,9 +139,6 @@ impl Renderable for SpinnerDisplay {
     }
 }
 
-// SAFETY: SpinnerDisplay contains only Send+Sync fields (Spinner, String, Instant)
-unsafe impl Send for SpinnerDisplay {}
-unsafe impl Sync for SpinnerDisplay {}
 
 /// A renderable that displays all spinners in columns.
 struct AllSpinners {
@@ -201,9 +198,6 @@ impl Renderable for AllSpinners {
     }
 }
 
-// SAFETY: AllSpinners contains only Send+Sync fields
-unsafe impl Send for AllSpinners {}
-unsafe impl Sync for AllSpinners {}
 
 fn main() -> std::io::Result<()> {
     let all_spinners = AllSpinners::new();

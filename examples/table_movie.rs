@@ -97,9 +97,6 @@ impl SharedTable {
     }
 }
 
-// SAFETY: SharedTable is Send + Sync because it uses Arc<Mutex<>> internally
-unsafe impl Send for SharedTable {}
-unsafe impl Sync for SharedTable {}
 
 impl Renderable for SharedTable {
     fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
@@ -188,9 +185,6 @@ fn main() {
         }
     }
 
-    // SAFETY: TableRenderer is Send + Sync because SharedTable is
-    unsafe impl Send for TableRenderer {}
-    unsafe impl Sync for TableRenderer {}
 
     let renderer = TableRenderer {
         table: display_table,

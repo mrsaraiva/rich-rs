@@ -911,9 +911,6 @@ impl Markdown {
     }
 }
 
-// Required for Renderable trait
-unsafe impl Send for Markdown {}
-unsafe impl Sync for Markdown {}
 
 impl Renderable for Markdown {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {

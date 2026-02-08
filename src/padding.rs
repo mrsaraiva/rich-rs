@@ -259,12 +259,6 @@ impl Padding {
     }
 }
 
-// SAFETY: Padding is Send + Sync because:
-// - renderable: Box<dyn Renderable + Send + Sync> is explicitly Send + Sync
-// - All other fields (usize, Style, bool) are Send + Sync
-// The unsafe impl is technically redundant but makes the guarantees explicit.
-unsafe impl Send for Padding {}
-unsafe impl Sync for Padding {}
 
 impl Renderable for Padding {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
