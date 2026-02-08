@@ -111,6 +111,12 @@ impl Style {
         self
     }
 
+    /// Builder: set reverse video.
+    pub fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = Some(reverse);
+        self
+    }
+
     /// Builder: set strike.
     pub fn with_strike(mut self, strike: bool) -> Self {
         self.strike = Some(strike);
@@ -778,9 +784,6 @@ impl MetaValue {
     }
 }
 
-// StyleMeta is Send + Sync because Arc<str> and Arc<BTreeMap> are
-unsafe impl Send for StyleMeta {}
-unsafe impl Sync for StyleMeta {}
 
 #[cfg(test)]
 mod tests {
@@ -1004,6 +1007,12 @@ mod tests {
     fn test_html_style_strike() {
         let style = Style::new().with_strike(true);
         assert_eq!(style.get_html_style(), "text-decoration: line-through");
+    }
+
+    #[test]
+    fn test_with_reverse_builder_sets_flag() {
+        let style = Style::new().with_reverse(true);
+        assert_eq!(style.reverse, Some(true));
     }
 
     #[test]

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Removed redundant `unsafe impl Send/Sync` declarations from core renderables and examples where auto-traits are already satisfied by field types and trait bounds.
 
+### Added
+- Added `Style::with_reverse(bool)` builder for API consistency with other style attribute builders.
+
 ## [1.0.3] - 2026-02-06
 
 ### Changed
