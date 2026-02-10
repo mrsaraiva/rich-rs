@@ -3445,12 +3445,18 @@ mod tests {
             .unwrap();
         console.clear_captured();
 
-        // Second render should reposition (erase line) before drawing.
+        // Second render takes the screen-buffer diff path (same shape), so it
+        // repositions the cursor without a full erase.  Verify that cursor
+        // repositioning is emitted (\r for carriage return).
         console
             .print(&Text::plain("B"), None, None, None, false, "\n")
             .unwrap();
         let out = console.get_captured();
-        assert!(out.contains("\x1b[2K"));
+        assert!(
+            out.contains("\r"),
+            "expected cursor repositioning (\\r) in second live render, got: {:?}",
+            out,
+        );
     }
 
     #[test]
