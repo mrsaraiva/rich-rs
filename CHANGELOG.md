@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-02-10
+
 ### Changed
 - Removed redundant `unsafe impl Send/Sync` declarations from core renderables and examples where auto-traits are already satisfied by field types and trait bounds.
 - Removed `WT_SESSION`-based Windows terminal heuristics; terminal behavior now relies on explicit overrides and capability-neutral defaults.
@@ -15,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added `Style::with_reverse(bool)` builder for API consistency with other style attribute builders.
+
+### Fixed
+- Reduced `table_movie` flicker with screen-buffer diff cursor updates.
+- Corrected live rendering test assertion to match screen-buffer diff path behavior.
 
 ## [1.0.3] - 2026-02-06
 
