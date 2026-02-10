@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use rich_rs::r#box::{MINIMAL, SIMPLE, SIMPLE_HEAD, SQUARE};
 use rich_rs::{
-    Column, Console, ConsoleOptions, JustifyMethod, Live, LiveOptions, Measurement, Renderable,
-    Segments, Style, Table, Text,
+    Align, Column, Console, ConsoleOptions, JustifyMethod, Live, LiveOptions, Measurement,
+    Renderable, Segments, Style, Table, Text,
 };
 
 /// Table data: Star Wars box office information.
@@ -79,6 +79,22 @@ struct SharedTable {
     table: Arc<Mutex<Table>>,
 }
 
+struct TableProxy {
+    table: Arc<Mutex<Table>>,
+}
+
+impl Renderable for TableProxy {
+    fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
+        let table = self.table.lock().unwrap();
+        table.render(console, options)
+    }
+
+    fn measure(&self, console: &Console, options: &ConsoleOptions) -> Measurement {
+        let table = self.table.lock().unwrap();
+        table.measure(console, options)
+    }
+}
+
 impl SharedTable {
     fn new(table: Table) -> Self {
         Self {
@@ -100,58 +116,19 @@ impl SharedTable {
 
 impl Renderable for SharedTable {
     fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
-        let table = self.table.lock().unwrap();
-        // Render the table centered
-        let segments = table.render(console, options);
-
-        // Get the table width and center it
-        let table_width = {
-            let mut width = 0;
-            let mut current_line_width = 0;
-            for seg in segments.iter() {
-                if seg.is_control() {
-                    continue;
-                }
-                if seg.text.contains('\n') {
-                    width = width.max(current_line_width);
-                    current_line_width = 0;
-                } else {
-                    current_line_width += rich_rs::cell_len(&seg.text);
-                }
-            }
-            width.max(current_line_width)
+        let proxy = TableProxy {
+            table: Arc::clone(&self.table),
         };
-
-        // Calculate centering padding
-        let available_width = options.max_width;
-        let left_pad = available_width.saturating_sub(table_width) / 2;
-
-        if left_pad == 0 {
-            return segments;
-        }
-
-        // Add left padding to each line
-        let pad_segment = rich_rs::Segment::new(" ".repeat(left_pad));
-        let mut result = Segments::new();
-        let mut at_line_start = true;
-
-        for seg in segments.iter() {
-            if at_line_start && !seg.is_control() {
-                result.push(pad_segment.clone());
-                at_line_start = false;
-            }
-            result.push(seg.clone());
-            if seg.text.ends_with('\n') || seg.text == "\n" {
-                at_line_start = true;
-            }
-        }
-
-        result
+        let centered = Align::center(Box::new(proxy));
+        centered.render(console, options)
     }
 
     fn measure(&self, console: &Console, options: &ConsoleOptions) -> Measurement {
-        let table = self.table.lock().unwrap();
-        table.measure(console, options)
+        let proxy = TableProxy {
+            table: Arc::clone(&self.table),
+        };
+        let centered = Align::center(Box::new(proxy));
+        centered.measure(console, options)
     }
 }
 
@@ -195,7 +172,7 @@ fn main() {
         LiveOptions {
             screen: false,
             refresh_per_second: 20.0,
-            auto_refresh: true,
+            auto_refresh: false,
             ..Default::default()
         },
     );
@@ -205,8 +182,7 @@ fn main() {
 
     // Helper to refresh the display
     let refresh = || {
-        // The auto-refresh will pick up changes automatically
-        // But we can force a refresh if needed
+        let _ = live.refresh();
     };
 
     // Add columns one by one

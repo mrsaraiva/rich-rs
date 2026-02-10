@@ -337,15 +337,17 @@ impl ScreenBuffer {
     /// Compute an update sequence that transforms `previous` into `self`.
     ///
     /// The returned segments:
-    /// - Start with `Home` (cursor to 0,0)
+    /// - Optionally start with `Home` (cursor to 0,0)
     /// - Use cursor controls (no `\n`) for positioning
     /// - Emit styled text for changed spans
-    pub fn diff_to_segments(&self, previous: &ScreenBuffer) -> Segments {
+    fn diff_to_segments_impl(&self, previous: &ScreenBuffer, include_home: bool) -> Segments {
         assert_eq!(self.width, previous.width, "buffer widths differ");
         assert_eq!(self.height, previous.height, "buffer heights differ");
 
         let mut out = Segments::new();
-        out.push(Segment::control(ControlType::Home));
+        if include_home {
+            out.push(Segment::control(ControlType::Home));
+        }
 
         let mut cursor_x: usize = 0;
         let mut cursor_y: usize = 0;
@@ -444,7 +446,40 @@ impl ScreenBuffer {
             }
         }
 
+        // Leave cursor at column 0 on the last row so live render cursor math remains stable.
+        let target_y = self.height.saturating_sub(1);
+        if target_y != cursor_y {
+            if target_y > cursor_y {
+                out.push(Segment::control(ControlType::CursorDown(
+                    (target_y - cursor_y) as u16,
+                )));
+            } else {
+                out.push(Segment::control(ControlType::CursorUp(
+                    (cursor_y - target_y) as u16,
+                )));
+            }
+        }
+        out.push(Segment::control(ControlType::CarriageReturn));
+
         out
+    }
+
+    /// Compute an update sequence that transforms `previous` into `self`.
+    ///
+    /// The returned segments:
+    /// - Start with `Home` (cursor to 0,0)
+    /// - Use cursor controls (no `\n`) for positioning
+    /// - Emit styled text for changed spans
+    pub fn diff_to_segments(&self, previous: &ScreenBuffer) -> Segments {
+        self.diff_to_segments_impl(previous, true)
+    }
+
+    /// Compute an update sequence relative to the current cursor origin.
+    ///
+    /// Unlike `diff_to_segments`, this does *not* emit `Home` and is intended for
+    /// embedding in larger cursor-positioned render flows (e.g. Live updates).
+    pub fn diff_to_segments_from_origin(&self, previous: &ScreenBuffer) -> Segments {
+        self.diff_to_segments_impl(previous, false)
     }
 }
 
