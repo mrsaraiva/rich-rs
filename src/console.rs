@@ -9,8 +9,9 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::fs::OpenOptions;
 use std::io::{self, Stdout, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crossterm::terminal::{self, ClearType};
 use crossterm::{cursor, execute, terminal as ct};
@@ -22,6 +23,7 @@ use crate::emoji::Emoji;
 use crate::export_format::{CONSOLE_HTML_FORMAT, CONSOLE_SVG_FORMAT};
 use crate::highlighter::Highlighter;
 use crate::segment::{ControlType, Segment, Segments};
+use crate::screen_buffer::ScreenBuffer;
 use crate::style::Style;
 use crate::table::{Column, Row, Table};
 use crate::terminal_theme::{DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, TerminalTheme};
@@ -30,6 +32,93 @@ use crate::theme::{Theme, ThemeStack};
 use crate::traceback::Traceback;
 
 use std::time::SystemTime;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowsRenderMode {
+    Segment,
+    Streaming,
+}
+
+fn parse_windows_render_mode(value: Option<&str>) -> WindowsRenderMode {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("streaming") => WindowsRenderMode::Streaming,
+        Some("segment") => WindowsRenderMode::Segment,
+        _ => WindowsRenderMode::Streaming,
+    }
+}
+
+fn detect_windows_render_mode() -> WindowsRenderMode {
+    parse_windows_render_mode(env::var("RICH_RS_WINDOWS_RENDER_MODE").ok().as_deref())
+}
+
+fn parse_bool_env(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn detect_legacy_windows_default() -> bool {
+    if let Ok(value) = env::var("RICH_RS_LEGACY_WINDOWS")
+        && let Some(parsed) = parse_bool_env(&value)
+    {
+        return parsed;
+    }
+    #[cfg(windows)]
+    {
+        // Align with Rich Python's capability-first gating:
+        // legacy mode is only required when VT is unavailable.
+        return !crossterm::ansi_support::supports_ansi();
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn debug_segments_log(line: &str) {
+    static PATH: OnceLock<Option<String>> = OnceLock::new();
+    let path = PATH.get_or_init(|| env::var("RICH_RS_DEBUG_SEGMENTS_FILE").ok());
+    let Some(path) = path.as_ref() else {
+        return;
+    };
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn debug_ansi_log(line: &str) {
+    static PATH: OnceLock<Option<String>> = OnceLock::new();
+    let path = PATH.get_or_init(|| env::var("RICH_RS_DEBUG_ANSI_FILE").ok());
+    let Some(path) = path.as_ref() else {
+        return;
+    };
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn debug_segments_match_text(text: &str) -> bool {
+    static FILTERS: OnceLock<Vec<String>> = OnceLock::new();
+    let filters = FILTERS.get_or_init(|| {
+        env::var("RICH_RS_DEBUG_SEGMENTS_FILTER")
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|part| part.trim().to_ascii_lowercase())
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    });
+    if filters.is_empty() {
+        return true;
+    }
+    let lowered = text.to_ascii_lowercase();
+    filters.iter().any(|filter| lowered.contains(filter))
+}
 
 // ============================================================================
 // JustifyMethod
@@ -418,6 +507,7 @@ struct LiveManager {
     stack: Vec<usize>,
     entries: HashMap<usize, LiveEntry>,
     shape: Option<(usize, usize)>,
+    buffer: Option<ScreenBuffer>,
 }
 
 impl Console<Stdout> {
@@ -431,7 +521,7 @@ impl Console<Stdout> {
             options,
             color_system,
             force_terminal: None,
-            legacy_windows: cfg!(windows) && env::var("WT_SESSION").is_err(),
+            legacy_windows: cfg!(windows) && detect_legacy_windows_default(),
             markup_enabled: true,
             emoji_enabled: true,
             highlight_enabled: true,
@@ -547,23 +637,15 @@ impl Console<Stdout> {
             return None;
         }
 
+        #[cfg(windows)]
+        if is_terminal && !crossterm::ansi_support::supports_ansi() {
+            // Legacy Windows console path: keep colors conservative.
+            return Some(ColorSystem::Standard);
+        }
+
         if let Ok(colorterm) = env::var("COLORTERM") {
             let ct = colorterm.to_ascii_lowercase();
             if ct == "truecolor" || ct == "24bit" || ct == "yes" || ct == "true" {
-                return Some(ColorSystem::TrueColor);
-            }
-        }
-
-        // Known modern terminal markers should win over TERM=*256color.
-        if env::var("WT_SESSION").is_ok()
-            || env::var("KITTY_WINDOW_ID").is_ok()
-            || env::var("WEZTERM_PANE").is_ok()
-        {
-            return Some(ColorSystem::TrueColor);
-        }
-        if let Ok(term_program) = env::var("TERM_PROGRAM") {
-            let tp = term_program.to_ascii_lowercase();
-            if tp == "wezterm" || tp == "ghostty" || tp == "iterm.app" {
                 return Some(ColorSystem::TrueColor);
             }
         }
@@ -586,7 +668,14 @@ impl Console<Stdout> {
 
         // Interactive default: modern assumption.
         if is_terminal {
-            return Some(ColorSystem::TrueColor);
+            #[cfg(windows)]
+            {
+                return Some(ColorSystem::TrueColor);
+            }
+            #[cfg(not(windows))]
+            {
+                return Some(ColorSystem::TrueColor);
+            }
         }
         if force_color {
             return Some(ColorSystem::EightBit);
@@ -1123,6 +1212,9 @@ impl<W: Write> Console<W> {
         if self.quiet {
             return Ok(());
         }
+        if cfg!(windows) && detect_windows_render_mode() == WindowsRenderMode::Segment {
+            return self.print_segments_segment_mode(segments);
+        }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         struct StyleState {
@@ -1240,6 +1332,7 @@ impl<W: Write> Console<W> {
 
         for segment in segments.iter() {
             if let Some(control) = &segment.control {
+                debug_segments_log(&format!("[control][streaming] {:?}", control));
                 // Emit terminal controls regardless of style state.
                 // Control sequences generally do not alter SGR state.
                 match control {
@@ -1321,15 +1414,36 @@ impl<W: Write> Console<W> {
             }
 
             if let Some(color_system) = self.color_system {
+                if debug_segments_match_text(&segment.text) {
+                    debug_segments_log(&format!(
+                        "[segment][streaming] text={:?} style={:?} color_system={:?}",
+                        segment.text,
+                        segment.style,
+                        self.color_system
+                    ));
+                }
                 let target = StyleState::from_style(segment.style);
                 let diff = current.sgr_diff(target, color_system);
                 if !diff.is_empty() {
                     write!(self.writer, "\x1b[{}m", diff)?;
+                    if debug_segments_match_text(&segment.text) {
+                        debug_ansi_log(&format!(
+                            "[ansi][streaming] text={:?} sgr=\\x1b[{}m target={:?}",
+                            segment.text, diff, target
+                        ));
+                    }
                     used_sgr = true;
                 }
                 write!(self.writer, "{}", segment.text)?;
                 current = target;
             } else {
+                if debug_segments_match_text(&segment.text) {
+                    debug_segments_log(&format!(
+                        "[segment][streaming] text={:?} style={:?} color_system=None",
+                        segment.text,
+                        segment.style
+                    ));
+                }
                 write!(self.writer, "{}", segment.text)?;
             }
         }
@@ -1342,6 +1456,130 @@ impl<W: Write> Console<W> {
         // Reset at the end so terminal state doesn't leak past the renderable.
         if self.color_system.is_some() && used_sgr && current != StyleState::DEFAULT {
             write!(self.writer, "\x1b[0m")?;
+            debug_ansi_log("[ansi][streaming] tail-reset=\\x1b[0m");
+        }
+
+        self.writer.flush()
+    }
+
+    fn print_segments_segment_mode(&mut self, segments: &Segments) -> io::Result<()> {
+        let hyperlinks_enabled = self.is_terminal() && !self.is_dumb_terminal();
+        let mut current_link: Option<(Arc<str>, Option<Arc<str>>)> = None;
+        let mut hyperlink_manual = false;
+
+        for segment in segments.iter() {
+            if let Some(control) = &segment.control {
+                debug_segments_log(&format!("[control][segment] {:?}", control));
+                match control {
+                    ControlType::Bell => write!(self.writer, "\x07")?,
+                    ControlType::CarriageReturn => write!(self.writer, "\r")?,
+                    ControlType::Home => write!(self.writer, "\x1b[H")?,
+                    ControlType::Clear => write!(self.writer, "\x1b[2J\x1b[H")?,
+                    ControlType::ShowCursor => write!(self.writer, "\x1b[?25h")?,
+                    ControlType::HideCursor => write!(self.writer, "\x1b[?25l")?,
+                    ControlType::EnableAltScreen => write!(self.writer, "\x1b[?1049h")?,
+                    ControlType::DisableAltScreen => write!(self.writer, "\x1b[?1049l")?,
+                    ControlType::SetTitle => {}
+                    ControlType::CursorUp(n) => write!(self.writer, "\x1b[{}A", n)?,
+                    ControlType::CursorDown(n) => write!(self.writer, "\x1b[{}B", n)?,
+                    ControlType::CursorForward(n) => write!(self.writer, "\x1b[{}C", n)?,
+                    ControlType::CursorBackward(n) => write!(self.writer, "\x1b[{}D", n)?,
+                    ControlType::EraseInLine(mode) => write!(self.writer, "\x1b[{}K", mode)?,
+                    ControlType::HyperlinkStart { url, id } => {
+                        if hyperlinks_enabled {
+                            if let Some(id) = id.as_deref() {
+                                write!(self.writer, "\x1b]8;id={};{}\x1b\\", id, url)?;
+                            } else {
+                                write!(self.writer, "\x1b]8;;{}\x1b\\", url)?;
+                            }
+                            current_link = Some((url.clone(), id.clone()));
+                            hyperlink_manual = true;
+                        }
+                    }
+                    ControlType::HyperlinkEnd => {
+                        if hyperlinks_enabled {
+                            write!(self.writer, "\x1b]8;;\x1b\\")?;
+                            current_link = None;
+                            hyperlink_manual = false;
+                        }
+                    }
+                    ControlType::MoveTo { x, y } => write!(
+                        self.writer,
+                        "\x1b[{};{}H",
+                        (*y as usize) + 1,
+                        (*x as usize) + 1
+                    )?,
+                }
+                continue;
+            }
+
+            if hyperlinks_enabled && !hyperlink_manual {
+                let mut desired_link: Option<(Arc<str>, Option<Arc<str>>)> = None;
+                if let Some(meta) = segment.meta.as_ref() {
+                    if let Some(url) = meta.link.as_ref() {
+                        let url = url.clone();
+                        let id = meta
+                            .link_id
+                            .clone()
+                            .or_else(|| Some(self.link_id_for_url(&url)));
+                        desired_link = Some((url, id));
+                    }
+                }
+
+                if desired_link != current_link {
+                    if current_link.is_some() {
+                        write!(self.writer, "\x1b]8;;\x1b\\")?;
+                    }
+                    if let Some((url, id)) = &desired_link {
+                        if let Some(id) = id.as_deref() {
+                            write!(self.writer, "\x1b]8;id={};{}\x1b\\", id, url)?;
+                        } else {
+                            write!(self.writer, "\x1b]8;;{}\x1b\\", url)?;
+                        }
+                    }
+                    current_link = desired_link;
+                }
+            }
+
+            if let Some(style) = segment.style {
+                if debug_segments_match_text(&segment.text) {
+                    debug_segments_log(&format!(
+                        "[segment][segment] text={:?} style={:?} color_system={:?}",
+                        segment.text,
+                        style,
+                        self.color_system
+                    ));
+                }
+                if let Some(color_system) = self.color_system {
+                    let styled = style.render(&segment.text, color_system);
+                    if debug_segments_match_text(&segment.text) {
+                        let sgr = styled
+                            .strip_prefix("\x1b[")
+                            .and_then(|rest| rest.split_once('m').map(|(a, _)| a))
+                            .unwrap_or("<none>");
+                        debug_ansi_log(&format!(
+                            "[ansi][segment] text={:?} sgr=\\x1b[{}m style={:?} color_system={:?}",
+                            segment.text, sgr, style, self.color_system
+                        ));
+                    }
+                    write!(self.writer, "{}", styled)?;
+                } else {
+                    write!(self.writer, "{}", segment.text)?;
+                }
+            } else {
+                if debug_segments_match_text(&segment.text) {
+                    debug_segments_log(&format!(
+                        "[segment][segment] text={:?} style=None color_system={:?}",
+                        segment.text,
+                        self.color_system
+                    ));
+                }
+                write!(self.writer, "{}", segment.text)?;
+            }
+        }
+
+        if hyperlinks_enabled && current_link.is_some() {
+            write!(self.writer, "\x1b]8;;\x1b\\")?;
         }
 
         self.writer.flush()
@@ -1410,14 +1648,19 @@ impl<W: Write> Console<W> {
             }
             end_to_write = "";
 
+            let (live_segments, full_redraw) = self.render_live_segments(&temp_console, &options);
             let mut wrapped = Segments::new();
-            for seg in self.live_position_cursor().iter() {
+            let cursor_controls = if full_redraw {
+                self.live_position_cursor()
+            } else {
+                self.live_position_cursor_no_erase()
+            };
+            for seg in cursor_controls.iter() {
                 wrapped.push(seg.clone());
             }
             for seg in segments.into_iter() {
                 wrapped.push(seg);
             }
-            let live_segments = self.render_live_segments(&temp_console, &options);
             for seg in live_segments.into_iter() {
                 wrapped.push(seg);
             }
@@ -1799,6 +2042,7 @@ impl<W: Write> Console<W> {
         let entry = self.live.entries.remove(&id);
         if self.live.stack.is_empty() {
             self.live.shape = None;
+            self.live.buffer = None;
         }
         entry.map(|e| e.renderable)
     }
@@ -1807,6 +2051,7 @@ impl<W: Write> Console<W> {
         self.live.stack.clear();
         self.live.entries.clear();
         self.live.shape = None;
+        self.live.buffer = None;
     }
 
     fn has_live(&self) -> bool {
@@ -1836,6 +2081,21 @@ impl<W: Write> Console<W> {
         Segments::from_iter(controls)
     }
 
+    pub(crate) fn live_position_cursor_no_erase(&self) -> Segments {
+        let Some((_, height)) = self.live.shape else {
+            return Segments::new();
+        };
+        if height == 0 {
+            return Segments::new();
+        }
+        let mut controls = Vec::new();
+        controls.push(Segment::control(ControlType::CarriageReturn));
+        for _ in 0..height.saturating_sub(1) {
+            controls.push(Segment::control(ControlType::CursorUp(1)));
+        }
+        Segments::from_iter(controls)
+    }
+
     pub(crate) fn live_restore_cursor(&self) -> Segments {
         let Some((_, height)) = self.live.shape else {
             return Segments::new();
@@ -1857,10 +2117,10 @@ impl<W: Write> Console<W> {
         &mut self,
         temp_console: &Console<Stdout>,
         options: &ConsoleOptions,
-    ) -> Segments {
+    ) -> (Segments, bool) {
         let root = match self.live_root() {
             Some(root) => root,
-            None => return Segments::new(),
+            None => return (Segments::new(), false),
         };
 
         let mut lines: Vec<Vec<Segment>> = Vec::new();
@@ -1900,6 +2160,26 @@ impl<W: Write> Console<W> {
         let shape = Segment::get_shape(&lines);
         self.live.shape = Some(shape);
 
+        let width = options.max_width.max(1);
+        let height = shape.1.max(1);
+        let current_buffer = ScreenBuffer::from_lines(&lines, width, height, None);
+
+        let use_diff = self
+            .live
+            .buffer
+            .as_ref()
+            .is_some_and(|previous| previous.width == current_buffer.width
+                && previous.height == current_buffer.height);
+
+        if use_diff {
+            let previous = self.live.buffer.as_ref().expect("checked above");
+            let diff = current_buffer.diff_to_segments_from_origin(previous);
+            self.live.buffer = Some(current_buffer);
+            return (diff, false);
+        }
+
+        self.live.buffer = Some(current_buffer);
+
         let mut out = Segments::new();
         let new_line = Segment::line();
         for (i, line) in lines.into_iter().enumerate() {
@@ -1910,7 +2190,7 @@ impl<W: Write> Console<W> {
                 out.push(new_line.clone());
             }
         }
-        out
+        (out, true)
     }
 
     // ========================================================================
@@ -3263,6 +3543,34 @@ mod tests {
         console.print_segments(&segments).unwrap();
         let out2 = console.get_captured();
         assert!(out2.contains("id=richrs-1;https://example.com"));
+    }
+
+    #[test]
+    fn test_parse_windows_render_mode_defaults_to_streaming() {
+        assert_eq!(
+            parse_windows_render_mode(None),
+            WindowsRenderMode::Streaming
+        );
+        assert_eq!(
+            parse_windows_render_mode(Some("invalid")),
+            WindowsRenderMode::Streaming
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_render_mode_values() {
+        assert_eq!(
+            parse_windows_render_mode(Some("segment")),
+            WindowsRenderMode::Segment
+        );
+        assert_eq!(
+            parse_windows_render_mode(Some("streaming")),
+            WindowsRenderMode::Streaming
+        );
+        assert_eq!(
+            parse_windows_render_mode(Some("  StReAmInG  ")),
+            WindowsRenderMode::Streaming
+        );
     }
 
     // ==================== Console configuration tests ====================
