@@ -847,13 +847,9 @@ impl Syntax {
     /// * `style` - Style to apply to the range.
     /// * `start` - Start position as (line, column).
     /// * `end` - End position as (line, column).
-    pub fn stylize_range(
-        &mut self,
-        style: Style,
-        start: (usize, usize),
-        end: (usize, usize),
-    ) {
-        self.stylized_ranges.push(SyntaxHighlightRange { style, start, end });
+    pub fn stylize_range(&mut self, style: Style, start: (usize, usize), end: (usize, usize)) {
+        self.stylized_ranges
+            .push(SyntaxHighlightRange { style, start, end });
     }
 
     /// Builder method to add a highlight range.
@@ -865,7 +861,8 @@ impl Syntax {
         start: (usize, usize),
         end: (usize, usize),
     ) -> Self {
-        self.stylized_ranges.push(SyntaxHighlightRange { style, start, end });
+        self.stylized_ranges
+            .push(SyntaxHighlightRange { style, start, end });
         self
     }
 
@@ -1030,17 +1027,10 @@ impl Syntax {
             let start_line_idx = start_line.saturating_sub(1);
             let end_line_idx = end_line.saturating_sub(1);
 
-            let start_offset = newlines_offsets
-                .get(start_line_idx)
-                .copied()
-                .unwrap_or(0)
-                + start_col;
+            let start_offset =
+                newlines_offsets.get(start_line_idx).copied().unwrap_or(0) + start_col;
 
-            let end_offset = newlines_offsets
-                .get(end_line_idx)
-                .copied()
-                .unwrap_or(0)
-                + end_col;
+            let end_offset = newlines_offsets.get(end_line_idx).copied().unwrap_or(0) + end_col;
 
             if start_offset < end_offset {
                 text.stylize(start_offset, end_offset, range.style);
@@ -1156,7 +1146,6 @@ impl Syntax {
         digits + NUMBERS_COLUMN_DEFAULT_PADDING
     }
 }
-
 
 impl Renderable for Syntax {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
@@ -1661,13 +1650,15 @@ mod tests {
     #[test]
     fn test_with_highlight_range_builder() {
         let style = Style::new().with_italic(true);
-        let syntax = Syntax::new("hello world", "text")
-            .with_highlight_range(style, (1, 0), (1, 5)); // "hello"
+        let syntax = Syntax::new("hello world", "text").with_highlight_range(style, (1, 0), (1, 5)); // "hello"
 
         let text = syntax.highlight();
         let spans = text.spans();
         let has_italic_span = spans.iter().any(|s| s.style.italic == Some(true));
-        assert!(has_italic_span, "Should have an italic span from with_highlight_range");
+        assert!(
+            has_italic_span,
+            "Should have an italic span from with_highlight_range"
+        );
     }
 
     #[test]

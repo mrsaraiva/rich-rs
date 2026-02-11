@@ -27,11 +27,11 @@
 
 use std::io::{self, Stdout, Write};
 
+use crate::Renderable;
 use crate::console::Console;
 use crate::group::Group;
 use crate::screen::Screen;
 use crate::style::Style;
-use crate::Renderable;
 
 /// Context guard for alternate screen mode.
 ///

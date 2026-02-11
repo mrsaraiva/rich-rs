@@ -393,7 +393,6 @@ impl Panel {
     }
 }
 
-
 impl Renderable for Panel {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         let mut result = Segments::new();

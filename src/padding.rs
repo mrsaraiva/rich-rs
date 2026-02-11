@@ -259,7 +259,6 @@ impl Padding {
     }
 }
 
-
 impl Renderable for Padding {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         let mut result = Segments::new();

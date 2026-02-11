@@ -1215,7 +1215,6 @@ impl Pretty {
     }
 }
 
-
 impl Renderable for Pretty {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         let max_width = options.max_width.saturating_sub(self.margin);

@@ -13,8 +13,8 @@ use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use rich_rs::{
@@ -47,7 +47,9 @@ fn main() -> std::io::Result<()> {
             TextColumn::new("[bold blue]{task.description}").with_justify(JustifyMethod::Right),
         ),
         Box::new(BarColumn::new().with_bar_width(None)),
-        Box::new(TextColumn::new("[progress.percentage]{task.percentage:>3.1f}%")),
+        Box::new(TextColumn::new(
+            "[progress.percentage]{task.percentage:>3.1f}%",
+        )),
         Box::new(TextColumn::new("•")),
         Box::new(DownloadColumn::new()),
         Box::new(TextColumn::new("•")),
@@ -103,8 +105,8 @@ fn main() -> std::io::Result<()> {
 
     // Unwrap Arc and stop progress
     // All threads are done, so we're the only owner
-    let mut progress = Arc::try_unwrap(progress)
-        .unwrap_or_else(|_| panic!("Threads should have finished"));
+    let mut progress =
+        Arc::try_unwrap(progress).unwrap_or_else(|_| panic!("Threads should have finished"));
     progress.stop()?;
 
     if done.load(Ordering::SeqCst) {
@@ -136,12 +138,12 @@ fn download_url(
     progress.update(
         task_id,
         content_length.map(|c| Some(c as f64)), // total
-        None,                                    // completed
-        None,                                    // advance
-        None,                                    // description
-        None,                                    // visible
-        false,                                   // refresh
-        None,                                    // fields
+        None,                                   // completed
+        None,                                   // advance
+        None,                                   // description
+        None,                                   // visible
+        false,                                  // refresh
+        None,                                   // fields
     );
     progress.start_task(task_id);
 

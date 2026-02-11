@@ -139,7 +139,6 @@ impl Renderable for SpinnerDisplay {
     }
 }
 
-
 /// A renderable that displays all spinners in columns.
 struct AllSpinners {
     names: Vec<String>,
@@ -197,7 +196,6 @@ impl Renderable for AllSpinners {
         columns.measure(console, options)
     }
 }
-
 
 fn main() -> std::io::Result<()> {
     let all_spinners = AllSpinners::new();

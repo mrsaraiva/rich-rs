@@ -127,9 +127,8 @@ impl Rule {
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         let title_str = title.into();
         // Try to parse as markup; fall back to plain text on error.
-        self.title = Some(
-            Text::from_markup(&title_str, false).unwrap_or_else(|_| Text::plain(&title_str)),
-        );
+        self.title =
+            Some(Text::from_markup(&title_str, false).unwrap_or_else(|_| Text::plain(&title_str)));
         self
     }
 
@@ -600,7 +599,9 @@ mod tests {
 
     #[test]
     fn test_rule_with_markup_title() {
-        let rule = Rule::new().with_title("[bold]Bold Title[/bold]").with_end("");
+        let rule = Rule::new()
+            .with_title("[bold]Bold Title[/bold]")
+            .with_end("");
         let console = Console::new();
         let options = ConsoleOptions {
             max_width: 30,
@@ -622,10 +623,7 @@ mod tests {
     fn test_rule_with_plain_title_fallback() {
         // If markup is invalid, it should fall back to plain text
         let rule = Rule::new().with_title("Plain Title").with_end("");
-        assert_eq!(
-            rule.title.as_ref().unwrap().plain_text(),
-            "Plain Title"
-        );
+        assert_eq!(rule.title.as_ref().unwrap().plain_text(), "Plain Title");
     }
 
     // ==================== Edge case tests ====================

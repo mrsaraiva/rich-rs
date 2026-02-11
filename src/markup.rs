@@ -261,9 +261,9 @@ pub fn render_with_emoji_variant(
                 if c as u32 > 0x2000
                     && c != '\u{fe0e}'
                     && c != '\u{fe0f}'
-                    && chars.peek().map_or(true, |&next| {
-                        next != '\u{fe0e}' && next != '\u{fe0f}'
-                    })
+                    && chars
+                        .peek()
+                        .map_or(true, |&next| next != '\u{fe0e}' && next != '\u{fe0f}')
                 {
                     result.push_str(selector);
                 }

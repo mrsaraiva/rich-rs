@@ -260,7 +260,6 @@ impl Align {
     }
 }
 
-
 impl Renderable for Align {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         let mut result = Segments::new();

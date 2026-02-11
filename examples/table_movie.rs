@@ -113,7 +113,6 @@ impl SharedTable {
     }
 }
 
-
 impl Renderable for SharedTable {
     fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
         let proxy = TableProxy {
@@ -161,7 +160,6 @@ fn main() {
             self.table.measure(console, options)
         }
     }
-
 
     let renderer = TableRenderer {
         table: display_table,

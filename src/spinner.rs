@@ -9,12 +9,12 @@
 use std::io::Stdout;
 use std::time::Instant;
 
+use crate::Renderable;
 use crate::console::{Console, ConsoleOptions};
 use crate::measure::Measurement;
 use crate::segment::Segments;
 use crate::style::Style;
 use crate::text::{Text, TextPart};
-use crate::Renderable;
 
 #[derive(Debug, Clone)]
 pub struct SpinnerDef {
@@ -66,12 +66,7 @@ impl Spinner {
     }
 
     /// Update the spinner's text, style, or speed after creation.
-    pub fn update(
-        &mut self,
-        text: Option<String>,
-        style: Option<Style>,
-        speed: Option<f64>,
-    ) {
+    pub fn update(&mut self, text: Option<String>, style: Option<Style>, speed: Option<f64>) {
         if let Some(t) = text {
             self.text = Some(Text::plain(t));
         }

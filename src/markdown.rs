@@ -922,7 +922,6 @@ impl Markdown {
     }
 }
 
-
 impl Renderable for Markdown {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         let (blocks, context) = self.parse();

@@ -1063,7 +1063,12 @@ impl Table {
             if pad_right > 0 {
                 padded.push(right_pad.clone());
             }
-            result.push(Segment::adjust_line_length(&padded, width, Some(style), true));
+            result.push(Segment::adjust_line_length(
+                &padded,
+                width,
+                Some(style),
+                true,
+            ));
         }
 
         // Add bottom padding blank lines
@@ -1077,7 +1082,6 @@ impl Table {
         result
     }
 }
-
 
 impl Renderable for Table {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
@@ -1114,7 +1118,8 @@ impl Renderable for Table {
 
         // Render title
         if let Some(ref title) = self.title {
-            let title_lines = console.render_lines(title, Some(options), self.title_style, false, false);
+            let title_lines =
+                console.render_lines(title, Some(options), self.title_style, false, false);
             for line in title_lines {
                 let line_width = Segment::get_line_length(&line);
                 let padding = table_width.saturating_sub(line_width);
@@ -1448,8 +1453,13 @@ impl Renderable for Table {
         if let Some(ref caption) = self.caption {
             let mut caption_options = options.clone();
             caption_options.max_width = table_width;
-            let caption_lines =
-                console.render_lines(caption, Some(&caption_options), self.caption_style, false, false);
+            let caption_lines = console.render_lines(
+                caption,
+                Some(&caption_options),
+                self.caption_style,
+                false,
+                false,
+            );
             for line in caption_lines {
                 let line_width = Segment::get_line_length(&line);
                 let padding = table_width.saturating_sub(line_width);
@@ -2047,9 +2057,7 @@ mod tests {
     #[test]
     fn test_table_with_title_style() {
         let style = Style::new().with_bold(true);
-        let table = Table::new()
-            .with_title("My Title")
-            .with_title_style(style);
+        let table = Table::new().with_title("My Title").with_title_style(style);
         assert_eq!(table.title_style, Some(style));
     }
 

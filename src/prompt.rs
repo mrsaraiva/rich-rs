@@ -272,9 +272,7 @@ impl Prompt {
                 // Print prompt but read from the provided stream.
                 let _ = console.print(&prompt_text, None, None, None, false, "");
                 let mut line = String::new();
-                stream
-                    .read_line(&mut line)
-                    .map_err(PromptError::from)?;
+                stream.read_line(&mut line).map_err(PromptError::from)?;
                 if line.is_empty() {
                     return Err(PromptError::Interrupted);
                 }
@@ -491,9 +489,7 @@ impl IntPrompt {
             let value = if let Some(ref mut stream) = self.stream {
                 let _ = console.print(&prompt_text, None, None, None, false, "");
                 let mut line = String::new();
-                stream
-                    .read_line(&mut line)
-                    .map_err(PromptError::from)?;
+                stream.read_line(&mut line).map_err(PromptError::from)?;
                 if line.is_empty() {
                     return Err(PromptError::Interrupted);
                 }
@@ -676,9 +672,7 @@ impl FloatPrompt {
             let value = if let Some(ref mut stream) = self.stream {
                 let _ = console.print(&prompt_text, None, None, None, false, "");
                 let mut line = String::new();
-                stream
-                    .read_line(&mut line)
-                    .map_err(PromptError::from)?;
+                stream.read_line(&mut line).map_err(PromptError::from)?;
                 if line.is_empty() {
                     return Err(PromptError::Interrupted);
                 }
@@ -869,9 +863,7 @@ impl Confirm {
             let value = if let Some(ref mut stream) = self.stream {
                 let _ = console.print(&prompt_text, None, None, None, false, "");
                 let mut line = String::new();
-                stream
-                    .read_line(&mut line)
-                    .map_err(PromptError::from)?;
+                stream.read_line(&mut line).map_err(PromptError::from)?;
                 if line.is_empty() {
                     return Err(PromptError::Interrupted);
                 }

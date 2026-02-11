@@ -186,7 +186,6 @@ impl Renderable for ProcessTableRenderer {
     }
 }
 
-
 fn main() -> std::io::Result<()> {
     // Get console height to determine number of processes to display
     let console = Console::new();

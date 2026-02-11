@@ -175,7 +175,6 @@ impl ScopeRenderable {
     }
 }
 
-
 impl Renderable for ScopeRenderable {
     fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         // Create a grid table (no borders, minimal padding)

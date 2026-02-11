@@ -421,10 +421,7 @@ impl Layout {
         use crate::tree::Tree;
 
         fn build_label(state: &LayoutState) -> Text {
-            let name = state
-                .name
-                .as_deref()
-                .unwrap_or("<unnamed>");
+            let name = state.name.as_deref().unwrap_or("<unnamed>");
             let kind = match state.splitter {
                 SplitterKind::Row => "row",
                 SplitterKind::Column => "column",
