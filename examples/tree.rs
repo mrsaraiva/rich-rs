@@ -10,7 +10,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-use rich_rs::{Console, Style, Text, Tree, filesize_decimal};
+use rich_rs::{Console, Style, Text, Tree, TreeNodeOptions, filesize_decimal};
 
 /// Recursively build a Tree with directory contents.
 fn walk_directory(directory: &Path, tree: &mut Tree) {
@@ -40,15 +40,9 @@ fn walk_directory(directory: &Path, tree: &mut Tree) {
         let is_dir = path.is_dir();
 
         if is_dir {
-            // Directory: use folder emoji and magenta color
-            // Apply dim style if name starts with "__"
-            let style = if name.starts_with("__") {
-                Style::parse("dim").unwrap_or_default()
-            } else {
-                Style::default()
-            };
-
-            let guide_style = style;
+            // Directory: use folder emoji and magenta color.
+            // Directories starting with "__" are rendered dim.
+            let dim_style = Style::parse("dim").unwrap_or_default();
 
             // Create label with folder emoji and link
             let label = Text::from_markup(
@@ -62,19 +56,16 @@ fn walk_directory(directory: &Path, tree: &mut Tree) {
             .unwrap_or_else(|_| Text::plain(&name));
 
             // Add branch and recurse
-            let branch = tree.add(Box::new(label));
-            // Apply styles to the branch
-            if !style.is_null() {
-                // Note: Tree inherits styles from parent when adding children,
-                // but we need to set them on the branch after creation
-                // The Tree API doesn't have a direct way to set style after creation
-                // through the returned mutable reference, so we work around this
-                // by setting guide_style through the builder pattern before adding.
-            }
-            // For proper dim styling on directories starting with "__",
-            // we need to modify the branch. Since with_style/with_guide_style
-            // are builder methods that consume self, we work around this limitation.
-            let _ = guide_style; // Acknowledge we can't easily apply this
+            let branch = if name.starts_with("__") {
+                tree.add_with_options(
+                    Box::new(label),
+                    TreeNodeOptions::new()
+                        .with_style(dim_style)
+                        .with_guide_style(dim_style),
+                )
+            } else {
+                tree.add(Box::new(label))
+            };
             walk_directory(&path, branch);
         } else {
             // File: create styled filename with extension highlighting

@@ -1,33 +1,35 @@
-//! Status example - Show a spinner with status text while working on tasks.
-//!
-//! This is a port of Python Rich's status example from `rich/status.py`.
+//! Status example
 //!
 //! Run with: `cargo run --example status`
+//!
+//! Demonstrates:
+//! - `Console::status()` for a transient spinner
+//! - `Status::update()` while work is in progress
+//! - `rich_rs::log!` for timestamped progress messages
 
 use std::thread::sleep;
 use std::time::Duration;
 
-use rich_rs::Console;
-use rich_rs::status::Status;
+use rich_rs::{Console, Text};
 
 fn main() -> std::io::Result<()> {
     let mut console = Console::new();
-    console.print_text("")?; // blank line
 
     let tasks: Vec<String> = (1..=10).map(|n| format!("task {}", n)).collect();
-
-    let mut status = Status::new("[bold green]Working on tasks...");
+    let mut status = console.status("[bold green]Working on tasks...", None, None, None, None);
     status.start()?;
 
-    for task in tasks {
+    for (index, task) in tasks.iter().enumerate() {
+        status.update(&format!("[bold green]Working on {}...", task))?;
         sleep(Duration::from_secs(1));
-        // Note: Python Rich uses console.log() which we don't have yet.
-        // We use println! instead, which works well because Status uses transient=true
-        // so the spinner line is cleared before our println output.
-        println!("{} complete", task);
+        rich_rs::log!(
+            console,
+            &Text::plain(format!("{} complete ({}/{})", task, index + 1, tasks.len()))
+        )?;
     }
 
     status.stop()?;
+    rich_rs::log!(console, &Text::plain("All tasks complete"))?;
 
     Ok(())
 }
