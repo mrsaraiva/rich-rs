@@ -477,6 +477,8 @@ pub struct Console<W: Write = Stdout> {
     record: bool,
     /// Buffer for recorded segments (protected by mutex for thread safety).
     record_buffer: Arc<Mutex<Vec<Segment>>>,
+    /// Render hooks stack.
+    render_hooks: Vec<Box<dyn Fn(&Segments) -> Segments + Send + Sync>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -535,6 +537,7 @@ impl Console<Stdout> {
             next_link_id: 1,
             record: false,
             record_buffer: Arc::new(Mutex::new(Vec::new())),
+            render_hooks: Vec::new(),
         }
     }
 
@@ -610,6 +613,7 @@ impl Console<Stdout> {
             next_link_id: 1,
             record: false,
             record_buffer: Arc::new(Mutex::new(Vec::new())),
+            render_hooks: Vec::new(),
         }
     }
 
@@ -774,6 +778,7 @@ impl<W: Write> Console<W> {
             next_link_id: 1,
             record: false,
             record_buffer: Arc::new(Mutex::new(Vec::new())),
+            render_hooks: Vec::new(),
         }
     }
 
@@ -2336,6 +2341,121 @@ impl<W: Write> Console<W> {
         // Console::with_options() initializes console fields from options.
         let temp_console = Console::<Stdout>::with_options(measure_opts.clone());
         renderable.measure(&temp_console, &measure_opts)
+    }
+
+    // ========================================================================
+    // New parity methods
+    // ========================================================================
+
+    /// Low-level output that bypasses the full rendering pipeline.
+    ///
+    /// Unlike `print()`, this won't pretty print, wrap text, or apply markup,
+    /// but will optionally apply a basic style and highlighting.
+    pub fn out(&mut self, text: &str, style: Option<Style>, _highlight: Option<bool>) -> io::Result<()> {
+        if self.quiet {
+            return Ok(());
+        }
+        self.print(
+            &Text::plain(text),
+            style,
+            None,
+            Some(OverflowMethod::Ignore),
+            true, // no_wrap
+            "\n",
+        )
+    }
+
+    /// Export recorded output as plain text.
+    ///
+    /// Requires `record=true` to be set. If `styles` is false, ANSI codes are
+    /// stripped from the output (only plain text is returned).
+    pub fn export_text(&self, clear: bool, styles: bool) -> String {
+        let mut buffer = self.record_buffer.lock().unwrap();
+        let text = if styles {
+            buffer
+                .iter()
+                .filter(|s| s.control.is_none())
+                .map(|s| {
+                    if let Some(style) = s.style {
+                        if let Some(color_system) = self.color_system {
+                            style.render(&s.text, color_system)
+                        } else {
+                            s.text.to_string()
+                        }
+                    } else {
+                        s.text.to_string()
+                    }
+                })
+                .collect::<String>()
+        } else {
+            buffer
+                .iter()
+                .filter(|s| s.control.is_none())
+                .map(|s| s.text.to_string())
+                .collect::<String>()
+        };
+        if clear {
+            buffer.clear();
+        }
+        text
+    }
+
+    /// Save export_text output to a file.
+    pub fn save_text(&self, path: &str, clear: bool, styles: bool) -> io::Result<()> {
+        let text = self.export_text(clear, styles);
+        std::fs::write(path, text)
+    }
+
+    /// Push a render hook that intercepts/transforms rendered segments before output.
+    pub fn push_render_hook(
+        &mut self,
+        hook: Box<dyn Fn(&Segments) -> Segments + Send + Sync>,
+    ) {
+        self.render_hooks.push(hook);
+    }
+
+    /// Remove the last render hook.
+    pub fn pop_render_hook(&mut self) {
+        self.render_hooks.pop();
+    }
+
+    /// Create and return a Status spinner.
+    ///
+    /// This is a convenience method that creates a `Status` with the console's
+    /// default settings.
+    pub fn status(
+        &self,
+        status: &str,
+        spinner: Option<&str>,
+        spinner_style: Option<Style>,
+        speed: Option<f64>,
+        _refresh_per_second: Option<f64>,
+    ) -> crate::status::Status {
+        let mut s = crate::status::Status::new(status);
+        if let Some(name) = spinner {
+            s = s.spinner(name);
+        }
+        if let Some(style) = spinner_style {
+            s = s.spinner_style(style);
+        }
+        if let Some(spd) = speed {
+            s = s.speed(spd);
+        }
+        s
+    }
+
+    /// Pretty-print JSON.
+    ///
+    /// Parse, format, highlight, and print JSON content.
+    pub fn print_json(
+        &mut self,
+        json: &str,
+        indent: usize,
+        highlight: bool,
+        sort_keys: bool,
+    ) -> io::Result<()> {
+        let json_renderable = crate::json::Json::new(json, indent, highlight, sort_keys);
+        self.print(&json_renderable, None, None, None, true, "\n")
     }
 }
 

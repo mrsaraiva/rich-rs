@@ -57,6 +57,28 @@ pub const TREE_GUIDES: TreeGuides = TreeGuides {
     end: "\u{2514}\u{2500}\u{2500} ",    // "└── "
 };
 
+/// Bold Unicode box-drawing tree guides.
+///
+/// Uses heavy-weight box characters (┃, ┣━━, ┗━━).
+/// In Python Rich, these are selected when `guide_style` has `bold=True`.
+pub const BOLD_TREE_GUIDES: TreeGuides = TreeGuides {
+    space: "    ",
+    vertical: "\u{2503}   ",             // "┃   "
+    branch: "\u{2523}\u{2501}\u{2501} ", // "┣━━ "
+    end: "\u{2517}\u{2501}\u{2501} ",    // "┗━━ "
+};
+
+/// Double-line Unicode tree guides.
+///
+/// Uses double-line box characters (║, ╠══, ╚══).
+/// In Python Rich, these are selected when `guide_style` has `underline2=True`.
+pub const DOUBLE_TREE_GUIDES: TreeGuides = TreeGuides {
+    space: "    ",
+    vertical: "\u{2551}   ",             // "║   "
+    branch: "\u{2560}\u{2550}\u{2550} ", // "╠══ "
+    end: "\u{255a}\u{2550}\u{2550} ",    // "╚══ "
+};
+
 /// ASCII tree guides for non-Unicode terminals.
 pub const ASCII_GUIDES: TreeGuides = TreeGuides {
     space: "    ",
@@ -86,6 +108,52 @@ pub const ASCII_GUIDES: TreeGuides = TreeGuides {
 /// projects.add(Box::new(Text::plain("project2")));
 /// root.add(Box::new(Text::plain("notes.txt")));
 /// ```
+/// Options for adding a child node to a tree.
+///
+/// Used with `Tree::add_with_options()` to specify per-node overrides.
+#[derive(Debug, Clone, Default)]
+pub struct TreeNodeOptions {
+    /// Style for this node's label. If `None`, inherits from parent.
+    pub style: Option<Style>,
+    /// Style for guide lines from this node. If `None`, inherits from parent.
+    pub guide_style: Option<Style>,
+    /// Whether children are shown. Defaults to `true`.
+    pub expanded: Option<bool>,
+    /// Whether to apply highlighting. If `None`, inherits from parent.
+    pub highlight: Option<bool>,
+}
+
+impl TreeNodeOptions {
+    /// Create new default options.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the node style.
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    /// Set the guide style.
+    pub fn with_guide_style(mut self, style: Style) -> Self {
+        self.guide_style = Some(style);
+        self
+    }
+
+    /// Set whether children are expanded.
+    pub fn with_expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
+    }
+
+    /// Set whether to highlight.
+    pub fn with_highlight(mut self, highlight: bool) -> Self {
+        self.highlight = Some(highlight);
+        self
+    }
+}
+
 pub struct Tree {
     /// The label/content of this node.
     label: Box<dyn Renderable + Send + Sync>,
@@ -99,6 +167,8 @@ pub struct Tree {
     expanded: bool,
     /// Whether to highlight labels (for future use with highlighters).
     highlight: bool,
+    /// Whether to hide the root node when rendering.
+    hide_root: bool,
 }
 
 impl std::fmt::Debug for Tree {
@@ -109,6 +179,7 @@ impl std::fmt::Debug for Tree {
             .field("guide_style", &self.guide_style)
             .field("expanded", &self.expanded)
             .field("highlight", &self.highlight)
+            .field("hide_root", &self.hide_root)
             .finish_non_exhaustive()
     }
 }
@@ -135,6 +206,7 @@ impl Tree {
             guide_style: Style::default(),
             expanded: true,
             highlight: false,
+            hide_root: false,
         }
     }
 
@@ -168,6 +240,38 @@ impl Tree {
             guide_style: self.guide_style,
             expanded: true,
             highlight: self.highlight,
+            hide_root: false,
+        };
+        self.children.push(child);
+        self.children.last_mut().unwrap()
+    }
+
+    /// Add a child node with the given label and options.
+    ///
+    /// Options allow overriding style, guide_style, expanded, and highlight
+    /// on a per-node basis. Fields set to `None` inherit from the parent.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - The content to display for the child node.
+    /// * `options` - Per-node overrides.
+    ///
+    /// # Returns
+    ///
+    /// A mutable reference to the newly added child Tree.
+    pub fn add_with_options(
+        &mut self,
+        label: Box<dyn Renderable + Send + Sync>,
+        options: TreeNodeOptions,
+    ) -> &mut Tree {
+        let child = Tree {
+            label,
+            children: Vec::new(),
+            style: options.style.unwrap_or(self.style),
+            guide_style: options.guide_style.unwrap_or(self.guide_style),
+            expanded: options.expanded.unwrap_or(true),
+            highlight: options.highlight.unwrap_or(self.highlight),
+            hide_root: false,
         };
         self.children.push(child);
         self.children.last_mut().unwrap()
@@ -236,6 +340,18 @@ impl Tree {
         self
     }
 
+    /// Set whether to hide the root node.
+    ///
+    /// When true, only children are rendered (no root label or root guide lines).
+    ///
+    /// # Arguments
+    ///
+    /// * `hide` - If true, the root node's label is hidden.
+    pub fn with_hide_root(mut self, hide: bool) -> Self {
+        self.hide_root = hide;
+        self
+    }
+
     /// Get the number of direct children.
     pub fn children_count(&self) -> usize {
         self.children.len()
@@ -289,21 +405,44 @@ impl Renderable for Tree {
     fn render(&self, _console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         let mut result = Segments::new();
 
-        // Select guides based on encoding
+        // Select guides based on encoding and guide_style.
+        // Python Rich selects bold guides when guide_style has bold=True,
+        // and double guides when guide_style has underline2=True.
         let guides = if options.ascii_only() {
             &ASCII_GUIDES
+        } else if self.guide_style.bold == Some(true) {
+            &BOLD_TREE_GUIDES
+        } else if self.guide_style.underline == Some(true) {
+            // Use double guides for underline (Rust doesn't have underline2,
+            // so we use underline as the trigger, matching the spirit of Python Rich).
+            &DOUBLE_TREE_GUIDES
         } else {
             &TREE_GUIDES
         };
 
-        // Stack-based traversal to avoid recursion
-        // Each entry: (node reference, child index, is_last, depth)
-        let mut stack: Vec<TraversalState> = vec![TraversalState {
-            node: self,
-            child_index: 0,
-            is_last: true,
-            depth: 0,
-        }];
+        // When hide_root is true, render children as if they are root-level.
+        // We push each child at depth 0 instead of the root.
+        let mut stack: Vec<TraversalState> = if self.hide_root {
+            // Push children in reverse so they render in order
+            self.children
+                .iter()
+                .enumerate()
+                .rev()
+                .map(|(i, child)| TraversalState {
+                    node: child,
+                    child_index: 0,
+                    is_last: i == self.children.len() - 1,
+                    depth: 0,
+                })
+                .collect()
+        } else {
+            vec![TraversalState {
+                node: self,
+                child_index: 0,
+                is_last: true,
+                depth: 0,
+            }]
+        };
 
         // Track "is_last" for each depth level for guide prefix calculation
         // levels[i] = true means the node at depth i was the last child
@@ -336,7 +475,7 @@ impl Renderable for Tree {
                 }
 
                 // Build guide prefix for this node
-                // Don't add guides for the root node (depth 0)
+                // Don't add guides for root-level nodes (depth 0)
                 if *depth > 0 {
                     let mut prefix = String::new();
 
@@ -565,6 +704,91 @@ mod tests {
     fn test_tree_with_highlight() {
         let tree = Tree::new(Box::new(Text::plain("Root"))).with_highlight(true);
         assert!(tree.highlight);
+    }
+
+    // ==================== hide_root tests ====================
+
+    #[test]
+    fn test_tree_hide_root() {
+        let mut tree = Tree::new(Box::new(Text::plain("Root"))).with_hide_root(true);
+        tree.add(Box::new(Text::plain("Child 1")));
+        tree.add(Box::new(Text::plain("Child 2")));
+
+        let console = Console::with_options(ConsoleOptions::default());
+        let options = console.options().clone();
+        let segments = tree.render(&console, &options);
+        let output: String = segments.iter().map(|s| s.text.to_string()).collect();
+
+        // Root should not appear
+        assert!(!output.contains("Root"));
+        // Children should appear
+        assert!(output.contains("Child 1"));
+        assert!(output.contains("Child 2"));
+    }
+
+    #[test]
+    fn test_tree_hide_root_no_children() {
+        let tree = Tree::new(Box::new(Text::plain("Root"))).with_hide_root(true);
+
+        let console = Console::with_options(ConsoleOptions::default());
+        let options = console.options().clone();
+        let segments = tree.render(&console, &options);
+        let output: String = segments.iter().map(|s| s.text.to_string()).collect();
+
+        // Nothing should appear
+        assert!(!output.contains("Root"));
+    }
+
+    // ==================== add_with_options tests ====================
+
+    #[test]
+    fn test_tree_add_with_options() {
+        let mut tree = Tree::new(Box::new(Text::plain("Root")));
+        let opts = TreeNodeOptions::new()
+            .with_style(Style::new().with_bold(true))
+            .with_expanded(false);
+        let child = tree.add_with_options(Box::new(Text::plain("Child")), opts);
+        assert!(!child.is_expanded());
+        assert_eq!(child.style().bold, Some(true));
+    }
+
+    #[test]
+    fn test_tree_add_with_options_inherits() {
+        let style = Style::new().with_dim(true);
+        let mut tree = Tree::new(Box::new(Text::plain("Root"))).with_style(style);
+        let child = tree.add_with_options(Box::new(Text::plain("Child")), TreeNodeOptions::new());
+        // Should inherit parent style when options don't override
+        assert_eq!(child.style().dim, Some(true));
+    }
+
+    // ==================== Guide variant tests ====================
+
+    #[test]
+    fn test_bold_tree_guides() {
+        assert_eq!(BOLD_TREE_GUIDES.vertical, "┃   ");
+        assert_eq!(BOLD_TREE_GUIDES.branch, "┣━━ ");
+        assert_eq!(BOLD_TREE_GUIDES.end, "┗━━ ");
+    }
+
+    #[test]
+    fn test_double_tree_guides() {
+        assert_eq!(DOUBLE_TREE_GUIDES.vertical, "║   ");
+        assert_eq!(DOUBLE_TREE_GUIDES.branch, "╠══ ");
+        assert_eq!(DOUBLE_TREE_GUIDES.end, "╚══ ");
+    }
+
+    #[test]
+    fn test_tree_renders_bold_guides() {
+        let mut tree =
+            Tree::new(Box::new(Text::plain("Root"))).with_guide_style(Style::new().with_bold(true));
+        tree.add(Box::new(Text::plain("Child")));
+
+        let console = Console::with_options(ConsoleOptions::default());
+        let options = console.options().clone();
+        let segments = tree.render(&console, &options);
+        let output: String = segments.iter().map(|s| s.text.to_string()).collect();
+
+        assert!(output.contains("┗━━ "), "Should use bold guides");
     }
 
     // ==================== Tree render tests ====================

@@ -673,6 +673,68 @@ impl ProgressColumn for TransferSpeedColumn {
     }
 }
 
+/// A column that renders an arbitrary `Renderable` from the task's fields.
+///
+/// This is the most flexible column type, allowing custom rendering logic
+/// via a closure that extracts a renderable from the task state.
+pub struct RenderableColumn {
+    render_fn: Box<dyn Fn(&ProgressTask) -> Box<dyn Renderable + Send + Sync> + Send + Sync>,
+    no_wrap: bool,
+    justify: JustifyMethod,
+}
+
+impl RenderableColumn {
+    /// Create a new RenderableColumn with a render function.
+    ///
+    /// The function receives a `ProgressTask` reference and should return
+    /// a boxed `Renderable` to display in the column.
+    pub fn new(
+        f: impl Fn(&ProgressTask) -> Box<dyn Renderable + Send + Sync> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            render_fn: Box::new(f),
+            no_wrap: false,
+            justify: JustifyMethod::Left,
+        }
+    }
+
+    /// Set whether the column should avoid wrapping.
+    pub fn with_no_wrap(mut self, no_wrap: bool) -> Self {
+        self.no_wrap = no_wrap;
+        self
+    }
+
+    /// Set the column justification.
+    pub fn with_justify(mut self, justify: JustifyMethod) -> Self {
+        self.justify = justify;
+        self
+    }
+}
+
+impl std::fmt::Debug for RenderableColumn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderableColumn")
+            .field("no_wrap", &self.no_wrap)
+            .field("justify", &self.justify)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ProgressColumn for RenderableColumn {
+    fn table_column(&self) -> Column {
+        Column::new().no_wrap(self.no_wrap).justify(self.justify)
+    }
+
+    fn render(
+        &self,
+        task: &ProgressTask,
+        _now: f64,
+        _options: &ConsoleOptions,
+    ) -> Box<dyn Renderable + Send + Sync> {
+        (self.render_fn)(task)
+    }
+}
+
 struct ProgressState {
     start: Instant,
     tasks: HashMap<TaskID, ProgressTask>,
@@ -1188,6 +1250,33 @@ impl Progress {
         };
 
         self.track(iter, task_id, config.update_period)
+    }
+}
+
+impl Progress {
+    /// Access the task list (snapshot).
+    pub fn tasks(&self) -> Vec<ProgressTask> {
+        let state = self.state.lock().expect("progress state mutex poisoned");
+        state
+            .order
+            .iter()
+            .filter_map(|id| state.tasks.get(id).cloned())
+            .collect()
+    }
+
+    /// List of task IDs in order.
+    pub fn task_ids(&self) -> Vec<TaskID> {
+        let state = self.state.lock().expect("progress state mutex poisoned");
+        state.order.clone()
+    }
+
+    /// Whether all tasks are complete.
+    pub fn finished(&self) -> bool {
+        let state = self.state.lock().expect("progress state mutex poisoned");
+        state
+            .tasks
+            .values()
+            .all(|t| t.finished())
     }
 }
 

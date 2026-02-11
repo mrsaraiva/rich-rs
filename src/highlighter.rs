@@ -29,6 +29,16 @@ fn byte_to_char_map(s: &str) -> Vec<usize> {
 pub trait Highlighter: Send + Sync {
     /// Apply highlighting in place to text.
     fn highlight(&self, text: &mut Text);
+
+    /// Return a new highlighted copy of the text.
+    ///
+    /// This matches Python Rich's `__call__` semantics where calling the
+    /// highlighter returns a new highlighted Text rather than mutating in place.
+    fn highlight_text(&self, text: &Text) -> Text {
+        let mut result = text.clone();
+        self.highlight(&mut result);
+        result
+    }
 }
 
 /// A highlighter that does nothing. Used to disable highlighting.
@@ -382,6 +392,27 @@ mod tests {
         let span = &text.spans()[0];
         assert_eq!(span.start, 9);
         assert_eq!(span.end, 11);
+    }
+
+    #[test]
+    fn test_highlight_text_returns_new_copy() {
+        let highlighter = RegexHighlighter::new(&[r"(?P<number>\d+)"], "repr.");
+        let text = Text::plain("value is 42");
+
+        // Original should be unmodified
+        let highlighted = highlighter.highlight_text(&text);
+        assert_eq!(text.spans().len(), 0);
+        assert!(!highlighted.spans().is_empty());
+        assert_eq!(highlighted.plain_text(), text.plain_text());
+    }
+
+    #[test]
+    fn test_null_highlighter_highlight_text() {
+        let highlighter = NullHighlighter;
+        let text = Text::plain("hello");
+        let result = highlighter.highlight_text(&text);
+        assert_eq!(result.plain_text(), "hello");
+        assert_eq!(result.spans().len(), 0);
     }
 
     #[test]

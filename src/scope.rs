@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::io::Stdout;
 
 use crate::Renderable;
-use crate::console::{Console, ConsoleOptions, JustifyMethod};
+use crate::console::{Console, ConsoleOptions, JustifyMethod, OverflowMethod};
 use crate::highlighter::{Highlighter, repr_highlighter};
 use crate::measure::Measurement;
 use crate::panel::Panel;
@@ -75,6 +75,10 @@ pub struct ScopeRenderable {
     max_length: Option<usize>,
     /// Maximum string length before truncating.
     max_string: Option<usize>,
+    /// Overflow method for long values.
+    overflow: Option<OverflowMethod>,
+    /// Maximum depth for nested value display.
+    max_depth: Option<usize>,
 }
 
 impl std::fmt::Debug for ScopeRenderable {
@@ -86,6 +90,8 @@ impl std::fmt::Debug for ScopeRenderable {
             .field("indent_guides", &self.indent_guides)
             .field("max_length", &self.max_length)
             .field("max_string", &self.max_string)
+            .field("overflow", &self.overflow)
+            .field("max_depth", &self.max_depth)
             .finish()
     }
 }
@@ -100,6 +106,8 @@ impl ScopeRenderable {
             indent_guides: false,
             max_length: None,
             max_string: None,
+            overflow: None,
+            max_depth: None,
         }
     }
 
@@ -130,6 +138,18 @@ impl ScopeRenderable {
     /// Set maximum string length.
     pub fn with_max_string(mut self, max: Option<usize>) -> Self {
         self.max_string = max;
+        self
+    }
+
+    /// Set overflow method for long values.
+    pub fn with_overflow(mut self, overflow: OverflowMethod) -> Self {
+        self.overflow = Some(overflow);
+        self
+    }
+
+    /// Set maximum depth for nested value display.
+    pub fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = Some(max_depth);
         self
     }
 
@@ -189,12 +209,9 @@ impl Renderable for ScopeRenderable {
 
             // Truncate if needed
             if let Some(max_str) = self.max_string {
+                let overflow = self.overflow.unwrap_or(OverflowMethod::Ellipsis);
                 if value_text.plain_text().len() > max_str {
-                    value_text = value_text.truncate(
-                        max_str,
-                        crate::console::OverflowMethod::Ellipsis,
-                        false,
-                    );
+                    value_text = value_text.truncate(max_str, overflow, false);
                 }
             }
 
@@ -338,13 +355,17 @@ mod tests {
             .with_sort_keys(false)
             .with_indent_guides(true)
             .with_max_length(Some(10))
-            .with_max_string(Some(80));
+            .with_max_string(Some(80))
+            .with_overflow(OverflowMethod::Crop)
+            .with_max_depth(5);
 
         assert_eq!(renderable.title, Some("Test".to_string()));
         assert!(!renderable.sort_keys);
         assert!(renderable.indent_guides);
         assert_eq!(renderable.max_length, Some(10));
         assert_eq!(renderable.max_string, Some(80));
+        assert_eq!(renderable.overflow, Some(OverflowMethod::Crop));
+        assert_eq!(renderable.max_depth, Some(5));
     }
 
     #[test]

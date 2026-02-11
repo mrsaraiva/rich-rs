@@ -27,8 +27,17 @@ impl std::fmt::Debug for Constrain {
 }
 
 impl Constrain {
+    /// Create a new Constrain with an explicit width.
     pub fn new(renderable: Box<dyn Renderable + Send + Sync>, width: Option<usize>) -> Self {
         Self { renderable, width }
+    }
+
+    /// Create a new Constrain with the default width of 80 (matches Python Rich).
+    pub fn with_default_width(renderable: Box<dyn Renderable + Send + Sync>) -> Self {
+        Self {
+            renderable,
+            width: Some(80),
+        }
     }
 
     pub fn with_width(mut self, width: Option<usize>) -> Self {
@@ -99,6 +108,13 @@ mod tests {
         let (w, h) = Segment::get_shape(&lines);
         assert!(h >= 2);
         assert!(w <= 5);
+    }
+
+    #[test]
+    fn test_constrain_default_width() {
+        let text = Text::plain("hello world");
+        let constrain = Constrain::with_default_width(Box::new(text));
+        assert_eq!(constrain.width(), Some(80));
     }
 
     #[test]

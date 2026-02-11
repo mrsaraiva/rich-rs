@@ -227,10 +227,57 @@ fn normalize_style(style: &str) -> String {
 /// assert_eq!(text.plain_text(), "Hello World");
 /// ```
 pub fn render(markup: &str, emoji: bool) -> Result<Text> {
+    render_with_emoji_variant(markup, emoji, None)
+}
+
+/// Render markup into a Text object with an optional emoji variant override.
+///
+/// # Arguments
+///
+/// * `markup` - The markup string to render
+/// * `emoji` - Whether to replace emoji codes
+/// * `emoji_variant` - Optional default variant to apply to all emojis
+///
+/// # Returns
+///
+/// A `Text` object with styled spans, or an error if the markup is invalid.
+pub fn render_with_emoji_variant(
+    markup: &str,
+    emoji: bool,
+    emoji_variant: Option<crate::emoji::EmojiVariant>,
+) -> Result<Text> {
+    // Helper to apply variant selector to emoji-replaced text
+    let apply_emoji = |input: &str| -> String {
+        let replaced = Emoji::replace(input);
+        if let Some(variant) = emoji_variant {
+            // Append variant selector to any emoji characters that don't already have one
+            let selector = variant.selector();
+            let mut result = String::with_capacity(replaced.len());
+            let mut chars = replaced.chars().peekable();
+            while let Some(c) = chars.next() {
+                result.push(c);
+                // If this is an emoji-like codepoint (above basic ASCII/Latin) and next
+                // char is not already a variant selector, append one
+                if c as u32 > 0x2000
+                    && c != '\u{fe0e}'
+                    && c != '\u{fe0f}'
+                    && chars.peek().map_or(true, |&next| {
+                        next != '\u{fe0e}' && next != '\u{fe0f}'
+                    })
+                {
+                    result.push_str(selector);
+                }
+            }
+            result
+        } else {
+            replaced
+        }
+    };
+
     // Fast path: no brackets means no markup
     if !markup.contains('[') {
         let content = if emoji {
-            Emoji::replace(markup)
+            apply_emoji(markup)
         } else {
             markup.to_string()
         };
@@ -248,7 +295,7 @@ pub fn render(markup: &str, emoji: bool) -> Result<Text> {
 
             // Replace emoji codes if enabled
             if emoji {
-                content = Emoji::replace(&content);
+                content = apply_emoji(&content);
             }
 
             text.append(&content, None);

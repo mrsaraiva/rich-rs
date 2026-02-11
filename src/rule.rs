@@ -122,9 +122,14 @@ impl Rule {
 
     /// Set the title from a string.
     ///
-    /// The title will be rendered in the middle of the rule line.
+    /// The title supports BBCode-style markup (e.g., `[bold]Title[/bold]`).
+    /// If markup parsing fails, the title is used as plain text.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(Text::plain(title.into()));
+        let title_str = title.into();
+        // Try to parse as markup; fall back to plain text on error.
+        self.title = Some(
+            Text::from_markup(&title_str, false).unwrap_or_else(|_| Text::plain(&title_str)),
+        );
         self
     }
 
@@ -589,6 +594,38 @@ mod tests {
 
         // Should end with newline
         assert!(text.ends_with('\n'));
+    }
+
+    // ==================== Markup tests ====================
+
+    #[test]
+    fn test_rule_with_markup_title() {
+        let rule = Rule::new().with_title("[bold]Bold Title[/bold]").with_end("");
+        let console = Console::new();
+        let options = ConsoleOptions {
+            max_width: 30,
+            ..Default::default()
+        };
+
+        let segments = rule.render(&console, &options);
+        let text: String = segments.iter().map(|s| s.text.to_string()).collect();
+
+        // The markup should be parsed, so "Bold Title" appears (without the tags)
+        assert!(text.contains("Bold Title"));
+        assert!(!text.contains("[bold]"));
+
+        // Should have correct width
+        assert_eq!(cell_len(&text), 30);
+    }
+
+    #[test]
+    fn test_rule_with_plain_title_fallback() {
+        // If markup is invalid, it should fall back to plain text
+        let rule = Rule::new().with_title("Plain Title").with_end("");
+        assert_eq!(
+            rule.title.as_ref().unwrap().plain_text(),
+            "Plain Title"
+        );
     }
 
     // ==================== Edge case tests ====================

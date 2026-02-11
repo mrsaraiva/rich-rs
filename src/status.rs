@@ -314,6 +314,12 @@ impl Status {
         self.live.is_started()
     }
 
+    /// Access the current status text.
+    pub fn status_text(&self) -> Text {
+        let state = self.state.lock().expect("state mutex poisoned");
+        state.text.clone()
+    }
+
     fn rebuild_renderable(&mut self) {
         let state = self.state.lock().expect("state mutex poisoned");
         let spinner = Spinner::new(&state.spinner_name)
@@ -348,6 +354,28 @@ impl Status {
         drop(state);
 
         self.live.update(Box::new(renderable), true)
+    }
+}
+
+impl Renderable for Status {
+    fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
+        let state = self.state.lock().expect("state mutex poisoned");
+        let spinner = Spinner::new(&state.spinner_name)
+            .unwrap_or_else(|_| Spinner::new("dots").expect("dots spinner must exist"))
+            .with_speed(state.speed);
+        let elapsed = state.start.elapsed().as_secs_f64();
+        let frame = spinner.render_at(elapsed, Some(0.0), state.spinner_style);
+
+        let assembled = Text::assemble([
+            crate::TextPart::Text(frame),
+            crate::TextPart::Plain(" ".to_string()),
+            crate::TextPart::Text(state.text.clone()),
+        ]);
+        assembled.render(console, options)
+    }
+
+    fn measure(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
+        Measurement::from_segments(&self.render(console, options))
     }
 }
 

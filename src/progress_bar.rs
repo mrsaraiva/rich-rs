@@ -48,6 +48,19 @@ impl ProgressBar {
         Self::default()
     }
 
+    /// Returns the completion percentage (0.0–100.0).
+    ///
+    /// Returns 0.0 if total is zero or None.
+    pub fn percentage_completed(&self) -> f64 {
+        let Some(total) = self.total else {
+            return 0.0;
+        };
+        if total <= 0.0 {
+            return 0.0;
+        }
+        ((self.completed / total) * 100.0).clamp(0.0, 100.0)
+    }
+
     pub fn update(&mut self, completed: f64, total: Option<f64>) {
         self.completed = completed;
         if let Some(t) = total {

@@ -6,10 +6,15 @@
 //! (`rich/_spinners.py`) via `tools/generate_spinner_data.py` and committed as
 //! `src/spinner_data.inc.rs`.
 
+use std::io::Stdout;
 use std::time::Instant;
 
+use crate::console::{Console, ConsoleOptions};
+use crate::measure::Measurement;
+use crate::segment::Segments;
 use crate::style::Style;
-use crate::text::Text;
+use crate::text::{Text, TextPart};
+use crate::Renderable;
 
 #[derive(Debug, Clone)]
 pub struct SpinnerDef {
@@ -27,7 +32,8 @@ pub struct Spinner {
     interval_ms: u64,
     style: Option<Style>,
     speed: f64,
-    start: Option<Instant>,
+    start: Instant,
+    text: Option<Text>,
 }
 
 impl Spinner {
@@ -39,7 +45,8 @@ impl Spinner {
             interval_ms: def.interval_ms,
             style: None,
             speed: 1.0,
-            start: None,
+            start: Instant::now(),
+            text: None,
         })
     }
 
@@ -51,6 +58,29 @@ impl Spinner {
     pub fn with_speed(mut self, speed: f64) -> Self {
         self.speed = speed;
         self
+    }
+
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(Text::plain(text.into()));
+        self
+    }
+
+    /// Update the spinner's text, style, or speed after creation.
+    pub fn update(
+        &mut self,
+        text: Option<String>,
+        style: Option<Style>,
+        speed: Option<f64>,
+    ) {
+        if let Some(t) = text {
+            self.text = Some(Text::plain(t));
+        }
+        if let Some(s) = style {
+            self.style = Some(s);
+        }
+        if let Some(sp) = speed {
+            self.speed = sp;
+        }
     }
 
     pub fn name(&self) -> &str {
@@ -86,16 +116,44 @@ impl Spinner {
     }
 
     /// Render using this spinner's internal start time (for standalone use).
-    pub fn render(&mut self) -> Text {
-        let now = Instant::now();
-        let start = *self.start.get_or_insert(now);
-        let elapsed = now.duration_since(start).as_secs_f64();
-        let interval = (self.interval_ms as f64) / 1000.0;
-        let frame_no = (elapsed * self.speed) / interval;
-        let frame = self.frames[(frame_no as usize) % self.frames.len()];
-        match self.style {
-            Some(style) => Text::styled(frame, style),
-            None => Text::plain(frame),
+    pub fn render_frame(&self) -> Text {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        self.render_at(elapsed, Some(0.0), self.style)
+    }
+
+    /// Access the text displayed alongside the spinner.
+    pub fn text(&self) -> Option<&Text> {
+        self.text.as_ref()
+    }
+}
+
+impl Renderable for Spinner {
+    fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
+        let frame_text = self.render_frame();
+        if let Some(ref text) = self.text {
+            // Compose: spinner frame + " " + text
+            let assembled = Text::assemble([
+                TextPart::Text(frame_text),
+                TextPart::Plain(" ".to_string()),
+                TextPart::Text(text.clone()),
+            ]);
+            assembled.render(console, options)
+        } else {
+            frame_text.render(console, options)
+        }
+    }
+
+    fn measure(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
+        let frame_text = self.render_frame();
+        if let Some(ref text) = self.text {
+            let assembled = Text::assemble([
+                TextPart::Text(frame_text),
+                TextPart::Plain(" ".to_string()),
+                TextPart::Text(text.clone()),
+            ]);
+            assembled.measure(console, options)
+        } else {
+            frame_text.measure(console, options)
         }
     }
 }
@@ -120,5 +178,39 @@ mod tests {
     #[test]
     fn test_spinner_unknown_errors() {
         assert!(Spinner::new("not-a-spinner").is_err());
+    }
+
+    #[test]
+    fn test_spinner_with_text() {
+        let spinner = Spinner::new("dots").unwrap().with_text("Loading...");
+        assert!(spinner.text().is_some());
+        assert_eq!(spinner.text().unwrap().plain_text(), "Loading...");
+    }
+
+    #[test]
+    fn test_spinner_update() {
+        let mut spinner = Spinner::new("dots").unwrap();
+        assert!(spinner.text().is_none());
+
+        spinner.update(Some("Working".to_string()), None, Some(2.0));
+        assert!(spinner.text().is_some());
+        assert_eq!(spinner.text().unwrap().plain_text(), "Working");
+    }
+
+    #[test]
+    fn test_spinner_render_frame() {
+        let spinner = Spinner::new("dots").unwrap();
+        let frame = spinner.render_frame();
+        assert!(!frame.plain_text().is_empty());
+    }
+
+    #[test]
+    fn test_spinner_renderable() {
+        let spinner = Spinner::new("dots").unwrap().with_text("Test");
+        let console = Console::new();
+        let options = ConsoleOptions::default();
+        let segments = Renderable::render(&spinner, &console, &options);
+        let output: String = segments.iter().map(|s| s.text.to_string()).collect();
+        assert!(output.contains("Test"));
     }
 }

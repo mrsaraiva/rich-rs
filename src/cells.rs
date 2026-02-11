@@ -77,6 +77,30 @@ pub fn set_cell_size(text: &str, width: usize) -> String {
     result
 }
 
+/// Split text into individual character graphemes.
+///
+/// This is a simplified version that splits by characters. For proper
+/// Unicode grapheme cluster splitting, `unicode-segmentation` would be needed.
+///
+/// # Example
+///
+/// ```
+/// use rich_rs::split_graphemes;
+///
+/// assert_eq!(split_graphemes("hello"), vec!["h", "e", "l", "l", "o"]);
+/// assert_eq!(split_graphemes("你好"), vec!["你", "好"]);
+/// ```
+pub fn split_graphemes(text: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut idx = 0;
+    for c in text.chars() {
+        let start = idx;
+        idx += c.len_utf8();
+        result.push(&text[start..idx]);
+    }
+    result
+}
+
 /// Split text into lines such that each line fits within the available (cell) width.
 ///
 /// Each resulting line has a cell width less than or equal to `width`, except when
@@ -290,6 +314,34 @@ mod tests {
         assert_eq!(chop_cells("😀😀😀", 4), vec!["😀😀", "😀"]);
         assert_eq!(chop_cells("😀😀", 2), vec!["😀", "😀"]);
         assert_eq!(chop_cells("a😀b", 3), vec!["a😀", "b"]);
+    }
+
+    // ==================== split_graphemes tests ====================
+
+    #[test]
+    fn test_split_graphemes_ascii() {
+        assert_eq!(split_graphemes("hello"), vec!["h", "e", "l", "l", "o"]);
+    }
+
+    #[test]
+    fn test_split_graphemes_cjk() {
+        assert_eq!(split_graphemes("你好"), vec!["你", "好"]);
+    }
+
+    #[test]
+    fn test_split_graphemes_mixed() {
+        assert_eq!(split_graphemes("a你b"), vec!["a", "你", "b"]);
+    }
+
+    #[test]
+    fn test_split_graphemes_empty() {
+        let empty: Vec<&str> = vec![];
+        assert_eq!(split_graphemes(""), empty);
+    }
+
+    #[test]
+    fn test_split_graphemes_emoji() {
+        assert_eq!(split_graphemes("😀hi"), vec!["😀", "h", "i"]);
     }
 
     #[test]

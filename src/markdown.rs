@@ -843,6 +843,8 @@ pub struct Markdown {
     code_block_padding: Option<PaddingDimensions>,
     /// Text justification for paragraphs.
     justify: Option<JustifyMethod>,
+    /// Optional base style applied to all rendered output.
+    style: Option<Style>,
 }
 
 impl Markdown {
@@ -855,6 +857,7 @@ impl Markdown {
             code_theme: crate::syntax::DEFAULT_THEME.to_string(),
             code_block_padding: None,
             justify: None,
+            style: None,
         }
     }
 
@@ -890,6 +893,14 @@ impl Markdown {
         self
     }
 
+    /// Set a base style applied to all rendered output.
+    ///
+    /// Matches Python Rich's `Markdown(style=...)` parameter.
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.style = Some(style);
+        self
+    }
+
     /// Parse the markdown and return block elements.
     fn parse(&self) -> (Vec<BlockElement>, MarkdownContext) {
         let mut context = MarkdownContext::new(
@@ -920,7 +931,14 @@ impl Renderable for Markdown {
 
         for (idx, block) in blocks.iter().enumerate() {
             let block_segs = block.render(console, options, &context);
-            for seg in block_segs {
+            for mut seg in block_segs {
+                // Apply base style to all segments (matches Python Rich Markdown(style=...))
+                if let Some(base) = self.style {
+                    seg.style = Some(match seg.style {
+                        Some(existing) => base.combine(&existing),
+                        None => base,
+                    });
+                }
                 result.push(seg);
             }
 
@@ -1114,6 +1132,22 @@ mod tests {
         let md = Markdown::new("This is ***bold and italic***");
         let output = render_to_string(&md);
         assert!(output.contains("bold and italic"));
+    }
+
+    #[test]
+    fn test_markdown_with_style() {
+        let style = Style::new().with_bold(true);
+        let md = Markdown::new("Hello world").with_style(style);
+        assert_eq!(md.style, Some(style));
+
+        // Verify style is applied to rendered segments
+        let console = Console::new();
+        let options = ConsoleOptions::default();
+        let segments = md.render(&console, &options);
+        let text_seg = segments.iter().find(|s| s.text.contains("Hello"));
+        assert!(text_seg.is_some());
+        let seg_style = text_seg.unwrap().style.unwrap_or_default();
+        assert_eq!(seg_style.bold, Some(true));
     }
 
     #[test]

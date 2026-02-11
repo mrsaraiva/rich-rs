@@ -458,6 +458,16 @@ impl SyntaxTheme for AnsiTheme {
 ///     .with_line_numbers(true)
 ///     .with_theme("monokai");
 /// ```
+/// A range to apply a custom style to in the syntax output.
+///
+/// Positions are `(line, column)` where line is 1-based and column is 0-based.
+#[derive(Debug, Clone)]
+struct SyntaxHighlightRange {
+    style: Style,
+    start: (usize, usize),
+    end: (usize, usize),
+}
+
 pub struct Syntax {
     /// The source code to highlight.
     code: String,
@@ -493,6 +503,8 @@ pub struct Syntax {
     padding: (usize, usize, usize, usize),
     /// Whether an explicit theme was set (if false, use Console's theme).
     explicit_theme: bool,
+    /// Custom style ranges applied on top of syntax highlighting.
+    stylized_ranges: Vec<SyntaxHighlightRange>,
 }
 
 impl std::fmt::Debug for Syntax {
@@ -548,6 +560,7 @@ impl Syntax {
             indent_guides: false,
             padding: (0, 0, 0, 0),
             explicit_theme: false,
+            stylized_ranges: Vec::new(),
         }
     }
 
@@ -825,6 +838,37 @@ impl Syntax {
         self
     }
 
+    /// Add a custom style range to apply on top of syntax highlighting.
+    ///
+    /// Positions are `(line, column)` where line is 1-based and column is 0-based.
+    ///
+    /// # Arguments
+    ///
+    /// * `style` - Style to apply to the range.
+    /// * `start` - Start position as (line, column).
+    /// * `end` - End position as (line, column).
+    pub fn stylize_range(
+        &mut self,
+        style: Style,
+        start: (usize, usize),
+        end: (usize, usize),
+    ) {
+        self.stylized_ranges.push(SyntaxHighlightRange { style, start, end });
+    }
+
+    /// Builder method to add a highlight range.
+    ///
+    /// Positions are `(line, column)` where line is 1-based and column is 0-based.
+    pub fn with_highlight_range(
+        mut self,
+        style: Style,
+        start: (usize, usize),
+        end: (usize, usize),
+    ) -> Self {
+        self.stylized_ranges.push(SyntaxHighlightRange { style, start, end });
+        self
+    }
+
     // ========================================================================
     // Getters
     // ========================================================================
@@ -930,6 +974,11 @@ impl Syntax {
             }
         }
 
+        // Apply custom stylized ranges on top of syntax highlighting.
+        if !self.stylized_ranges.is_empty() {
+            self.apply_stylized_ranges(&mut text);
+        }
+
         // Remove trailing newline if the original didn't have one
         if !ends_on_nl && text.plain_text().ends_with('\n') {
             let plain = text.plain_text();
@@ -954,6 +1003,49 @@ impl Syntax {
         }
 
         text
+    }
+
+    /// Apply custom stylized ranges to the highlighted text.
+    ///
+    /// Converts (line, column) positions to character offsets and applies styles.
+    fn apply_stylized_ranges(&self, text: &mut Text) {
+        let plain = text.plain_text();
+
+        // Build newline offset table: newlines_offsets[i] = char offset of line i+1 start
+        // Line 1 starts at offset 0.
+        let mut newlines_offsets: Vec<usize> = vec![0];
+        for (i, c) in plain.chars().enumerate() {
+            if c == '\n' {
+                newlines_offsets.push(i + 1);
+            }
+        }
+        // Sentinel at the end
+        newlines_offsets.push(plain.chars().count() + 1);
+
+        for range in &self.stylized_ranges {
+            let (start_line, start_col) = range.start;
+            let (end_line, end_col) = range.end;
+
+            // Convert 1-based line to 0-based index
+            let start_line_idx = start_line.saturating_sub(1);
+            let end_line_idx = end_line.saturating_sub(1);
+
+            let start_offset = newlines_offsets
+                .get(start_line_idx)
+                .copied()
+                .unwrap_or(0)
+                + start_col;
+
+            let end_offset = newlines_offsets
+                .get(end_line_idx)
+                .copied()
+                .unwrap_or(0)
+                + end_col;
+
+            if start_offset < end_offset {
+                text.stylize(start_offset, end_offset, range.style);
+            }
+        }
     }
 
     /// Get the base style for the syntax block.
@@ -1548,6 +1640,34 @@ mod tests {
 
         // Line 2 should be highlighted with pointer (❱ or > depending on legacy_windows)
         assert!(output.contains('❱') || output.contains('>'));
+    }
+
+    #[test]
+    fn test_stylize_range() {
+        let mut syntax = Syntax::new("line1\nline2\nline3", "text");
+        let style = Style::new().with_bold(true);
+        syntax.stylize_range(style, (2, 0), (2, 5)); // "line2"
+
+        let text = syntax.highlight();
+        let plain = text.plain_text();
+        assert!(plain.contains("line2"));
+
+        // Check that spans were applied
+        let spans = text.spans();
+        let has_bold_span = spans.iter().any(|s| s.style.bold == Some(true));
+        assert!(has_bold_span, "Should have a bold span from stylize_range");
+    }
+
+    #[test]
+    fn test_with_highlight_range_builder() {
+        let style = Style::new().with_italic(true);
+        let syntax = Syntax::new("hello world", "text")
+            .with_highlight_range(style, (1, 0), (1, 5)); // "hello"
+
+        let text = syntax.highlight();
+        let spans = text.spans();
+        let has_italic_span = spans.iter().any(|s| s.style.italic == Some(true));
+        assert!(has_italic_span, "Should have an italic span from with_highlight_range");
     }
 
     #[test]

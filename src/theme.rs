@@ -227,7 +227,7 @@ impl Theme {
 
         for name in names {
             if let Some(style) = self.styles.get(name) {
-                lines.push(format!("{} = {}", name, style_to_string(style)));
+                lines.push(format!("{} = {}", name, style.to_markup_string()));
             }
         }
 
@@ -362,101 +362,6 @@ impl Default for ThemeStack {
 // Default Styles
 // ============================================================================
 
-/// Convert a Style to a string representation (for config file output).
-fn style_to_string(style: &Style) -> String {
-    let mut parts = Vec::new();
-
-    // Attributes
-    if style.bold == Some(true) {
-        parts.push("bold".to_string());
-    } else if style.bold == Some(false) {
-        parts.push("not bold".to_string());
-    }
-
-    if style.dim == Some(true) {
-        parts.push("dim".to_string());
-    } else if style.dim == Some(false) {
-        parts.push("not dim".to_string());
-    }
-
-    if style.italic == Some(true) {
-        parts.push("italic".to_string());
-    } else if style.italic == Some(false) {
-        parts.push("not italic".to_string());
-    }
-
-    if style.underline == Some(true) {
-        parts.push("underline".to_string());
-    } else if style.underline == Some(false) {
-        parts.push("not underline".to_string());
-    }
-
-    if style.blink == Some(true) {
-        parts.push("blink".to_string());
-    } else if style.blink == Some(false) {
-        parts.push("not blink".to_string());
-    }
-
-    if style.reverse == Some(true) {
-        parts.push("reverse".to_string());
-    } else if style.reverse == Some(false) {
-        parts.push("not reverse".to_string());
-    }
-
-    if style.strike == Some(true) {
-        parts.push("strike".to_string());
-    } else if style.strike == Some(false) {
-        parts.push("not strike".to_string());
-    }
-
-    // Foreground color
-    if let Some(color) = style.color {
-        parts.push(color_to_string(color));
-    }
-
-    // Background color
-    if let Some(bgcolor) = style.bgcolor {
-        parts.push(format!("on {}", color_to_string(bgcolor)));
-    }
-
-    if parts.is_empty() {
-        "none".to_string()
-    } else {
-        parts.join(" ")
-    }
-}
-
-/// Convert a Color to a string representation.
-fn color_to_string(color: Color) -> String {
-    match color {
-        Color::Default => "default".to_string(),
-        Color::Standard(n) => {
-            // Map standard colors to names
-            match n {
-                0 => "black".to_string(),
-                1 => "red".to_string(),
-                2 => "green".to_string(),
-                3 => "yellow".to_string(),
-                4 => "blue".to_string(),
-                5 => "magenta".to_string(),
-                6 => "cyan".to_string(),
-                7 => "white".to_string(),
-                8 => "bright_black".to_string(),
-                9 => "bright_red".to_string(),
-                10 => "bright_green".to_string(),
-                11 => "bright_yellow".to_string(),
-                12 => "bright_blue".to_string(),
-                13 => "bright_magenta".to_string(),
-                14 => "bright_cyan".to_string(),
-                15 => "bright_white".to_string(),
-                _ => format!("color({})", n),
-            }
-        }
-        Color::EightBit(n) => format!("color({})", n),
-        Color::Rgb { r, g, b } => format!("rgb({},{},{})", r, g, b),
-    }
-}
-
 /// Create the default styles map.
 ///
 /// These correspond to Python Rich's DEFAULT_STYLES from default_styles.py.
@@ -482,8 +387,14 @@ pub fn default_styles() -> HashMap<String, Style> {
             italic: Some(false),
             underline: Some(false),
             blink: Some(false),
+            blink2: Some(false),
             reverse: Some(false),
+            conceal: Some(false),
             strike: Some(false),
+            underline2: Some(false),
+            frame: Some(false),
+            encircle: Some(false),
+            overline: Some(false),
         }
     );
     add!("dim", Style::new().with_dim(true));
@@ -908,6 +819,20 @@ pub fn default_styles() -> HashMap<String, Style> {
         Style::color(Color::Standard(4)).with_underline(true)
     );
     add!("markdown.s", Style::new().with_strike(true));
+    add!("markdown.table.border", Style::color(Color::Standard(6)));
+    add!(
+        "markdown.table.header",
+        Style::color(Color::Standard(6)).with_bold(false)
+    );
+
+    // Blink2 style
+    add!(
+        "blink2",
+        Style {
+            blink2: Some(true),
+            ..Default::default()
+        }
+    );
 
     // ISO8601 styles
     add!("iso8601.date", Style::color(Color::Standard(4)));
@@ -1152,7 +1077,7 @@ test = bold
     fn test_style_to_string_roundtrip() {
         let style = Style::new().with_bold(true).with_color(Color::Standard(1));
 
-        let s = style_to_string(&style);
+        let s = style.to_markup_string();
         assert!(s.contains("bold"));
         assert!(s.contains("red"));
 

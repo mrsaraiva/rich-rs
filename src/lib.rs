@@ -36,6 +36,7 @@ mod theme;
 mod console;
 pub mod file_proxy;
 pub mod highlighter;
+pub mod json;
 pub mod markup;
 pub mod pager;
 pub mod text;
@@ -78,7 +79,7 @@ pub mod tree;
 mod renderables;
 
 // Re-exports for public API
-pub use cells::{cell_len, chop_cells, set_cell_size};
+pub use cells::{cell_len, chop_cells, set_cell_size, split_graphemes};
 pub use color::{
     ANSI_COLOR_NAMES, Color, ColorSystem, ColorTriplet, ColorType, EIGHT_BIT_PALETTE, Palette,
     STANDARD_PALETTE, SimpleColor, WINDOWS_PALETTE, blend_rgb, parse_rgb_hex,
@@ -86,11 +87,11 @@ pub use color::{
 pub use console::{
     Console, ConsoleOptions, JustifyMethod, OverflowMethod, PagerContext, PagerOptions,
 };
-pub use control::Control;
+pub use control::{Control, escape_control_codes, strip_control_codes};
 pub use error::{ParseError, Result as ParseResult};
 pub use measure::{Measurement, measure_renderables};
-pub use segment::{ControlType, Segment, Segments};
-pub use style::{MetaValue, NULL_STYLE, Style, StyleMeta};
+pub use segment::{ControlType, Segment, SegmentLines, Segments};
+pub use style::{MetaValue, NULL_STYLE, Style, StyleMeta, StyleStack};
 pub use text::{Span, Text, TextPart};
 pub use theme::{Theme, ThemeError, ThemeStack, default_styles};
 pub use wrap::divide_line;
@@ -98,7 +99,10 @@ pub use wrap::divide_line;
 // Emoji re-exports
 pub use ansi::AnsiDecoder;
 pub use emoji::{EMOJI, Emoji, EmojiVariant};
-pub use filesize::{decimal as filesize_decimal, pick_unit_and_suffix};
+pub use filesize::{
+    decimal as filesize_decimal, decimal_with_params as filesize_decimal_with_params,
+    pick_unit_and_suffix,
+};
 pub use loop_helpers::{loop_first, loop_first_last, loop_last};
 
 // Highlighter re-exports
@@ -107,18 +111,21 @@ pub use highlighter::{
     json_highlighter, repr_highlighter,
 };
 
+// JSON re-export
+pub use json::Json;
+
 // Simple renderable re-exports
 pub use align::{Align, VerticalAlignMethod};
 pub use bar::Bar;
 pub use columns::Columns;
 pub use constrain::Constrain;
-pub use group::Group;
+pub use group::{Group, Renderables};
 pub use padding::{Padding, PaddingDimensions};
 pub use panel::Panel;
 pub use rule::{AlignMethod, Rule};
 pub use styled::Styled;
 pub use table::{Column, Row, Table};
-pub use tree::{ASCII_GUIDES, TREE_GUIDES, Tree, TreeGuides};
+pub use tree::{ASCII_GUIDES, BOLD_TREE_GUIDES, TREE_GUIDES, Tree, TreeGuides, TreeNodeOptions};
 
 // Syntax highlighting re-exports
 pub use syntax::{AnsiTheme, DEFAULT_THEME, Syntax, SyntaxTheme, SyntectTheme};
@@ -135,9 +142,9 @@ pub use live::{Live, LiveOptions, VerticalOverflowMethod};
 pub use live_render::LiveRender;
 pub use progress::{
     BarColumn, DownloadColumn, FileSizeColumn, MofNCompleteColumn, Progress, ProgressColumn,
-    ProgressReader, ProgressTask, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn,
-    TimeElapsedColumn, TimeRemainingColumn, TotalFileSizeColumn, TrackConfig, TransferSpeedColumn,
-    WrapFileBuilder,
+    ProgressReader, ProgressTask, RenderableColumn, SpinnerColumn, TaskID, TaskProgressColumn,
+    TextColumn, TimeElapsedColumn, TimeRemainingColumn, TotalFileSizeColumn, TrackConfig,
+    TransferSpeedColumn, WrapFileBuilder,
 };
 pub use progress_bar::ProgressBar;
 pub use region::Region;
@@ -227,4 +234,48 @@ macro_rules! log {
     ($console:expr, $renderable:expr) => {
         $console.log($renderable, Some(file!()), Some(line!()))
     };
+}
+
+// ============================================================================
+// Global Console
+// ============================================================================
+
+use std::sync::{Mutex, OnceLock};
+
+/// Get a reference to the global console singleton.
+///
+/// The global console is lazily initialized on first access.
+/// Use this for convenience when you don't need a custom console.
+///
+/// # Example
+///
+/// ```ignore
+/// let console = rich_rs::get_console();
+/// console.lock().unwrap().print_text("Hello!").unwrap();
+/// ```
+pub fn get_console() -> &'static Mutex<Console> {
+    static CONSOLE: OnceLock<Mutex<Console>> = OnceLock::new();
+    CONSOLE.get_or_init(|| Mutex::new(Console::new()))
+}
+
+/// Print styled content using the global console.
+///
+/// Accepts a string that may contain Rich markup, and prints it
+/// to the global console.
+///
+/// # Example
+///
+/// ```ignore
+/// rich_rs::rich_print!("[bold red]Hello[/] World");
+/// ```
+#[macro_export]
+macro_rules! rich_print {
+    ($($arg:tt)*) => {{
+        let text = format!($($arg)*);
+        if let Ok(mut console) = $crate::get_console().lock() {
+            let rendered = $crate::Text::from_markup(&text, true)
+                .unwrap_or_else(|_| $crate::Text::plain(&text));
+            let _ = console.print(&rendered, None, None, None, false, "\n");
+        }
+    }};
 }

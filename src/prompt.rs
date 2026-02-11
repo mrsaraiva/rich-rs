@@ -25,7 +25,7 @@
 //! }
 //! ```
 
-use std::io;
+use std::io::{self, BufRead};
 
 use crate::Console;
 use crate::text::Text;
@@ -144,7 +144,6 @@ pub trait PromptBase<T> {
 ///     .with_choices(&["Alice", "Bob", "Charlie"])
 ///     .ask()?;
 /// ```
-#[derive(Debug, Clone)]
 pub struct Prompt {
     /// The prompt text.
     prompt: String,
@@ -160,6 +159,10 @@ pub struct Prompt {
     show_choices: bool,
     /// Whether this is a password prompt (input will be masked).
     password: bool,
+    /// Optional input stream (for testing; reads from this instead of stdin).
+    stream: Option<Box<dyn BufRead + Send>>,
+    /// Optional callback called just before displaying the prompt.
+    pre_prompt: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for Prompt {
@@ -179,6 +182,8 @@ impl Prompt {
             show_default: true,
             show_choices: true,
             password: false,
+            stream: None,
+            pre_prompt: None,
         }
     }
 
@@ -218,6 +223,20 @@ impl Prompt {
         self
     }
 
+    /// Set an input stream to read from instead of stdin.
+    ///
+    /// This enables testing prompts without actual stdin interaction.
+    pub fn with_stream(mut self, stream: impl BufRead + Send + 'static) -> Self {
+        self.stream = Some(Box::new(stream));
+        self
+    }
+
+    /// Set a callback called just before displaying the prompt.
+    pub fn with_pre_prompt(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
+        self.pre_prompt = Some(Box::new(f));
+        self
+    }
+
     /// Shortcut to create and run a prompt, returning the result.
     ///
     /// # Example
@@ -229,17 +248,42 @@ impl Prompt {
         Prompt::new(prompt).run()
     }
 
+    /// Debug representation (stream/pre_prompt are not Debug).
+    pub fn has_stream(&self) -> bool {
+        self.stream.is_some()
+    }
+
     /// Run the prompt loop and return the result.
-    pub fn run(&self) -> Result<String> {
+    pub fn run(&mut self) -> Result<String> {
         let mut console = Console::new();
         self.run_with_console(&mut console)
     }
 
     /// Run the prompt loop with a specific console.
-    pub fn run_with_console(&self, console: &mut Console) -> Result<String> {
+    pub fn run_with_console(&mut self, console: &mut Console) -> Result<String> {
         loop {
+            if let Some(ref pre_prompt) = self.pre_prompt {
+                pre_prompt();
+            }
+
             let prompt_text = self.make_prompt();
-            let value = console.input(&prompt_text, self.password)?;
+
+            let value = if let Some(ref mut stream) = self.stream {
+                // Print prompt but read from the provided stream.
+                let _ = console.print(&prompt_text, None, None, None, false, "");
+                let mut line = String::new();
+                stream
+                    .read_line(&mut line)
+                    .map_err(PromptError::from)?;
+                if line.is_empty() {
+                    return Err(PromptError::Interrupted);
+                }
+                line.trim_end_matches('\n')
+                    .trim_end_matches('\r')
+                    .to_string()
+            } else {
+                console.input(&prompt_text, self.password)?
+            };
 
             // Use default if input is empty
             if value.is_empty() {
@@ -354,7 +398,6 @@ impl Prompt {
 ///     .with_default(5)
 ///     .ask()?;
 /// ```
-#[derive(Debug, Clone)]
 pub struct IntPrompt {
     /// The prompt text.
     prompt: String,
@@ -362,6 +405,12 @@ pub struct IntPrompt {
     default: Option<i64>,
     /// Whether to show the default value in the prompt.
     show_default: bool,
+    /// Optional list of valid choices.
+    choices: Option<Vec<i64>>,
+    /// Optional input stream (for testing).
+    stream: Option<Box<dyn BufRead + Send>>,
+    /// Optional callback called just before displaying the prompt.
+    pre_prompt: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for IntPrompt {
@@ -377,6 +426,9 @@ impl IntPrompt {
             prompt: prompt.into(),
             default: None,
             show_default: true,
+            choices: None,
+            stream: None,
+            pre_prompt: None,
         }
     }
 
@@ -392,6 +444,24 @@ impl IntPrompt {
         self
     }
 
+    /// Set valid choices for the prompt.
+    pub fn with_choices(mut self, choices: Vec<i64>) -> Self {
+        self.choices = Some(choices);
+        self
+    }
+
+    /// Set an input stream to read from instead of stdin.
+    pub fn with_stream(mut self, stream: impl BufRead + Send + 'static) -> Self {
+        self.stream = Some(Box::new(stream));
+        self
+    }
+
+    /// Set a callback called just before displaying the prompt.
+    pub fn with_pre_prompt(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
+        self.pre_prompt = Some(Box::new(f));
+        self
+    }
+
     /// Shortcut to create and run a prompt, returning the result.
     ///
     /// # Example
@@ -404,16 +474,35 @@ impl IntPrompt {
     }
 
     /// Run the prompt loop and return the result.
-    pub fn run(&self) -> Result<i64> {
+    pub fn run(&mut self) -> Result<i64> {
         let mut console = Console::new();
         self.run_with_console(&mut console)
     }
 
     /// Run the prompt loop with a specific console.
-    pub fn run_with_console(&self, console: &mut Console) -> Result<i64> {
+    pub fn run_with_console(&mut self, console: &mut Console) -> Result<i64> {
         loop {
+            if let Some(ref pre_prompt) = self.pre_prompt {
+                pre_prompt();
+            }
+
             let prompt_text = self.make_prompt();
-            let value = console.input(&prompt_text, false)?;
+
+            let value = if let Some(ref mut stream) = self.stream {
+                let _ = console.print(&prompt_text, None, None, None, false, "");
+                let mut line = String::new();
+                stream
+                    .read_line(&mut line)
+                    .map_err(PromptError::from)?;
+                if line.is_empty() {
+                    return Err(PromptError::Interrupted);
+                }
+                line.trim_end_matches('\n')
+                    .trim_end_matches('\r')
+                    .to_string()
+            } else {
+                console.input(&prompt_text, false)?
+            };
 
             // Use default if input is empty
             if value.is_empty() {
@@ -435,9 +524,15 @@ impl IntPrompt {
         }
     }
 
-    /// Build the prompt text including default.
+    /// Build the prompt text including choices and default.
     fn make_prompt(&self) -> Text {
         let mut parts = vec![self.prompt.clone()];
+
+        // Add choices
+        if let Some(ref choices) = self.choices {
+            let choices_str: Vec<String> = choices.iter().map(|c| c.to_string()).collect();
+            parts.push(format!(" [prompt.choices]\\[{}][/]", choices_str.join("/")));
+        }
 
         // Add default
         if self.show_default {
@@ -456,9 +551,17 @@ impl IntPrompt {
     /// Process the response.
     fn process_response(&self, value: &str) -> std::result::Result<i64, InvalidResponse> {
         let value = value.trim();
-        value.parse::<i64>().map_err(|_| {
+        let parsed = value.parse::<i64>().map_err(|_| {
             InvalidResponse::new("[prompt.invalid]Please enter a valid integer number")
-        })
+        })?;
+        if let Some(ref choices) = self.choices {
+            if !choices.contains(&parsed) {
+                return Err(InvalidResponse::new(
+                    "[prompt.invalid.choice]Please select one of the available options",
+                ));
+            }
+        }
+        Ok(parsed)
     }
 }
 
@@ -480,7 +583,6 @@ impl IntPrompt {
 ///     .with_default(98.6)
 ///     .ask()?;
 /// ```
-#[derive(Debug, Clone)]
 pub struct FloatPrompt {
     /// The prompt text.
     prompt: String,
@@ -488,6 +590,12 @@ pub struct FloatPrompt {
     default: Option<f64>,
     /// Whether to show the default value in the prompt.
     show_default: bool,
+    /// Optional list of valid choices.
+    choices: Option<Vec<f64>>,
+    /// Optional input stream (for testing).
+    stream: Option<Box<dyn BufRead + Send>>,
+    /// Optional callback called just before displaying the prompt.
+    pre_prompt: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for FloatPrompt {
@@ -503,6 +611,9 @@ impl FloatPrompt {
             prompt: prompt.into(),
             default: None,
             show_default: true,
+            choices: None,
+            stream: None,
+            pre_prompt: None,
         }
     }
 
@@ -518,6 +629,24 @@ impl FloatPrompt {
         self
     }
 
+    /// Set valid choices for the prompt.
+    pub fn with_choices(mut self, choices: Vec<f64>) -> Self {
+        self.choices = Some(choices);
+        self
+    }
+
+    /// Set an input stream to read from instead of stdin.
+    pub fn with_stream(mut self, stream: impl BufRead + Send + 'static) -> Self {
+        self.stream = Some(Box::new(stream));
+        self
+    }
+
+    /// Set a callback called just before displaying the prompt.
+    pub fn with_pre_prompt(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
+        self.pre_prompt = Some(Box::new(f));
+        self
+    }
+
     /// Shortcut to create and run a prompt, returning the result.
     ///
     /// # Example
@@ -530,16 +659,35 @@ impl FloatPrompt {
     }
 
     /// Run the prompt loop and return the result.
-    pub fn run(&self) -> Result<f64> {
+    pub fn run(&mut self) -> Result<f64> {
         let mut console = Console::new();
         self.run_with_console(&mut console)
     }
 
     /// Run the prompt loop with a specific console.
-    pub fn run_with_console(&self, console: &mut Console) -> Result<f64> {
+    pub fn run_with_console(&mut self, console: &mut Console) -> Result<f64> {
         loop {
+            if let Some(ref pre_prompt) = self.pre_prompt {
+                pre_prompt();
+            }
+
             let prompt_text = self.make_prompt();
-            let value = console.input(&prompt_text, false)?;
+
+            let value = if let Some(ref mut stream) = self.stream {
+                let _ = console.print(&prompt_text, None, None, None, false, "");
+                let mut line = String::new();
+                stream
+                    .read_line(&mut line)
+                    .map_err(PromptError::from)?;
+                if line.is_empty() {
+                    return Err(PromptError::Interrupted);
+                }
+                line.trim_end_matches('\n')
+                    .trim_end_matches('\r')
+                    .to_string()
+            } else {
+                console.input(&prompt_text, false)?
+            };
 
             // Use default if input is empty
             if value.is_empty() {
@@ -561,9 +709,15 @@ impl FloatPrompt {
         }
     }
 
-    /// Build the prompt text including default.
+    /// Build the prompt text including choices and default.
     fn make_prompt(&self) -> Text {
         let mut parts = vec![self.prompt.clone()];
+
+        // Add choices
+        if let Some(ref choices) = self.choices {
+            let choices_str: Vec<String> = choices.iter().map(|c| c.to_string()).collect();
+            parts.push(format!(" [prompt.choices]\\[{}][/]", choices_str.join("/")));
+        }
 
         // Add default
         if self.show_default {
@@ -582,9 +736,17 @@ impl FloatPrompt {
     /// Process the response.
     fn process_response(&self, value: &str) -> std::result::Result<f64, InvalidResponse> {
         let value = value.trim();
-        value
+        let parsed = value
             .parse::<f64>()
-            .map_err(|_| InvalidResponse::new("[prompt.invalid]Please enter a number"))
+            .map_err(|_| InvalidResponse::new("[prompt.invalid]Please enter a number"))?;
+        if let Some(ref choices) = self.choices {
+            if !choices.iter().any(|c| (*c - parsed).abs() < f64::EPSILON) {
+                return Err(InvalidResponse::new(
+                    "[prompt.invalid.choice]Please select one of the available options",
+                ));
+            }
+        }
+        Ok(parsed)
     }
 }
 
@@ -608,7 +770,6 @@ impl FloatPrompt {
 ///     println!("Continuing...");
 /// }
 /// ```
-#[derive(Debug, Clone)]
 pub struct Confirm {
     /// The prompt text.
     prompt: String,
@@ -620,6 +781,10 @@ pub struct Confirm {
     yes_choice: String,
     /// The no choice string.
     no_choice: String,
+    /// Optional input stream (for testing).
+    stream: Option<Box<dyn BufRead + Send>>,
+    /// Optional callback called just before displaying the prompt.
+    pre_prompt: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for Confirm {
@@ -637,6 +802,8 @@ impl Confirm {
             show_default: true,
             yes_choice: "y".to_string(),
             no_choice: "n".to_string(),
+            stream: None,
+            pre_prompt: None,
         }
     }
 
@@ -659,6 +826,18 @@ impl Confirm {
         self
     }
 
+    /// Set an input stream to read from instead of stdin.
+    pub fn with_stream(mut self, stream: impl BufRead + Send + 'static) -> Self {
+        self.stream = Some(Box::new(stream));
+        self
+    }
+
+    /// Set a callback called just before displaying the prompt.
+    pub fn with_pre_prompt(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
+        self.pre_prompt = Some(Box::new(f));
+        self
+    }
+
     /// Shortcut to create and run a prompt, returning the result.
     ///
     /// # Example
@@ -673,16 +852,35 @@ impl Confirm {
     }
 
     /// Run the prompt loop and return the result.
-    pub fn run(&self) -> Result<bool> {
+    pub fn run(&mut self) -> Result<bool> {
         let mut console = Console::new();
         self.run_with_console(&mut console)
     }
 
     /// Run the prompt loop with a specific console.
-    pub fn run_with_console(&self, console: &mut Console) -> Result<bool> {
+    pub fn run_with_console(&mut self, console: &mut Console) -> Result<bool> {
         loop {
+            if let Some(ref pre_prompt) = self.pre_prompt {
+                pre_prompt();
+            }
+
             let prompt_text = self.make_prompt();
-            let value = console.input(&prompt_text, false)?;
+
+            let value = if let Some(ref mut stream) = self.stream {
+                let _ = console.print(&prompt_text, None, None, None, false, "");
+                let mut line = String::new();
+                stream
+                    .read_line(&mut line)
+                    .map_err(PromptError::from)?;
+                if line.is_empty() {
+                    return Err(PromptError::Interrupted);
+                }
+                line.trim_end_matches('\n')
+                    .trim_end_matches('\r')
+                    .to_string()
+            } else {
+                console.input(&prompt_text, false)?
+            };
 
             // Use default if input is empty
             if value.is_empty() {
@@ -765,6 +963,7 @@ mod tests {
         assert!(prompt.show_default);
         assert!(prompt.show_choices);
         assert!(!prompt.password);
+        assert!(!prompt.has_stream());
     }
 
     #[test]
@@ -843,12 +1042,23 @@ mod tests {
         assert_eq!(prompt.prompt, "Enter number");
         assert!(prompt.default.is_none());
         assert!(prompt.show_default);
+        assert!(prompt.choices.is_none());
     }
 
     #[test]
     fn test_int_prompt_with_default() {
         let prompt = IntPrompt::new("Enter number").with_default(42);
         assert_eq!(prompt.default, Some(42));
+    }
+
+    #[test]
+    fn test_int_prompt_with_choices() {
+        let prompt = IntPrompt::new("Pick").with_choices(vec![1, 2, 3]);
+        assert_eq!(prompt.choices, Some(vec![1, 2, 3]));
+        // Valid choice
+        assert!(prompt.process_response("2").is_ok());
+        // Invalid choice
+        assert!(prompt.process_response("5").is_err());
     }
 
     #[test]
@@ -870,18 +1080,28 @@ mod tests {
         let prompt = FloatPrompt::new("Enter number");
         assert_eq!(prompt.prompt, "Enter number");
         assert!(prompt.default.is_none());
+        assert!(prompt.choices.is_none());
     }
 
     #[test]
     fn test_float_prompt_with_default() {
-        let prompt = FloatPrompt::new("Enter number").with_default(3.14);
-        assert_eq!(prompt.default, Some(3.14));
+        let prompt = FloatPrompt::new("Enter number").with_default(3.125);
+        assert_eq!(prompt.default, Some(3.125));
+    }
+
+    #[test]
+    fn test_float_prompt_with_choices() {
+        let prompt = FloatPrompt::new("Pick").with_choices(vec![1.0, 2.5, 3.125]);
+        // Valid choice
+        assert!(prompt.process_response("2.5").is_ok());
+        // Invalid choice
+        assert!(prompt.process_response("9.9").is_err());
     }
 
     #[test]
     fn test_float_prompt_process_response_valid() {
         let prompt = FloatPrompt::new("Enter number");
-        assert!((prompt.process_response("3.14").unwrap() - 3.14).abs() < f64::EPSILON);
+        assert!((prompt.process_response("3.125").unwrap() - 3.125).abs() < f64::EPSILON);
         assert!((prompt.process_response("  -2.5  ").unwrap() - (-2.5)).abs() < f64::EPSILON);
         assert!((prompt.process_response("42").unwrap() - 42.0).abs() < f64::EPSILON);
     }
@@ -899,6 +1119,7 @@ mod tests {
         assert!(confirm.default.is_none());
         assert_eq!(confirm.yes_choice, "y");
         assert_eq!(confirm.no_choice, "n");
+        assert!(confirm.stream.is_none());
     }
 
     #[test]
@@ -960,6 +1181,17 @@ mod tests {
 
         let interrupted = PromptError::Interrupted;
         assert!(format!("{}", interrupted).contains("interrupted"));
+    }
+
+    #[test]
+    fn test_prompt_with_stream() {
+        let input = std::io::Cursor::new(b"Alice\n");
+        let mut prompt = Prompt::new("Name")
+            .with_stream(input)
+            .with_choices(&["Alice", "Bob"]);
+        let mut console = Console::new();
+        let result = prompt.run_with_console(&mut console).unwrap();
+        assert_eq!(result, "Alice");
     }
 
     #[test]

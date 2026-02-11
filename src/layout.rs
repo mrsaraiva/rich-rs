@@ -411,6 +411,46 @@ impl Layout {
     }
 }
 
+impl Layout {
+    /// Build a Tree renderable that visualises the layout hierarchy.
+    ///
+    /// This matches Python Rich's `Layout.tree` property: each node shows the
+    /// layout name (or "<unnamed>"), its splitter direction, and size/ratio info.
+    pub fn to_tree(&self) -> crate::tree::Tree {
+        use crate::text::Text;
+        use crate::tree::Tree;
+
+        fn build_label(state: &LayoutState) -> Text {
+            let name = state
+                .name
+                .as_deref()
+                .unwrap_or("<unnamed>");
+            let kind = match state.splitter {
+                SplitterKind::Row => "row",
+                SplitterKind::Column => "column",
+            };
+            let size_info = if let Some(s) = state.size {
+                format!(" size={s}")
+            } else {
+                format!(" ratio={}", state.ratio)
+            };
+            Text::plain(format!("{name} ({kind}{size_info})"))
+        }
+
+        fn recurse(layout: &Layout) -> Tree {
+            let state = layout.state.lock().expect("layout mutex poisoned");
+            let label = build_label(&state);
+            let mut node = Tree::new(Box::new(label));
+            for child in &state.children {
+                node.children_mut().push(recurse(child));
+            }
+            node
+        }
+
+        recurse(self)
+    }
+}
+
 impl Renderable for Layout {
     fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
         // Leaf layouts render their stored renderable.
@@ -596,6 +636,24 @@ mod tests {
         let lines: Vec<&str> = output.split('\n').collect();
         assert!(lines[0].contains('A'));
         assert!(lines[1].contains('B'));
+    }
+
+    #[test]
+    fn test_layout_to_tree() {
+        let root = Layout::new().with_name("root");
+        let left = Layout::new().with_name("left").with_size(3);
+        let right = Layout::new().with_name("right");
+        root.split_row(vec![left, right]);
+
+        let tree = root.to_tree();
+        assert_eq!(tree.children().len(), 2);
+    }
+
+    #[test]
+    fn test_layout_to_tree_leaf() {
+        let leaf = Layout::new().with_name("leaf");
+        let tree = leaf.to_tree();
+        assert!(tree.children().is_empty());
     }
 
     #[test]

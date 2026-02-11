@@ -21,8 +21,14 @@ pub const NULL_STYLE: Style = Style {
     italic: None,
     underline: None,
     blink: None,
+    blink2: None,
     reverse: None,
+    conceal: None,
     strike: None,
+    underline2: None,
+    frame: None,
+    encircle: None,
+    overline: None,
 };
 
 /// Text style with color and attributes.
@@ -47,10 +53,22 @@ pub struct Style {
     pub underline: Option<bool>,
     /// Blinking text.
     pub blink: Option<bool>,
+    /// Rapid blinking text (SGR 6).
+    pub blink2: Option<bool>,
     /// Reverse video (swap fg/bg).
     pub reverse: Option<bool>,
+    /// Concealed text (SGR 8).
+    pub conceal: Option<bool>,
     /// Strikethrough text.
     pub strike: Option<bool>,
+    /// Double underline (SGR 21).
+    pub underline2: Option<bool>,
+    /// Framed text (SGR 51).
+    pub frame: Option<bool>,
+    /// Encircled text (SGR 52).
+    pub encircle: Option<bool>,
+    /// Overlined text (SGR 53).
+    pub overline: Option<bool>,
 }
 
 impl Style {
@@ -123,6 +141,42 @@ impl Style {
         self
     }
 
+    /// Builder: set blink2 (rapid blink).
+    pub fn with_blink2(mut self, blink2: bool) -> Self {
+        self.blink2 = Some(blink2);
+        self
+    }
+
+    /// Builder: set conceal.
+    pub fn with_conceal(mut self, conceal: bool) -> Self {
+        self.conceal = Some(conceal);
+        self
+    }
+
+    /// Builder: set underline2 (double underline).
+    pub fn with_underline2(mut self, underline2: bool) -> Self {
+        self.underline2 = Some(underline2);
+        self
+    }
+
+    /// Builder: set frame.
+    pub fn with_frame(mut self, frame: bool) -> Self {
+        self.frame = Some(frame);
+        self
+    }
+
+    /// Builder: set encircle.
+    pub fn with_encircle(mut self, encircle: bool) -> Self {
+        self.encircle = Some(encircle);
+        self
+    }
+
+    /// Builder: set overline.
+    pub fn with_overline(mut self, overline: bool) -> Self {
+        self.overline = Some(overline);
+        self
+    }
+
     /// Combine this style with another, with `other` taking precedence.
     ///
     /// Values from `other` override values from `self` only if they are `Some`.
@@ -135,8 +189,14 @@ impl Style {
             italic: other.italic.or(self.italic),
             underline: other.underline.or(self.underline),
             blink: other.blink.or(self.blink),
+            blink2: other.blink2.or(self.blink2),
             reverse: other.reverse.or(self.reverse),
+            conceal: other.conceal.or(self.conceal),
             strike: other.strike.or(self.strike),
+            underline2: other.underline2.or(self.underline2),
+            frame: other.frame.or(self.frame),
+            encircle: other.encircle.or(self.encircle),
+            overline: other.overline.or(self.overline),
         }
     }
 
@@ -190,7 +250,7 @@ impl Style {
                             words.next();
                             continue;
                         }
-                        "dim" => {
+                        "dim" | "d" => {
                             style.dim = Some(false);
                             words.next();
                             continue;
@@ -210,13 +270,43 @@ impl Style {
                             words.next();
                             continue;
                         }
-                        "reverse" => {
+                        "blink2" => {
+                            style.blink2 = Some(false);
+                            words.next();
+                            continue;
+                        }
+                        "reverse" | "r" => {
                             style.reverse = Some(false);
+                            words.next();
+                            continue;
+                        }
+                        "conceal" | "c" => {
+                            style.conceal = Some(false);
                             words.next();
                             continue;
                         }
                         "strike" | "s" => {
                             style.strike = Some(false);
+                            words.next();
+                            continue;
+                        }
+                        "underline2" | "uu" => {
+                            style.underline2 = Some(false);
+                            words.next();
+                            continue;
+                        }
+                        "frame" => {
+                            style.frame = Some(false);
+                            words.next();
+                            continue;
+                        }
+                        "encircle" => {
+                            style.encircle = Some(false);
+                            words.next();
+                            continue;
+                        }
+                        "overline" | "o" => {
+                            style.overline = Some(false);
                             words.next();
                             continue;
                         }
@@ -227,15 +317,21 @@ impl Style {
                 continue;
             }
 
-            // Check for attributes (including shorthand: b, i, u, s)
+            // Check for attributes (including shorthand: b, d, i, u, s, r, c, o, uu)
             match word_lower.as_str() {
                 "bold" | "b" => style.bold = Some(true),
-                "dim" => style.dim = Some(true),
+                "dim" | "d" => style.dim = Some(true),
                 "italic" | "i" => style.italic = Some(true),
                 "underline" | "u" => style.underline = Some(true),
                 "blink" => style.blink = Some(true),
-                "reverse" => style.reverse = Some(true),
+                "blink2" => style.blink2 = Some(true),
+                "reverse" | "r" => style.reverse = Some(true),
+                "conceal" | "c" => style.conceal = Some(true),
                 "strike" | "s" => style.strike = Some(true),
+                "underline2" | "uu" => style.underline2 = Some(true),
+                "frame" => style.frame = Some(true),
+                "encircle" => style.encircle = Some(true),
+                "overline" | "o" => style.overline = Some(true),
                 _ => {
                     // Try to parse as color
                     if let Some(color) = Color::parse(&word_lower) {
@@ -316,33 +412,49 @@ impl Style {
         // SGR reset codes for explicitly disabled attributes (emit "off" before "on"):
         // 22 = bold/dim off (resets both)
         // 23 = italic off
-        // 24 = underline off
-        // 25 = blink off
+        // 24 = underline/underline2 off (resets both)
+        // 25 = blink/blink2 off (resets both)
         // 27 = reverse off
+        // 28 = conceal off
         // 29 = strike off
+        // 54 = frame/encircle off (resets both)
+        // 55 = overline off
         //
         // Note: SGR 22 resets both bold AND dim, so we only emit it once if either is false.
+        // Similarly SGR 24 resets underline AND underline2, SGR 25 resets blink AND blink2,
+        // and SGR 54 resets frame AND encircle.
         if self.bold == Some(false) || self.dim == Some(false) {
             sgr.push("22".to_string());
         }
         if self.italic == Some(false) {
             sgr.push("23".to_string());
         }
-        if self.underline == Some(false) {
+        if self.underline == Some(false) || self.underline2 == Some(false) {
             sgr.push("24".to_string());
         }
-        if self.blink == Some(false) {
+        if self.blink == Some(false) || self.blink2 == Some(false) {
             sgr.push("25".to_string());
         }
         if self.reverse == Some(false) {
             sgr.push("27".to_string());
         }
+        if self.conceal == Some(false) {
+            sgr.push("28".to_string());
+        }
         if self.strike == Some(false) {
             sgr.push("29".to_string());
         }
+        if self.frame == Some(false) || self.encircle == Some(false) {
+            sgr.push("54".to_string());
+        }
+        if self.overline == Some(false) {
+            sgr.push("55".to_string());
+        }
 
         // SGR codes for enabled attributes:
-        // bold=1, dim=2, italic=3, underline=4, blink=5, blink2=6, reverse=7, conceal=8, strike=9
+        // bold=1, dim=2, italic=3, underline=4, blink=5, blink2=6,
+        // reverse=7, conceal=8, strike=9, underline2=21,
+        // frame=51, encircle=52, overline=53
         if self.bold == Some(true) {
             sgr.push("1".to_string());
         }
@@ -358,11 +470,29 @@ impl Style {
         if self.blink == Some(true) {
             sgr.push("5".to_string());
         }
+        if self.blink2 == Some(true) {
+            sgr.push("6".to_string());
+        }
         if self.reverse == Some(true) {
             sgr.push("7".to_string());
         }
+        if self.conceal == Some(true) {
+            sgr.push("8".to_string());
+        }
         if self.strike == Some(true) {
             sgr.push("9".to_string());
+        }
+        if self.underline2 == Some(true) {
+            sgr.push("21".to_string());
+        }
+        if self.frame == Some(true) {
+            sgr.push("51".to_string());
+        }
+        if self.encircle == Some(true) {
+            sgr.push("52".to_string());
+        }
+        if self.overline == Some(true) {
+            sgr.push("53".to_string());
         }
 
         // Foreground color
@@ -437,11 +567,179 @@ impl Style {
         if self.strike == Some(true) {
             decorations.push("line-through");
         }
+        if self.overline == Some(true) {
+            decorations.push("overline");
+        }
         if !decorations.is_empty() {
             css.push(format!("text-decoration: {}", decorations.join(" ")));
         }
 
         css.join("; ")
+    }
+
+    /// Chain multiple styles together. Like `combine` but applied left-to-right.
+    ///
+    /// This is equivalent to Python Rich's `Style.chain(*styles)`.
+    pub fn chain(styles: &[Style]) -> Self {
+        let mut result = Style::new();
+        for style in styles {
+            result = result.combine(style);
+        }
+        result
+    }
+
+    /// Apply the style to text and return the ANSI string.
+    ///
+    /// This is equivalent to Python Rich's `Style.test()`.
+    pub fn test(&self, text: &str, color_system: ColorSystem) -> String {
+        self.render(text, color_system)
+    }
+
+    /// Return a new Style with only the background color.
+    ///
+    /// This is equivalent to Python Rich's `Style.background_style`.
+    pub fn background_style(&self) -> Self {
+        Style {
+            bgcolor: self.bgcolor,
+            ..Default::default()
+        }
+    }
+
+    /// Return a new Style with colors stripped but attributes preserved.
+    ///
+    /// This is equivalent to Python Rich's `Style.without_color`.
+    pub fn without_color(&self) -> Self {
+        Style {
+            color: None,
+            bgcolor: None,
+            bold: self.bold,
+            dim: self.dim,
+            italic: self.italic,
+            underline: self.underline,
+            blink: self.blink,
+            blink2: self.blink2,
+            reverse: self.reverse,
+            conceal: self.conceal,
+            strike: self.strike,
+            underline2: self.underline2,
+            frame: self.frame,
+            encircle: self.encircle,
+            overline: self.overline,
+        }
+    }
+
+    /// Check if the style has a transparent (unset or default) background.
+    ///
+    /// This is equivalent to Python Rich's `Style.transparent_background`.
+    pub fn has_transparent_background(&self) -> bool {
+        matches!(self.bgcolor, None | Some(Color::Default))
+    }
+
+    /// Convert this style to its markup-compatible string representation.
+    ///
+    /// Returns a string like `"bold red on blue"` that can be used in Rich markup tags.
+    /// This is the canonical way to serialize a Style for markup — all consumers
+    /// (Text::to_markup, Theme serialization, etc.) should use this method.
+    pub fn to_markup_string(&self) -> String {
+        use crate::color::ANSI_COLOR_NAMES;
+
+        let mut parts: Vec<&str> = Vec::new();
+        // Macro to reduce repetition for bool attributes
+        macro_rules! attr {
+            ($field:ident, $name:expr, $neg:expr) => {
+                match self.$field {
+                    Some(true) => parts.push($name),
+                    Some(false) => parts.push($neg),
+                    None => {}
+                }
+            };
+            ($field:ident, $name:expr) => {
+                if self.$field == Some(true) {
+                    parts.push($name);
+                }
+            };
+        }
+        attr!(bold, "bold", "not bold");
+        attr!(dim, "dim", "not dim");
+        attr!(italic, "italic", "not italic");
+        attr!(underline, "underline", "not underline");
+        attr!(blink, "blink", "not blink");
+        attr!(blink2, "blink2", "not blink2");
+        attr!(reverse, "reverse", "not reverse");
+        attr!(conceal, "conceal", "not conceal");
+        attr!(strike, "strike", "not strike");
+        attr!(underline2, "underline2", "not underline2");
+        attr!(frame, "frame", "not frame");
+        attr!(encircle, "encircle", "not encircle");
+        attr!(overline, "overline", "not overline");
+
+        let mut owned_parts: Vec<String> = parts.iter().map(|s| s.to_string()).collect();
+
+        // Foreground color
+        if let Some(ref color) = self.color {
+            owned_parts.push(simple_color_name(color, &ANSI_COLOR_NAMES));
+        }
+
+        // Background color
+        if let Some(ref bgcolor) = self.bgcolor {
+            owned_parts.push(format!("on {}", simple_color_name(bgcolor, &ANSI_COLOR_NAMES)));
+        }
+
+        owned_parts.join(" ")
+    }
+}
+
+/// Convert a SimpleColor to its markup name.
+fn simple_color_name(
+    color: &Color,
+    color_names: &std::collections::HashMap<&str, u8>,
+) -> String {
+    match color {
+        Color::Default => String::new(),
+        Color::Standard(n) => {
+            for (name, &idx) in color_names.iter() {
+                if idx == *n {
+                    return name.to_string();
+                }
+            }
+            format!("color({})", n)
+        }
+        Color::EightBit(n) => format!("color({})", n),
+        Color::Rgb { r, g, b } => format!("#{:02x}{:02x}{:02x}", r, g, b),
+    }
+}
+
+/// A stack of styles where the current style is the combination of all pushed styles.
+///
+/// This mirrors Python Rich's `StyleStack`.
+#[derive(Debug, Clone)]
+pub struct StyleStack {
+    _stack: Vec<Style>,
+}
+
+impl StyleStack {
+    /// Create a new StyleStack with the given default style.
+    pub fn new(default_style: Style) -> Self {
+        StyleStack {
+            _stack: vec![default_style],
+        }
+    }
+
+    /// Get the current (top) style.
+    pub fn current(&self) -> Style {
+        *self._stack.last().unwrap()
+    }
+
+    /// Push a new style, combined with the current style.
+    pub fn push(&mut self, style: Style) {
+        let combined = self.current().combine(&style);
+        self._stack.push(combined);
+    }
+
+    /// Pop the top style and return the new current.
+    pub fn pop(&mut self) -> Style {
+        self._stack.pop();
+        self.current()
     }
 }
 
@@ -784,7 +1082,6 @@ impl MetaValue {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -841,8 +1138,14 @@ mod tests {
         assert_eq!(NULL_STYLE.italic, None);
         assert_eq!(NULL_STYLE.underline, None);
         assert_eq!(NULL_STYLE.blink, None);
+        assert_eq!(NULL_STYLE.blink2, None);
         assert_eq!(NULL_STYLE.reverse, None);
+        assert_eq!(NULL_STYLE.conceal, None);
         assert_eq!(NULL_STYLE.strike, None);
+        assert_eq!(NULL_STYLE.underline2, None);
+        assert_eq!(NULL_STYLE.frame, None);
+        assert_eq!(NULL_STYLE.encircle, None);
+        assert_eq!(NULL_STYLE.overline, None);
     }
 
     #[test]
@@ -884,8 +1187,6 @@ mod tests {
     #[test]
     fn test_render_all_attributes() {
         let style = Style {
-            color: None,
-            bgcolor: None,
             bold: Some(true),
             dim: Some(true),
             italic: Some(true),
@@ -893,6 +1194,7 @@ mod tests {
             blink: Some(true),
             reverse: Some(true),
             strike: Some(true),
+            ..Default::default()
         };
         let rendered = style.render("X", ColorSystem::TrueColor);
         // SGR codes: bold=1, dim=2, italic=3, underline=4, blink=5, reverse=7, strike=9
@@ -1287,5 +1589,286 @@ mod tests {
 
         let style = Style::parse("not i").unwrap();
         assert_eq!(style.italic, Some(false));
+    }
+
+    // --- New attribute tests ---
+
+    #[test]
+    fn test_parse_new_attributes() {
+        let style = Style::parse("overline").unwrap();
+        assert_eq!(style.overline, Some(true));
+
+        let style = Style::parse("blink2").unwrap();
+        assert_eq!(style.blink2, Some(true));
+
+        let style = Style::parse("conceal").unwrap();
+        assert_eq!(style.conceal, Some(true));
+
+        let style = Style::parse("underline2").unwrap();
+        assert_eq!(style.underline2, Some(true));
+
+        let style = Style::parse("frame").unwrap();
+        assert_eq!(style.frame, Some(true));
+
+        let style = Style::parse("encircle").unwrap();
+        assert_eq!(style.encircle, Some(true));
+    }
+
+    #[test]
+    fn test_parse_new_attribute_shorthand() {
+        let style = Style::parse("o").unwrap();
+        assert_eq!(style.overline, Some(true));
+
+        let style = Style::parse("uu").unwrap();
+        assert_eq!(style.underline2, Some(true));
+
+        let style = Style::parse("c").unwrap();
+        assert_eq!(style.conceal, Some(true));
+    }
+
+    #[test]
+    fn test_parse_not_new_attributes() {
+        let style = Style::parse("not overline").unwrap();
+        assert_eq!(style.overline, Some(false));
+
+        let style = Style::parse("not blink2").unwrap();
+        assert_eq!(style.blink2, Some(false));
+
+        let style = Style::parse("not conceal").unwrap();
+        assert_eq!(style.conceal, Some(false));
+
+        let style = Style::parse("not underline2").unwrap();
+        assert_eq!(style.underline2, Some(false));
+
+        let style = Style::parse("not frame").unwrap();
+        assert_eq!(style.frame, Some(false));
+
+        let style = Style::parse("not encircle").unwrap();
+        assert_eq!(style.encircle, Some(false));
+    }
+
+    #[test]
+    fn test_builder_new_attributes() {
+        let style = Style::new().with_overline(true);
+        assert_eq!(style.overline, Some(true));
+
+        let style = Style::new().with_blink2(true);
+        assert_eq!(style.blink2, Some(true));
+
+        let style = Style::new().with_conceal(true);
+        assert_eq!(style.conceal, Some(true));
+
+        let style = Style::new().with_underline2(true);
+        assert_eq!(style.underline2, Some(true));
+
+        let style = Style::new().with_frame(true);
+        assert_eq!(style.frame, Some(true));
+
+        let style = Style::new().with_encircle(true);
+        assert_eq!(style.encircle, Some(true));
+    }
+
+    #[test]
+    fn test_render_new_attributes() {
+        // overline = SGR 53
+        let style = Style::new().with_overline(true);
+        assert_eq!(
+            style.render("X", ColorSystem::TrueColor),
+            "\x1b[53mX\x1b[0m"
+        );
+
+        // blink2 = SGR 6
+        let style = Style::new().with_blink2(true);
+        assert_eq!(style.render("X", ColorSystem::TrueColor), "\x1b[6mX\x1b[0m");
+
+        // conceal = SGR 8
+        let style = Style::new().with_conceal(true);
+        assert_eq!(style.render("X", ColorSystem::TrueColor), "\x1b[8mX\x1b[0m");
+
+        // underline2 = SGR 21
+        let style = Style::new().with_underline2(true);
+        assert_eq!(
+            style.render("X", ColorSystem::TrueColor),
+            "\x1b[21mX\x1b[0m"
+        );
+
+        // frame = SGR 51
+        let style = Style::new().with_frame(true);
+        assert_eq!(
+            style.render("X", ColorSystem::TrueColor),
+            "\x1b[51mX\x1b[0m"
+        );
+
+        // encircle = SGR 52
+        let style = Style::new().with_encircle(true);
+        assert_eq!(
+            style.render("X", ColorSystem::TrueColor),
+            "\x1b[52mX\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn test_render_new_attributes_off() {
+        // overline off = SGR 55
+        let style = Style::new().with_overline(false);
+        assert_eq!(
+            style.render("X", ColorSystem::TrueColor),
+            "\x1b[55mX\x1b[0m"
+        );
+
+        // conceal off = SGR 28
+        let style = Style::new().with_conceal(false);
+        assert_eq!(
+            style.render("X", ColorSystem::TrueColor),
+            "\x1b[28mX\x1b[0m"
+        );
+
+        // frame off = SGR 54
+        let style = Style::new().with_frame(false);
+        assert_eq!(
+            style.render("X", ColorSystem::TrueColor),
+            "\x1b[54mX\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn test_combine_new_attributes() {
+        let a = Style::new().with_overline(true);
+        let b = Style::new().with_blink2(true);
+        let combined = a.combine(&b);
+        assert_eq!(combined.overline, Some(true));
+        assert_eq!(combined.blink2, Some(true));
+    }
+
+    #[test]
+    fn test_render_all_new_attributes() {
+        let style = Style {
+            blink2: Some(true),
+            conceal: Some(true),
+            underline2: Some(true),
+            frame: Some(true),
+            encircle: Some(true),
+            overline: Some(true),
+            ..Default::default()
+        };
+        let rendered = style.render("X", ColorSystem::TrueColor);
+        // blink2=6, conceal=8, underline2=21, frame=51, encircle=52, overline=53
+        assert_eq!(rendered, "\x1b[6;8;21;51;52;53mX\x1b[0m");
+    }
+
+    // --- chain / test / background_style / without_color / transparent_background ---
+
+    #[test]
+    fn test_chain() {
+        let a = Style::new().with_bold(true);
+        let b = Style::new()
+            .with_italic(true)
+            .with_color(Color::Standard(1));
+        let c = Style::new().with_underline(true);
+        let result = Style::chain(&[a, b, c]);
+        assert_eq!(result.bold, Some(true));
+        assert_eq!(result.italic, Some(true));
+        assert_eq!(result.underline, Some(true));
+        assert_eq!(result.color, Some(Color::Standard(1)));
+    }
+
+    #[test]
+    fn test_background_style() {
+        let style = Style::new()
+            .with_bold(true)
+            .with_color(Color::Standard(1))
+            .with_bgcolor(Color::Standard(4));
+        let bg = style.background_style();
+        assert_eq!(bg.bgcolor, Some(Color::Standard(4)));
+        assert_eq!(bg.color, None);
+        assert_eq!(bg.bold, None);
+    }
+
+    #[test]
+    fn test_without_color() {
+        let style = Style::new()
+            .with_bold(true)
+            .with_color(Color::Standard(1))
+            .with_bgcolor(Color::Standard(4));
+        let nc = style.without_color();
+        assert_eq!(nc.color, None);
+        assert_eq!(nc.bgcolor, None);
+        assert_eq!(nc.bold, Some(true));
+    }
+
+    #[test]
+    fn test_has_transparent_background() {
+        assert!(Style::new().has_transparent_background());
+        assert!(
+            Style::new()
+                .with_bgcolor(Color::Default)
+                .has_transparent_background()
+        );
+        assert!(
+            !Style::new()
+                .with_bgcolor(Color::Standard(1))
+                .has_transparent_background()
+        );
+    }
+
+    // --- StyleStack tests ---
+
+    #[test]
+    fn test_style_stack_new() {
+        let stack = StyleStack::new(Style::new().with_bold(true));
+        assert_eq!(stack.current().bold, Some(true));
+    }
+
+    #[test]
+    fn test_style_stack_push_pop() {
+        let mut stack = StyleStack::new(Style::new().with_bold(true));
+        stack.push(Style::new().with_italic(true));
+        let current = stack.current();
+        assert_eq!(current.bold, Some(true));
+        assert_eq!(current.italic, Some(true));
+
+        stack.pop();
+        let current = stack.current();
+        assert_eq!(current.bold, Some(true));
+        assert_eq!(current.italic, None);
+    }
+
+    #[test]
+    fn test_style_stack_multiple_push() {
+        let mut stack = StyleStack::new(Style::new());
+        stack.push(Style::new().with_bold(true));
+        stack.push(Style::new().with_italic(true));
+        stack.push(Style::new().with_underline(true));
+
+        let current = stack.current();
+        assert_eq!(current.bold, Some(true));
+        assert_eq!(current.italic, Some(true));
+        assert_eq!(current.underline, Some(true));
+
+        stack.pop();
+        let current = stack.current();
+        assert_eq!(current.bold, Some(true));
+        assert_eq!(current.italic, Some(true));
+        assert_eq!(current.underline, None);
+    }
+
+    // --- HTML style with overline ---
+
+    #[test]
+    fn test_html_style_overline() {
+        let style = Style::new().with_overline(true);
+        let css = style.get_html_style();
+        assert!(css.contains("text-decoration: overline"));
+    }
+
+    #[test]
+    fn test_html_style_underline_strike_overline_combined() {
+        let style = Style::new()
+            .with_underline(true)
+            .with_strike(true)
+            .with_overline(true);
+        let css = style.get_html_style();
+        assert!(css.contains("text-decoration: underline line-through overline"));
+        assert_eq!(css.matches("text-decoration").count(), 1);
     }
 }

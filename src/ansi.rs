@@ -6,8 +6,10 @@
 //! - `AnsiDecoder` (stateful decoder that persists style across lines)
 //! - `Text::from_ansi` (see `src/text.rs`)
 
+use std::sync::Arc;
+
 use crate::color::SimpleColor;
-use crate::style::Style;
+use crate::style::{Style, StyleMeta};
 use crate::text::Text;
 
 /// Translate ANSI escape codes in to styled `Text`.
@@ -17,12 +19,15 @@ use crate::text::Text;
 #[derive(Debug, Clone)]
 pub struct AnsiDecoder {
     style: Style,
+    /// Current hyperlink URL from OSC 8, if any.
+    link: Option<Arc<str>>,
 }
 
 impl Default for AnsiDecoder {
     fn default() -> Self {
         Self {
             style: Style::new(),
+            link: None,
         }
     }
 }
@@ -70,7 +75,7 @@ impl AnsiDecoder {
             if plain_start < index {
                 let plain = &line[plain_start..index];
                 if !plain.is_empty() {
-                    out.append(plain.to_string(), self.style_for_text());
+                    self.append_to_text(&mut out, plain);
                 }
             }
 
@@ -123,7 +128,7 @@ impl AnsiDecoder {
         if plain_start < bytes.len() {
             let plain = &line[plain_start..];
             if !plain.is_empty() {
-                out.append(plain.to_string(), self.style_for_text());
+                self.append_to_text(&mut out, plain);
             }
         }
 
@@ -131,22 +136,51 @@ impl AnsiDecoder {
     }
 
     fn style_for_text(&self) -> Option<Style> {
-        if self.style.is_null() {
+        if self.style.is_null() && self.link.is_none() {
             None
         } else {
             Some(self.style)
         }
     }
 
+    /// Get the current StyleMeta (for hyperlink), if any.
+    fn meta_for_text(&self) -> Option<StyleMeta> {
+        self.link
+            .as_ref()
+            .map(|url| StyleMeta::with_link(url.clone()))
+    }
+
+    /// Append text to a Text object with current style and meta.
+    fn append_to_text(&self, out: &mut Text, plain: &str) {
+        let style = self.style_for_text();
+        let meta = self.meta_for_text();
+        if let Some(meta) = meta {
+            // Use spans with meta for hyperlinks
+            let start = out.len();
+            out.append(plain.to_string(), style);
+            // Manually add meta to the last span
+            if let Some(last_span) = out.spans_mut().last_mut() {
+                if last_span.start == start {
+                    last_span.meta = Some(meta);
+                }
+            }
+        } else {
+            out.append(plain.to_string(), style);
+        }
+    }
+
     fn apply_osc(&mut self, content: &str) {
-        // Match Rich: only handle OSC 8 links (best-effort).
-        //
-        // Python Rich stores hyperlinks in Style metadata. rich-rs doesn't yet surface
-        // hyperlinks in `Style`, so we currently ignore them (but must parse and skip).
-        if content.starts_with("8;") {
-            // Format: "8;params;url" (url may be empty to clear).
-            // We intentionally ignore the parsed url for now.
-            let _ = content;
+        // Handle OSC 8 hyperlinks: "8;params;url" (url may be empty to clear).
+        if let Some(after_8) = content.strip_prefix("8;") {
+            // Split: "8;params;url"
+            if let Some((_params, url)) = after_8.split_once(';') {
+                if url.is_empty() {
+                    // Clear hyperlink
+                    self.link = None;
+                } else {
+                    self.link = Some(Arc::from(url));
+                }
+            }
         }
     }
 
@@ -184,8 +218,11 @@ impl AnsiDecoder {
                 3 => self.style.italic = Some(true),
                 4 => self.style.underline = Some(true),
                 5 => self.style.blink = Some(true),
+                6 => self.style.blink2 = Some(true),
                 7 => self.style.reverse = Some(true),
+                8 => self.style.conceal = Some(true),
                 9 => self.style.strike = Some(true),
+                21 => self.style.underline2 = Some(true),
 
                 22 => {
                     // not dim not bold
@@ -193,10 +230,29 @@ impl AnsiDecoder {
                     self.style.dim = None;
                 }
                 23 => self.style.italic = None,
-                24 => self.style.underline = None,
-                25 => self.style.blink = None,
+                24 => {
+                    // resets both underline and underline2
+                    self.style.underline = None;
+                    self.style.underline2 = None;
+                }
+                25 => {
+                    // resets both blink and blink2
+                    self.style.blink = None;
+                    self.style.blink2 = None;
+                }
                 27 => self.style.reverse = None,
+                28 => self.style.conceal = None,
                 29 => self.style.strike = None,
+
+                51 => self.style.frame = Some(true),
+                52 => self.style.encircle = Some(true),
+                53 => self.style.overline = Some(true),
+                54 => {
+                    // resets both frame and encircle
+                    self.style.frame = None;
+                    self.style.encircle = None;
+                }
+                55 => self.style.overline = None,
 
                 30..=37 => self.style.color = Some(SimpleColor::Standard((code - 30) as u8)),
                 39 => self.style.color = None,
@@ -259,8 +315,6 @@ impl AnsiDecoder {
                     }
                 }
 
-                // Unsupported / ignored SGR codes:
-                // - 6 blink2, 8 conceal, 21 underline2, and 51..55 frame/overline, etc.
                 _ => {}
             }
         }
@@ -399,5 +453,62 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].plain_text(), "abc");
         assert_eq!(lines[1].plain_text(), "def");
+    }
+
+    #[test]
+    fn test_decode_new_sgr_codes() {
+        let mut decoder = AnsiDecoder::new();
+        // SGR 6 = blink2
+        let text = decoder.decode_line("\x1b[6mRapid\x1b[0m");
+        assert_eq!(text.spans()[0].style.blink2, Some(true));
+
+        let mut decoder = AnsiDecoder::new();
+        // SGR 8 = conceal
+        let text = decoder.decode_line("\x1b[8mHidden\x1b[0m");
+        assert_eq!(text.spans()[0].style.conceal, Some(true));
+
+        let mut decoder = AnsiDecoder::new();
+        // SGR 21 = underline2
+        let text = decoder.decode_line("\x1b[21mDouble\x1b[0m");
+        assert_eq!(text.spans()[0].style.underline2, Some(true));
+
+        let mut decoder = AnsiDecoder::new();
+        // SGR 53 = overline
+        let text = decoder.decode_line("\x1b[53mOver\x1b[0m");
+        assert_eq!(text.spans()[0].style.overline, Some(true));
+
+        let mut decoder = AnsiDecoder::new();
+        // SGR 51 = frame
+        let text = decoder.decode_line("\x1b[51mFramed\x1b[0m");
+        assert_eq!(text.spans()[0].style.frame, Some(true));
+
+        let mut decoder = AnsiDecoder::new();
+        // SGR 52 = encircle
+        let text = decoder.decode_line("\x1b[52mCircle\x1b[0m");
+        assert_eq!(text.spans()[0].style.encircle, Some(true));
+    }
+
+    #[test]
+    fn test_decode_sgr_reset_codes() {
+        let mut decoder = AnsiDecoder::new();
+        // Set overline, then reset with SGR 55
+        let text = decoder.decode_line("\x1b[53mOver\x1b[55mNormal\x1b[0m");
+        assert_eq!(text.spans().len(), 1);
+        assert_eq!(text.spans()[0].style.overline, Some(true));
+        // After reset, "Normal" should have overline=None
+    }
+
+    #[test]
+    fn test_decode_osc8_hyperlink() {
+        let mut decoder = AnsiDecoder::new();
+        // OSC 8 hyperlink: ESC ] 8 ; params ; url BEL
+        let text = decoder.decode_line("\x1b]8;;https://example.com\x07Link\x1b]8;;\x07");
+        assert_eq!(text.plain_text(), "Link");
+        assert_eq!(text.spans().len(), 1);
+        // Check meta has the link
+        let span = &text.spans()[0];
+        assert!(span.meta.is_some());
+        let meta = span.meta.as_ref().unwrap();
+        assert_eq!(meta.link.as_deref(), Some("https://example.com"));
     }
 }

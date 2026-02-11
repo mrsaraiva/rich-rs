@@ -3,12 +3,15 @@
 //! Text is the primary way to work with styled content in Rich.
 //! It stores plain text with a list of spans that define styled regions.
 
+use std::cmp::Ordering;
+
 use regex::Regex;
 
 use crate::Renderable;
 use crate::cells::cell_len;
-use crate::console::{Console, ConsoleOptions};
+use crate::console::{Console, ConsoleOptions, JustifyMethod};
 use crate::error::Result;
+use crate::markup;
 use crate::measure::Measurement;
 use crate::segment::{Segment, Segments};
 use crate::style::{Style, StyleMeta};
@@ -1098,15 +1101,11 @@ impl Text {
     /// # Returns
     ///
     /// A new Text with indentation guides added.
-    ///
-    /// # Note
-    ///
-    /// This is a stub implementation that returns the text unchanged.
-    /// Full implementation is TODO.
-    pub fn with_indent_guides(self, _indent_size: usize, _style: Option<crate::Style>) -> Text {
-        // TODO: Implement actual indent guides
-        // For now, return the text unchanged
-        self
+    pub fn with_indent_guides(self, indent_size: usize, style: Option<crate::Style>) -> Text {
+        let guide_style = style.unwrap_or_else(|| {
+            Style::new().with_dim(true).with_color(crate::color::SimpleColor::Standard(2))
+        });
+        self.with_indent_guides_full(Some(indent_size), "│", guide_style)
     }
 
     /// Strip trailing whitespace from the text.
@@ -1594,6 +1593,349 @@ impl Text {
 
         all_lines
     }
+}
+
+// ========================================================================
+// Additional parity methods
+// ========================================================================
+
+impl Text {
+    /// Return a sub-Text from character offsets `start..end` with correctly adjusted spans.
+    ///
+    /// This is the equivalent of Python's `text[start:end]`. Spans that partially overlap
+    /// the range are clipped. Spans fully outside are dropped.
+    pub fn slice(&self, start: usize, end: usize) -> Text {
+        let text_len = self.len();
+        let start = start.min(text_len);
+        let end = end.min(text_len);
+        if start >= end {
+            return self.blank_copy("");
+        }
+        let lines = self.divide([start, end]);
+        // divide([start, end]) returns up to 3 segments: [0..start], [start..end], [end..len]
+        // We want the middle one (index 1), or the first one if start==0.
+        if start == 0 {
+            lines.into_iter().next().unwrap_or_else(|| self.blank_copy(""))
+        } else if lines.len() > 1 {
+            lines.into_iter().nth(1).unwrap_or_else(|| self.blank_copy(""))
+        } else {
+            self.blank_copy("")
+        }
+    }
+
+    /// Align text within width: left (pad right), center (pad both sides), right (pad left),
+    /// full (distribute spaces between words).
+    pub fn align(&mut self, align: JustifyMethod, width: usize) {
+        let current_width = self.cell_len();
+        if current_width >= width {
+            *self = self.truncate(width, crate::console::OverflowMethod::Crop, false);
+            return;
+        }
+        let excess_space = width - current_width;
+        if excess_space == 0 {
+            return;
+        }
+        match align {
+            JustifyMethod::Left | JustifyMethod::Default => {
+                *self = self.pad_right(width);
+            }
+            JustifyMethod::Center => {
+                *self = self.center(width);
+            }
+            JustifyMethod::Right => {
+                *self = self.pad_left(width);
+            }
+            JustifyMethod::Full => {
+                *self = self.justify_full(width);
+            }
+        }
+    }
+
+    /// Check if the plain text contains a substring.
+    pub fn contains(&self, text: &str) -> bool {
+        self.text.contains(text)
+    }
+
+    /// Reconstruct a markup string from the styled text.
+    ///
+    /// For each span, wraps the text range in `[style]...[/style]` tags.
+    pub fn to_markup(&self) -> String {
+        let plain = &self.text;
+        if self.spans.is_empty() && self.style.is_none_or(|s| s.is_null()) {
+            return markup::escape(plain);
+        }
+
+        // Build events: (offset, is_closing, style_string)
+        let mut events: Vec<(usize, bool, String)> = Vec::new();
+
+        // Base style
+        if let Some(style) = self.style {
+            if !style.is_null() {
+                let style_str = style.to_markup_string();
+                if !style_str.is_empty() {
+                    events.push((0, false, style_str.clone()));
+                    events.push((self.len(), true, style_str));
+                }
+            }
+        }
+
+        // Span styles
+        for span in &self.spans {
+            let style_str = span.style.to_markup_string();
+            if !style_str.is_empty() {
+                events.push((span.start, false, style_str.clone()));
+                events.push((span.end, true, style_str));
+            }
+        }
+
+        // Sort by offset, then closings before openings at same position
+        events.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+        let mut output = String::new();
+        let chars: Vec<char> = plain.chars().collect();
+        let mut position = 0;
+
+        for (offset, closing, style_str) in &events {
+            let offset = (*offset).min(chars.len());
+            if offset > position {
+                let text_slice: String = chars[position..offset].iter().collect();
+                output.push_str(&markup::escape(&text_slice));
+                position = offset;
+            }
+            if *closing {
+                output.push_str(&format!("[/{}]", style_str));
+            } else {
+                output.push_str(&format!("[{}]", style_str));
+            }
+        }
+
+        // Remaining text
+        if position < chars.len() {
+            let text_slice: String = chars[position..].iter().collect();
+            output.push_str(&markup::escape(&text_slice));
+        }
+
+        output
+    }
+
+    /// Get the combined style at a specific character offset by combining all overlapping spans.
+    pub fn get_style_at_offset(&self, offset: usize) -> Style {
+        let mut style = self.style.unwrap_or_default();
+        for span in &self.spans {
+            if span.start <= offset && offset < span.end {
+                style = style.combine(&span.style);
+            }
+        }
+        style
+    }
+
+    /// Truncate or pad (with spaces) to exact character length.
+    pub fn set_length(&mut self, length: usize) {
+        let current = self.len();
+        match current.cmp(&length) {
+            Ordering::Less => {
+                // Pad right
+                *self = self.pad_right(length);
+            }
+            Ordering::Greater => {
+                // Right crop
+                self.right_crop(current - length);
+            }
+            Ordering::Equal => {}
+        }
+    }
+
+    /// Remove `amount` characters from the right side.
+    pub fn right_crop(&mut self, amount: usize) {
+        if amount == 0 {
+            return;
+        }
+        let chars: Vec<char> = self.text.chars().collect();
+        if amount >= chars.len() {
+            self.text.clear();
+            self.spans.clear();
+            return;
+        }
+        let new_len = chars.len() - amount;
+        self.text = chars[..new_len].iter().collect();
+        self.spans = self
+            .spans
+            .iter()
+            .filter(|span| span.start < new_len)
+            .map(|span| {
+                if span.end <= new_len {
+                    span.clone()
+                } else {
+                    Span::new_with_meta(span.start, new_len, span.style, span.meta.clone())
+                }
+            })
+            .collect();
+    }
+
+    /// Fit text to width by splitting on newlines, then setting each line to exact width.
+    pub fn fit(&self, width: usize) -> Vec<Text> {
+        let mut lines = Vec::new();
+        for mut line in self.split("\n", false, true) {
+            line.set_length(width);
+            lines.push(line);
+        }
+        lines
+    }
+
+    /// Remove suffix from the text if present.
+    pub fn remove_suffix(&mut self, suffix: &str) {
+        if self.text.ends_with(suffix) {
+            let suffix_chars = suffix.chars().count();
+            self.right_crop(suffix_chars);
+        }
+    }
+
+    /// Extend the last span's style to cover `count` more characters.
+    pub fn extend_style(&mut self, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let end_offset = self.len();
+        if !self.spans.is_empty() {
+            for span in &mut self.spans {
+                if span.end >= end_offset {
+                    span.end += count;
+                }
+            }
+        }
+        self.text.push_str(&" ".repeat(count));
+    }
+
+    /// Detect the common indentation level.
+    pub fn detect_indentation(&self) -> usize {
+        let re = Regex::new(r"(?m)^( *)(.*)$").unwrap_or_else(|_| Regex::new("$^").unwrap());
+        let mut indentations: Vec<usize> = Vec::new();
+        for cap in re.captures_iter(&self.text) {
+            let indent_len = cap.get(1).map_or(0, |m| m.as_str().len());
+            let content = cap.get(2).map_or("", |m| m.as_str());
+            if !content.is_empty() && indent_len > 0 {
+                indentations.push(indent_len);
+            }
+        }
+
+        if indentations.is_empty() {
+            return 1;
+        }
+
+        // Filter to even indentations, then compute GCD
+        let even_indents: Vec<usize> = indentations.into_iter().filter(|i| i % 2 == 0).collect();
+        if even_indents.is_empty() {
+            return 1;
+        }
+
+        even_indents.iter().copied().reduce(gcd).unwrap_or(1).max(1)
+    }
+
+    /// Copy spans from another Text onto this one (direct copy, no offset adjustment).
+    pub fn copy_styles(&mut self, other: &Text) {
+        self.spans.extend(other.spans.iter().cloned());
+    }
+
+    /// Implement real indent guide rendering.
+    ///
+    /// Scans for leading whitespace and replaces indent positions with the guide
+    /// character in the given style.
+    pub fn with_indent_guides_full(
+        &self,
+        indent_size: Option<usize>,
+        character: &str,
+        style: Style,
+    ) -> Text {
+        let indent_size = indent_size.unwrap_or_else(|| self.detect_indentation());
+        if indent_size == 0 {
+            return self.clone();
+        }
+
+        let expanded = self.expand_tabs(indent_size);
+        let indent_line = format!("{}{}", character, " ".repeat(indent_size.saturating_sub(1)));
+        let re_indent = Regex::new(r"^( *)(.*)$").unwrap();
+
+        let mut new_lines: Vec<Text> = Vec::new();
+        let mut blank_lines: usize = 0;
+
+        for line in expanded.split("\n", false, true) {
+            let plain = line.plain_text().to_string();
+            if let Some(caps) = re_indent.captures(&plain) {
+                let indent = caps.get(1).map_or("", |m| m.as_str());
+                let content = caps.get(2).map_or("", |m| m.as_str());
+
+                if content.is_empty() {
+                    blank_lines += 1;
+                    continue;
+                }
+
+                let indent_len = indent.len();
+                let full_indents = indent_len / indent_size;
+                let remaining_space = indent_len % indent_size;
+                let new_indent =
+                    format!("{}{}", indent_line.repeat(full_indents), " ".repeat(remaining_space));
+
+                let mut result_line = line.clone();
+                // Replace the leading whitespace with guide characters
+                let new_indent_len = new_indent.chars().count();
+                let chars: Vec<char> = result_line.text.chars().collect();
+                let replace_len = indent_len.min(new_indent_len).min(chars.len());
+                let mut new_text = new_indent.clone();
+                if replace_len < chars.len() {
+                    let rest: String = chars[replace_len..].iter().collect();
+                    new_text.push_str(&rest);
+                }
+                result_line.text = new_text;
+                result_line.stylize(0, new_indent_len.min(indent_len), style);
+
+                // Add blank lines with indent guides
+                if blank_lines > 0 {
+                    for _ in 0..blank_lines {
+                        let blank_guide = Text::styled(new_indent.clone(), style);
+                        new_lines.push(blank_guide);
+                    }
+                    blank_lines = 0;
+                }
+
+                new_lines.push(result_line);
+            } else {
+                blank_lines += 1;
+            }
+        }
+
+        // Handle trailing blank lines
+        for _ in 0..blank_lines {
+            new_lines.push(Text::new());
+        }
+
+        let joiner = expanded.blank_copy("\n");
+        joiner.join(new_lines)
+    }
+}
+
+impl std::ops::Add for Text {
+    type Output = Text;
+
+    fn add(self, rhs: Text) -> Text {
+        let mut result = self.clone();
+        result.append_text(&rhs);
+        result
+    }
+}
+
+impl std::ops::Add<&str> for Text {
+    type Output = Text;
+
+    fn add(self, rhs: &str) -> Text {
+        let mut result = self.clone();
+        result.append(rhs, None);
+        result
+    }
+}
+
+/// Compute the greatest common divisor.
+fn gcd(a: usize, b: usize) -> usize {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 impl From<&str> for Text {
@@ -2647,5 +2989,235 @@ mod tests {
         let lines = text.wrap(5, Some(JustifyMethod::Full), None, 8, false);
         // Should have multiple lines, with full justification on non-last lines
         assert!(lines.len() >= 2);
+    }
+
+    // ==================== slice tests ====================
+
+    #[test]
+    fn test_slice_basic() {
+        let text = Text::plain("Hello World");
+        let sliced = text.slice(0, 5);
+        assert_eq!(sliced.plain_text(), "Hello");
+    }
+
+    #[test]
+    fn test_slice_middle() {
+        let text = Text::plain("Hello World");
+        let sliced = text.slice(6, 11);
+        assert_eq!(sliced.plain_text(), "World");
+    }
+
+    #[test]
+    fn test_slice_preserves_spans() {
+        let mut text = Text::plain("Hello World");
+        text.stylize(0, 5, Style::new().with_bold(true));
+
+        let sliced = text.slice(0, 5);
+        assert_eq!(sliced.plain_text(), "Hello");
+        assert!(!sliced.spans().is_empty());
+        assert_eq!(sliced.spans()[0].start, 0);
+        assert_eq!(sliced.spans()[0].end, 5);
+    }
+
+    #[test]
+    fn test_slice_clips_span() {
+        let mut text = Text::plain("Hello World");
+        text.stylize(3, 8, Style::new().with_bold(true));
+
+        let sliced = text.slice(0, 5);
+        assert_eq!(sliced.plain_text(), "Hello");
+        assert!(!sliced.spans().is_empty());
+        assert_eq!(sliced.spans()[0].start, 3);
+        assert_eq!(sliced.spans()[0].end, 5);
+    }
+
+    #[test]
+    fn test_slice_empty_range() {
+        let text = Text::plain("Hello World");
+        let sliced = text.slice(5, 5);
+        assert_eq!(sliced.plain_text(), "");
+    }
+
+    // ==================== align tests ====================
+
+    #[test]
+    fn test_align_left() {
+        use crate::console::JustifyMethod;
+        let mut text = Text::plain("hi");
+        text.align(JustifyMethod::Left, 6);
+        assert_eq!(text.plain_text(), "hi    ");
+    }
+
+    #[test]
+    fn test_align_right() {
+        use crate::console::JustifyMethod;
+        let mut text = Text::plain("hi");
+        text.align(JustifyMethod::Right, 6);
+        assert_eq!(text.plain_text(), "    hi");
+    }
+
+    #[test]
+    fn test_align_center() {
+        use crate::console::JustifyMethod;
+        let mut text = Text::plain("hi");
+        text.align(JustifyMethod::Center, 6);
+        assert_eq!(text.plain_text(), "  hi  ");
+    }
+
+    // ==================== contains tests ====================
+
+    #[test]
+    fn test_contains_true() {
+        let text = Text::plain("Hello World");
+        assert!(text.contains("World"));
+    }
+
+    #[test]
+    fn test_contains_false() {
+        let text = Text::plain("Hello World");
+        assert!(!text.contains("xyz"));
+    }
+
+    // ==================== get_style_at_offset tests ====================
+
+    #[test]
+    fn test_get_style_at_offset() {
+        let mut text = Text::plain("Hello World");
+        let bold = Style::new().with_bold(true);
+        text.stylize(0, 5, bold);
+
+        let style_at_0 = text.get_style_at_offset(0);
+        assert_eq!(style_at_0.bold, Some(true));
+
+        let style_at_6 = text.get_style_at_offset(6);
+        assert_ne!(style_at_6.bold, Some(true));
+    }
+
+    // ==================== set_length tests ====================
+
+    #[test]
+    fn test_set_length_pad() {
+        let mut text = Text::plain("hi");
+        text.set_length(5);
+        assert_eq!(text.cell_len(), 5);
+        assert!(text.plain_text().starts_with("hi"));
+    }
+
+    #[test]
+    fn test_set_length_crop() {
+        let mut text = Text::plain("hello world");
+        text.set_length(5);
+        assert_eq!(text.plain_text(), "hello");
+    }
+
+    // ==================== right_crop tests ====================
+
+    #[test]
+    fn test_text_right_crop() {
+        let mut text = Text::plain("Hello World");
+        text.right_crop(6);
+        assert_eq!(text.plain_text(), "Hello");
+    }
+
+    #[test]
+    fn test_text_right_crop_adjusts_spans() {
+        let mut text = Text::plain("Hello World");
+        text.stylize(0, 11, Style::new().with_bold(true));
+        text.right_crop(6);
+        assert_eq!(text.spans()[0].end, 5);
+    }
+
+    // ==================== fit tests ====================
+
+    #[test]
+    fn test_fit_basic() {
+        let text = Text::plain("Hello\nWorld");
+        let lines = text.fit(10);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].cell_len(), 10);
+        assert_eq!(lines[1].cell_len(), 10);
+    }
+
+    // ==================== remove_suffix tests ====================
+
+    #[test]
+    fn test_remove_suffix_found() {
+        let mut text = Text::plain("Hello World");
+        text.remove_suffix(" World");
+        assert_eq!(text.plain_text(), "Hello");
+    }
+
+    #[test]
+    fn test_remove_suffix_not_found() {
+        let mut text = Text::plain("Hello World");
+        text.remove_suffix("xyz");
+        assert_eq!(text.plain_text(), "Hello World");
+    }
+
+    // ==================== extend_style tests ====================
+
+    #[test]
+    fn test_extend_style() {
+        let mut text = Text::plain("hello");
+        text.stylize(0, 5, Style::new().with_bold(true));
+        text.extend_style(3);
+        assert_eq!(text.len(), 8);
+        assert_eq!(text.spans()[0].end, 8);
+    }
+
+    // ==================== detect_indentation tests ====================
+
+    #[test]
+    fn test_detect_indentation() {
+        let text = Text::plain("  foo\n    bar\n      baz");
+        let indent = text.detect_indentation();
+        assert_eq!(indent, 2);
+    }
+
+    // ==================== copy_styles tests ====================
+
+    #[test]
+    fn test_copy_styles() {
+        let mut text = Text::plain("Hello World");
+        let mut other = Text::plain("Hello World");
+        other.stylize(0, 5, Style::new().with_bold(true));
+
+        text.copy_styles(&other);
+        assert_eq!(text.spans().len(), 1);
+    }
+
+    // ==================== Add trait tests ====================
+
+    #[test]
+    fn test_add_text() {
+        let a = Text::plain("Hello ");
+        let b = Text::plain("World");
+        let result = a + b;
+        assert_eq!(result.plain_text(), "Hello World");
+    }
+
+    #[test]
+    fn test_add_str() {
+        let a = Text::plain("Hello ");
+        let result = a + "World";
+        assert_eq!(result.plain_text(), "Hello World");
+    }
+
+    // ==================== to_markup tests ====================
+
+    #[test]
+    fn test_to_markup_plain() {
+        let text = Text::plain("Hello World");
+        assert_eq!(text.to_markup(), "Hello World");
+    }
+
+    #[test]
+    fn test_to_markup_with_style() {
+        let mut text = Text::plain("Hello");
+        text.stylize(0, 5, Style::new().with_bold(true));
+        let markup = text.to_markup();
+        assert!(markup.contains("[bold]"));
+        assert!(markup.contains("[/bold]"));
+        assert!(markup.contains("Hello"));
     }
 }

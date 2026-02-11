@@ -20,6 +20,7 @@ use crate::align::VerticalAlignMethod;
 use crate::r#box::{Box as RichBox, HEAVY_HEAD, RowLevel};
 use crate::console::{ConsoleOptions, JustifyMethod, OverflowMethod};
 use crate::measure::Measurement;
+use crate::padding::PaddingDimensions;
 use crate::rule::AlignMethod;
 use crate::segment::{Segment, Segments};
 use crate::style::Style;
@@ -313,8 +314,8 @@ pub struct Table {
     box_type: Option<RichBox>,
     /// Use ASCII-safe box characters (None = use console default).
     safe_box: Option<bool>,
-    /// Cell padding (left, right).
-    padding: (usize, usize),
+    /// Cell padding (top, right, bottom, left) — CSS order.
+    padding: (usize, usize, usize, usize),
     /// Collapse padding between adjacent cells.
     collapse_padding: bool,
     /// Pad the edge cells.
@@ -345,6 +346,10 @@ pub struct Table {
     title: Option<Text>,
     /// Optional caption below the table.
     caption: Option<Text>,
+    /// Style for the title.
+    title_style: Option<Style>,
+    /// Style for the caption.
+    caption_style: Option<Style>,
     /// Title alignment.
     title_align: AlignMethod,
     /// Caption alignment.
@@ -389,7 +394,7 @@ impl Table {
             rows: Vec::new(),
             box_type: Some(HEAVY_HEAD),
             safe_box: None,
-            padding: (1, 1),
+            padding: (0, 1, 0, 1),
             collapse_padding: false,
             pad_edge: true,
             expand: false,
@@ -405,6 +410,8 @@ impl Table {
             border_style: Style::default(),
             title: None,
             caption: None,
+            title_style: None,
+            caption_style: None,
             title_align: AlignMethod::Center,
             caption_align: AlignMethod::Center,
             width: None,
@@ -419,7 +426,7 @@ impl Table {
     pub fn grid() -> Self {
         Table {
             box_type: None,
-            padding: (0, 0),
+            padding: (0, 0, 0, 0),
             collapse_padding: true,
             pad_edge: false,
             show_header: false,
@@ -445,9 +452,34 @@ impl Table {
         self
     }
 
-    /// Set cell padding (left and right).
+    /// Set cell padding (left and right), keeping top/bottom at 0.
+    ///
+    /// For full 4-way padding, use `with_padding_dims`.
     pub fn with_padding(mut self, left: usize, right: usize) -> Self {
-        self.padding = (left, right);
+        self.padding = (0, right, 0, left);
+        self
+    }
+
+    /// Set cell padding using CSS-order dimensions.
+    ///
+    /// Accepts `PaddingDimensions` (or anything that converts to it):
+    /// - `usize` — all four sides
+    /// - `(vert, horiz)` — top/bottom and left/right
+    /// - `(top, right, bottom, left)` — CSS order
+    pub fn with_padding_dims(mut self, pad: impl Into<PaddingDimensions>) -> Self {
+        self.padding = pad.into().unpack();
+        self
+    }
+
+    /// Set the title style.
+    pub fn with_title_style(mut self, style: Style) -> Self {
+        self.title_style = Some(style);
+        self
+    }
+
+    /// Set the caption style.
+    pub fn with_caption_style(mut self, style: Style) -> Self {
+        self.caption_style = Some(style);
         self
     }
 
@@ -719,7 +751,7 @@ impl Table {
     /// (e.g. fixed-width columns, min/max bounds), while the actual padding applied
     /// to cells may vary with `pad_edge` (handled in `get_padding_for_column`).
     fn get_measure_padding_width(&self, column_index: usize) -> usize {
-        let (pad_left, pad_right) = self.padding;
+        let (_top, pad_right, _bottom, pad_left) = self.padding;
         let mut left = pad_left;
         let right = pad_right;
 
@@ -733,7 +765,7 @@ impl Table {
     /// Get the actual (left, right) padding for a specific column,
     /// accounting for collapse_padding and pad_edge settings.
     fn get_padding_for_column(&self, column_index: usize) -> (usize, usize) {
-        let (pad_left, pad_right) = self.padding;
+        let (_top, pad_right, _bottom, pad_left) = self.padding;
         let num_columns = self.columns.len();
         let is_first = column_index == 0;
         let is_last = column_index == num_columns.saturating_sub(1);
@@ -1008,23 +1040,41 @@ impl Table {
         let left_pad = Segment::styled(" ".repeat(pad_left), style);
         let right_pad = Segment::styled(" ".repeat(pad_right), style);
 
-        cell_lines
-            .into_iter()
-            .map(|line| {
-                let mut padded = Vec::new();
-                if pad_left > 0 {
-                    padded.push(left_pad.clone());
-                }
-                for seg in line {
-                    padded.push(seg);
-                }
-                if pad_right > 0 {
-                    padded.push(right_pad.clone());
-                }
-                // Adjust to exact width
-                Segment::adjust_line_length(&padded, width, Some(style), true)
-            })
-            .collect()
+        let mut result: Vec<Vec<Segment>> = Vec::new();
+        let (pad_top, _, pad_bottom, _) = self.padding;
+
+        // Add top padding blank lines
+        if pad_top > 0 {
+            let blank = Segment::adjust_line_length(&[], width, Some(style), true);
+            for _ in 0..pad_top {
+                result.push(blank.clone());
+            }
+        }
+
+        // Add content lines with left/right padding
+        for line in cell_lines {
+            let mut padded = Vec::new();
+            if pad_left > 0 {
+                padded.push(left_pad.clone());
+            }
+            for seg in line {
+                padded.push(seg);
+            }
+            if pad_right > 0 {
+                padded.push(right_pad.clone());
+            }
+            result.push(Segment::adjust_line_length(&padded, width, Some(style), true));
+        }
+
+        // Add bottom padding blank lines
+        if pad_bottom > 0 {
+            let blank = Segment::adjust_line_length(&[], width, Some(style), true);
+            for _ in 0..pad_bottom {
+                result.push(blank.clone());
+            }
+        }
+
+        result
     }
 }
 
@@ -1064,7 +1114,7 @@ impl Renderable for Table {
 
         // Render title
         if let Some(ref title) = self.title {
-            let title_lines = console.render_lines(title, Some(options), None, false, false);
+            let title_lines = console.render_lines(title, Some(options), self.title_style, false, false);
             for line in title_lines {
                 let line_width = Segment::get_line_length(&line);
                 let padding = table_width.saturating_sub(line_width);
@@ -1399,7 +1449,7 @@ impl Renderable for Table {
             let mut caption_options = options.clone();
             caption_options.max_width = table_width;
             let caption_lines =
-                console.render_lines(caption, Some(&caption_options), None, false, false);
+                console.render_lines(caption, Some(&caption_options), self.caption_style, false, false);
             for line in caption_lines {
                 let line_width = Segment::get_line_length(&line);
                 let padding = table_width.saturating_sub(line_width);
@@ -1990,6 +2040,46 @@ mod tests {
 
         let m = table.measure(&console, &options);
         assert_eq!(m.maximum, 50);
+    }
+
+    // ==================== Title/caption style tests ====================
+
+    #[test]
+    fn test_table_with_title_style() {
+        let style = Style::new().with_bold(true);
+        let table = Table::new()
+            .with_title("My Title")
+            .with_title_style(style);
+        assert_eq!(table.title_style, Some(style));
+    }
+
+    #[test]
+    fn test_table_with_caption_style() {
+        let style = Style::new().with_italic(true);
+        let table = Table::new()
+            .with_caption("My Caption")
+            .with_caption_style(style);
+        assert_eq!(table.caption_style, Some(style));
+    }
+
+    #[test]
+    fn test_table_four_way_padding() {
+        use crate::padding::PaddingDimensions;
+        let table = Table::new().with_padding_dims(PaddingDimensions::FourWay(1, 2, 1, 2));
+        assert_eq!(table.padding, (1, 2, 1, 2));
+    }
+
+    #[test]
+    fn test_table_padding_from_usize() {
+        let table = Table::new().with_padding_dims(3usize);
+        assert_eq!(table.padding, (3, 3, 3, 3));
+    }
+
+    #[test]
+    fn test_table_padding_compat() {
+        // Old 2-arg with_padding sets left/right with 0 top/bottom
+        let table = Table::new().with_padding(2, 3);
+        assert_eq!(table.padding, (0, 3, 0, 2));
     }
 
     // ==================== Send + Sync tests ====================

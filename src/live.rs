@@ -39,6 +39,10 @@ pub struct LiveOptions {
     pub refresh_per_second: f64,
     pub transient: bool,
     pub vertical_overflow: VerticalOverflowMethod,
+    /// When true, capture writes to stdout and route them through the Console output.
+    pub redirect_stdout: bool,
+    /// When true, capture writes to stderr and route them through the Console output.
+    pub redirect_stderr: bool,
 }
 
 impl Default for LiveOptions {
@@ -49,6 +53,8 @@ impl Default for LiveOptions {
             refresh_per_second: 4.0,
             transient: false,
             vertical_overflow: VerticalOverflowMethod::Ellipsis,
+            redirect_stdout: false,
+            redirect_stderr: false,
         }
     }
 }
@@ -73,6 +79,9 @@ pub struct Live {
     stop_flag: Arc<AtomicBool>,
     started_flag: Arc<AtomicBool>,
     refresh_thread: Option<thread::JoinHandle<()>>,
+    /// Optional callback to get the current renderable on each refresh tick.
+    /// When set, this is called instead of requiring manual `update()` calls.
+    get_renderable: Option<Arc<dyn Fn() -> Box<dyn Renderable + Send + Sync> + Send + Sync>>,
 }
 
 impl Live {
@@ -121,11 +130,24 @@ impl Live {
             stop_flag: Arc::new(AtomicBool::new(false)),
             started_flag: Arc::new(AtomicBool::new(false)),
             refresh_thread: None,
+            get_renderable: None,
         }
     }
 
     pub fn is_started(&self) -> bool {
         self.started_flag.load(Ordering::SeqCst)
+    }
+
+    /// Set a callback that provides the renderable on each refresh tick.
+    ///
+    /// When set, this function is called on each refresh to get the latest
+    /// renderable to display, instead of requiring manual `update()` calls.
+    pub fn with_get_renderable(
+        mut self,
+        f: impl Fn() -> Box<dyn Renderable + Send + Sync> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_renderable = Some(Arc::new(f));
+        self
     }
 
     pub(crate) fn started_flag(&self) -> Arc<AtomicBool> {
@@ -333,6 +355,7 @@ impl Live {
         let stop_flag = self.stop_flag.clone();
         let console = self.console.clone();
         let state = self.state.clone();
+        let get_renderable = self.get_renderable.clone();
         let refresh_per_second = state
             .lock()
             .expect("live state mutex poisoned")
@@ -353,6 +376,25 @@ impl Live {
                 if !state_guard.started {
                     continue;
                 }
+                let live_id = state_guard.live_id;
+                drop(state_guard);
+
+                // If get_renderable is set, call it and update the live display.
+                if let Some(ref get_renderable) = get_renderable {
+                    if let Some(id) = live_id {
+                        let renderable = get_renderable();
+                        let mut console_guard = match console.lock() {
+                            Ok(g) => g,
+                            Err(_) => break,
+                        };
+                        console_guard.live_update(id, renderable);
+                        sync_terminal_size(&mut console_guard);
+                        let _ =
+                            console_guard.print(&Control::new(), None, None, None, false, "");
+                        continue;
+                    }
+                }
+
                 let mut console_guard = match console.lock() {
                     Ok(g) => g,
                     Err(_) => break,

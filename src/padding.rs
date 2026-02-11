@@ -301,15 +301,21 @@ impl Renderable for Padding {
             render_options
         };
 
-        // Render inner content to lines
-        // Note: We pass None for style here - the padding style should NOT apply to content.
-        // The padding style only applies to the padding spaces themselves.
+        // Render inner content to lines.
+        // Python Rich passes the padding style to render_lines, which applies it as a
+        // base style to all content. This ensures background colors extend across the
+        // full width including content (not just padding spaces).
+        let style_arg = if self.style.is_null() {
+            None
+        } else {
+            Some(self.style)
+        };
         let lines = console.render_lines(
             self.renderable.as_ref(),
             Some(&render_options),
-            None,  // Don't apply padding style to content
-            true,  // pad=true
-            false, // new_lines=false (we add them ourselves)
+            style_arg, // Apply padding style to content (matches Python Rich)
+            true,      // pad=true
+            false,     // new_lines=false (we add them ourselves)
         );
 
         // Create padding segments (using clamped values)
@@ -596,6 +602,32 @@ mod tests {
         // When max_width < extra_width + 1, return max_width for both
         assert_eq!(measurement.minimum, 8);
         assert_eq!(measurement.maximum, 8);
+    }
+
+    #[test]
+    fn test_padding_style_applies_to_content() {
+        use crate::color::SimpleColor;
+
+        let text = Text::plain("Hi");
+        let style = Style::new().with_bgcolor(SimpleColor::Standard(4)); // blue bg
+        let padding = Padding::new(Box::new(text), (0, 0, 0, 0)).with_style(style);
+        let console = Console::with_options(ConsoleOptions {
+            max_width: 10,
+            ..Default::default()
+        });
+        let options = console.options().clone();
+
+        let segments = padding.render(&console, &options);
+
+        // Content segments should have the padding style applied (blue background)
+        let content_seg = segments.iter().find(|s| s.text.contains("Hi"));
+        assert!(content_seg.is_some(), "Should find 'Hi' segment");
+        let seg = content_seg.unwrap();
+        let seg_style = seg.style.unwrap_or_default();
+        assert!(
+            seg_style.bgcolor.is_some(),
+            "Content should have background color from padding style"
+        );
     }
 
     // ==================== Send + Sync tests ====================

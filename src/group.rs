@@ -111,6 +111,95 @@ impl Renderable for Group {
     }
 }
 
+// ============================================================================
+// Renderables — like Group but without inserting newlines
+// ============================================================================
+
+/// A container that renders multiple children sequentially WITHOUT newlines.
+///
+/// Unlike `Group`, which inserts newlines between children, `Renderables`
+/// yields each child's output directly, matching Python Rich's
+/// `rich.containers.Renderables`.
+#[derive(Clone, Default)]
+pub struct Renderables {
+    renderables: Vec<Arc<dyn Renderable>>,
+}
+
+impl Renderables {
+    /// Create a new Renderables from an iterator of renderables.
+    pub fn new<I, R>(renderables: I) -> Self
+    where
+        I: IntoIterator<Item = R>,
+        R: Renderable + 'static,
+    {
+        Self {
+            renderables: renderables
+                .into_iter()
+                .map(|r| Arc::new(r) as Arc<dyn Renderable>)
+                .collect(),
+        }
+    }
+
+    /// Create from an iterator of `Arc<dyn Renderable>`.
+    pub fn from_arcs<I>(renderables: I) -> Self
+    where
+        I: IntoIterator<Item = Arc<dyn Renderable>>,
+    {
+        Self {
+            renderables: renderables.into_iter().collect(),
+        }
+    }
+
+    /// Create an empty Renderables.
+    pub fn empty() -> Self {
+        Self {
+            renderables: Vec::new(),
+        }
+    }
+
+    /// Add a renderable.
+    pub fn push(&mut self, renderable: impl Renderable + 'static) {
+        self.renderables.push(Arc::new(renderable));
+    }
+
+    /// Add a pre-wrapped Arc renderable.
+    pub fn push_arc(&mut self, renderable: Arc<dyn Renderable>) {
+        self.renderables.push(renderable);
+    }
+
+    /// Return the child renderables.
+    pub fn renderables(&self) -> &[Arc<dyn Renderable>] {
+        &self.renderables
+    }
+}
+
+impl std::fmt::Debug for Renderables {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Renderables")
+            .field("len", &self.renderables.len())
+            .finish()
+    }
+}
+
+impl Renderable for Renderables {
+    fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
+        let mut out = Segments::new();
+        for child in &self.renderables {
+            let segs = child.render(console, options);
+            out.extend(segs.into_iter());
+        }
+        out
+    }
+
+    fn measure(&self, console: &Console, options: &ConsoleOptions) -> Measurement {
+        let refs: Vec<&dyn Renderable> = self.renderables.iter().map(|r| r.as_ref()).collect();
+        if refs.is_empty() {
+            return Measurement::new(1, 1);
+        }
+        measure_renderables(console, options, &refs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,6 +225,44 @@ mod tests {
         let options = console.options();
         let m = group.measure(&console, options);
         assert!(m.maximum >= 6);
+    }
+
+    #[test]
+    fn test_renderables_no_newlines() {
+        let r = Renderables::new([Text::plain("A"), Text::plain("B")]);
+        let console = Console::new();
+        let options = console.options();
+        let rendered: String = r
+            .render(&console, options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
+        // Renderables should NOT insert newlines between children
+        assert!(rendered.contains("AB") || rendered.contains("A") && rendered.contains("B"));
+        // Check there's no inserted newline between A and B
+        let pos_a = rendered.find('A').unwrap();
+        let pos_b = rendered.find('B').unwrap();
+        let between = &rendered[pos_a + 1..pos_b];
+        assert!(!between.contains('\n'), "Should not insert newline between children");
+    }
+
+    #[test]
+    fn test_renderables_measure() {
+        let r = Renderables::new([Text::plain("Hello"), Text::plain("World!")]);
+        let console = Console::new();
+        let options = console.options();
+        let m = r.measure(&console, options);
+        assert!(m.maximum >= 6); // "World!" = 6 chars
+    }
+
+    #[test]
+    fn test_renderables_empty() {
+        let r = Renderables::empty();
+        let console = Console::new();
+        let options = console.options();
+        let m = r.measure(&console, options);
+        assert_eq!(m.minimum, 1);
+        assert_eq!(m.maximum, 1);
     }
 
     #[test]

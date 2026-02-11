@@ -895,6 +895,227 @@ impl Segment {
 
         result
     }
+
+    // ========================================================================
+    // Vertical alignment functions
+    // ========================================================================
+
+    /// Align lines to the top by padding the bottom with blank lines.
+    ///
+    /// # Arguments
+    ///
+    /// * `lines` - A list of lines.
+    /// * `width` - Desired width of blank lines in cells.
+    /// * `height` - Desired total height.
+    /// * `style` - Style for padding.
+    /// * `new_lines` - Whether blank lines should include "\n".
+    pub fn align_top(
+        lines: &[Vec<Segment>],
+        width: usize,
+        height: usize,
+        style: Option<Style>,
+        new_lines: bool,
+    ) -> Vec<Vec<Segment>> {
+        let extra_lines = height.saturating_sub(lines.len());
+        if extra_lines == 0 {
+            return lines[..height.min(lines.len())].to_vec();
+        }
+        let mut result: Vec<Vec<Segment>> = lines[..height.min(lines.len())].to_vec();
+        let blank_text = if new_lines {
+            format!("{}\n", " ".repeat(width))
+        } else {
+            " ".repeat(width)
+        };
+        let blank = vec![Segment::new_with_style_control(
+            blank_text, style, None, None,
+        )];
+        for _ in 0..extra_lines {
+            result.push(blank.clone());
+        }
+        result
+    }
+
+    /// Align lines to the bottom by padding the top with blank lines.
+    pub fn align_bottom(
+        lines: &[Vec<Segment>],
+        width: usize,
+        height: usize,
+        style: Option<Style>,
+        new_lines: bool,
+    ) -> Vec<Vec<Segment>> {
+        let extra_lines = height.saturating_sub(lines.len());
+        if extra_lines == 0 {
+            return lines[..height.min(lines.len())].to_vec();
+        }
+        let blank_text = if new_lines {
+            format!("{}\n", " ".repeat(width))
+        } else {
+            " ".repeat(width)
+        };
+        let blank = vec![Segment::new_with_style_control(
+            blank_text, style, None, None,
+        )];
+        let mut result: Vec<Vec<Segment>> = Vec::with_capacity(height);
+        for _ in 0..extra_lines {
+            result.push(blank.clone());
+        }
+        result.extend_from_slice(&lines[..height.min(lines.len())]);
+        result
+    }
+
+    /// Align lines to the middle by padding top and bottom with blank lines.
+    pub fn align_middle(
+        lines: &[Vec<Segment>],
+        width: usize,
+        height: usize,
+        style: Option<Style>,
+        new_lines: bool,
+    ) -> Vec<Vec<Segment>> {
+        let extra_lines = height.saturating_sub(lines.len());
+        if extra_lines == 0 {
+            return lines[..height.min(lines.len())].to_vec();
+        }
+        let blank_text = if new_lines {
+            format!("{}\n", " ".repeat(width))
+        } else {
+            " ".repeat(width)
+        };
+        let blank = vec![Segment::new_with_style_control(
+            blank_text, style, None, None,
+        )];
+        let top_lines = extra_lines / 2;
+        let bottom_lines = extra_lines - top_lines;
+        let mut result: Vec<Vec<Segment>> = Vec::with_capacity(height);
+        for _ in 0..top_lines {
+            result.push(blank.clone());
+        }
+        result.extend_from_slice(&lines[..height.min(lines.len())]);
+        for _ in 0..bottom_lines {
+            result.push(blank.clone());
+        }
+        result
+    }
+
+    /// Split segments into lines, preserving a boolean flag indicating whether
+    /// a newline character was encountered (true) or end of content (false).
+    ///
+    /// This is equivalent to Python Rich's `Segment.split_lines_terminator`.
+    pub fn split_lines_terminator(
+        segments: impl IntoIterator<Item = Segment>,
+    ) -> Vec<(Vec<Segment>, bool)> {
+        let mut result: Vec<(Vec<Segment>, bool)> = Vec::new();
+        let mut current_line: Vec<Segment> = Vec::new();
+
+        for segment in segments {
+            if segment.text.contains('\n') && segment.control.is_none() {
+                let text = segment.text.to_string();
+                let style = segment.style;
+                let meta = segment.meta.clone();
+                let mut remaining = text.as_str();
+
+                while !remaining.is_empty() {
+                    if let Some(newline_pos) = remaining.find('\n') {
+                        let before = &remaining[..newline_pos];
+                        if !before.is_empty() {
+                            current_line.push(Segment::new_with_style_control(
+                                before.to_string(),
+                                style,
+                                meta.clone(),
+                                None,
+                            ));
+                        }
+                        result.push((std::mem::take(&mut current_line), true));
+                        remaining = &remaining[newline_pos + 1..];
+                    } else {
+                        if !remaining.is_empty() {
+                            current_line.push(Segment::new_with_style_control(
+                                remaining.to_string(),
+                                style,
+                                meta.clone(),
+                                None,
+                            ));
+                        }
+                        break;
+                    }
+                }
+            } else {
+                current_line.push(segment);
+            }
+        }
+
+        if !current_line.is_empty() {
+            result.push((current_line, false));
+        }
+
+        result
+    }
+
+    /// Remove link metadata from segments.
+    ///
+    /// This is equivalent to Python Rich's `Segment.strip_links`.
+    pub fn strip_links(segments: impl IntoIterator<Item = Segment>) -> Segments {
+        segments
+            .into_iter()
+            .map(|s| Segment {
+                text: s.text,
+                style: s.style,
+                meta: None,
+                control: s.control,
+            })
+            .collect()
+    }
+
+    /// Remove color information from segments, keeping text and attributes.
+    ///
+    /// This is equivalent to Python Rich's `Segment.remove_color`.
+    pub fn remove_color(segments: impl IntoIterator<Item = Segment>) -> Segments {
+        segments
+            .into_iter()
+            .map(|s| {
+                let new_style = s.style.map(|style| style.without_color());
+                Segment {
+                    text: s.text,
+                    style: new_style,
+                    meta: s.meta,
+                    control: s.control,
+                }
+            })
+            .collect()
+    }
+}
+
+/// A simple renderable wrapping pre-rendered lines of segments.
+///
+/// This allows pre-rendered content to be passed through the rendering pipeline.
+/// Equivalent to Python Rich's `SegmentLines`.
+#[derive(Debug, Clone)]
+pub struct SegmentLines {
+    /// The pre-rendered lines.
+    pub lines: Vec<Vec<Segment>>,
+    /// Whether to insert newlines after each line.
+    pub new_lines: bool,
+}
+
+impl SegmentLines {
+    /// Create a new SegmentLines.
+    pub fn new(lines: Vec<Vec<Segment>>, new_lines: bool) -> Self {
+        SegmentLines { lines, new_lines }
+    }
+
+    /// Convert to a flat Segments collection for rendering.
+    pub fn to_segments(&self) -> Segments {
+        let mut result = Segments::new();
+        let new_line = Segment::line();
+        for line in &self.lines {
+            for seg in line {
+                result.push(seg.clone());
+            }
+            if self.new_lines {
+                result.push(new_line.clone());
+            }
+        }
+        result
+    }
 }
 
 impl Default for Segment {
@@ -1704,6 +1925,120 @@ mod tests {
         let result = Segment::set_shape(&lines, 5, Some(1), Some(style), false);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0].style, Some(style));
+    }
+
+    // ==================== vertical alignment tests ====================
+
+    #[test]
+    fn test_align_top() {
+        let lines = vec![vec![Segment::new("hello")]];
+        let result = Segment::align_top(&lines, 5, 3, None, false);
+        assert_eq!(result.len(), 3);
+        assert_eq!(&*result[0][0].text, "hello");
+        // Blank lines
+        assert_eq!(Segment::get_line_length(&result[1]), 5);
+        assert_eq!(Segment::get_line_length(&result[2]), 5);
+    }
+
+    #[test]
+    fn test_align_bottom() {
+        let lines = vec![vec![Segment::new("hello")]];
+        let result = Segment::align_bottom(&lines, 5, 3, None, false);
+        assert_eq!(result.len(), 3);
+        // Content at bottom
+        assert_eq!(&*result[2][0].text, "hello");
+        // Blank lines at top
+        assert_eq!(Segment::get_line_length(&result[0]), 5);
+        assert_eq!(Segment::get_line_length(&result[1]), 5);
+    }
+
+    #[test]
+    fn test_align_middle() {
+        let lines = vec![vec![Segment::new("hello")]];
+        let result = Segment::align_middle(&lines, 5, 3, None, false);
+        assert_eq!(result.len(), 3);
+        // Content in the middle
+        assert_eq!(&*result[1][0].text, "hello");
+    }
+
+    #[test]
+    fn test_align_no_extra_lines() {
+        let lines = vec![
+            vec![Segment::new("a")],
+            vec![Segment::new("b")],
+            vec![Segment::new("c")],
+        ];
+        let result = Segment::align_top(&lines, 5, 3, None, false);
+        assert_eq!(result.len(), 3);
+    }
+
+    // ==================== split_lines_terminator tests ====================
+
+    #[test]
+    fn test_split_lines_terminator_basic() {
+        let segments = vec![Segment::new("hello\nworld")];
+        let lines = Segment::split_lines_terminator(segments);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].1); // newline was found
+        assert!(!lines[1].1); // end of content, no newline
+        assert_eq!(&*lines[0].0[0].text, "hello");
+        assert_eq!(&*lines[1].0[0].text, "world");
+    }
+
+    #[test]
+    fn test_split_lines_terminator_trailing_newline() {
+        let segments = vec![Segment::new("hello\n")];
+        let lines = Segment::split_lines_terminator(segments);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].1);
+    }
+
+    // ==================== strip_links tests ====================
+
+    #[test]
+    fn test_strip_links() {
+        let meta = StyleMeta::with_link("https://example.com");
+        let segments = vec![
+            Segment::styled_with_meta("link", Style::new().with_bold(true), meta),
+            Segment::new("plain"),
+        ];
+        let result = Segment::strip_links(segments);
+        for seg in result.iter() {
+            assert!(seg.meta.is_none());
+        }
+    }
+
+    // ==================== remove_color tests ====================
+
+    #[test]
+    fn test_remove_color() {
+        let style = Style::new()
+            .with_bold(true)
+            .with_color(crate::SimpleColor::Standard(1));
+        let segments = vec![Segment::styled("hello", style)];
+        let result = Segment::remove_color(segments);
+        let seg = result.iter().next().unwrap();
+        assert_eq!(seg.style.unwrap().bold, Some(true));
+        assert_eq!(seg.style.unwrap().color, None);
+    }
+
+    // ==================== SegmentLines tests ====================
+
+    #[test]
+    fn test_segment_lines_to_segments() {
+        let lines = vec![vec![Segment::new("hello")], vec![Segment::new("world")]];
+        let sl = SegmentLines::new(lines, true);
+        let segs = sl.to_segments();
+        // 2 content segments + 2 newlines
+        assert_eq!(segs.len(), 4);
+    }
+
+    #[test]
+    fn test_segment_lines_no_newlines() {
+        let lines = vec![vec![Segment::new("hello")], vec![Segment::new("world")]];
+        let sl = SegmentLines::new(lines, false);
+        let segs = sl.to_segments();
+        assert_eq!(segs.len(), 2);
     }
 
     // ==================== Send + Sync compile-time assertions ====================
