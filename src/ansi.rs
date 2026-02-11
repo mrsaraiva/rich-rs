@@ -21,6 +21,8 @@ pub struct AnsiDecoder {
     style: Style,
     /// Current hyperlink URL from OSC 8, if any.
     link: Option<Arc<str>>,
+    /// Current hyperlink id from OSC 8 params (`id=...`), if any.
+    link_id: Option<Arc<str>>,
 }
 
 impl Default for AnsiDecoder {
@@ -28,6 +30,7 @@ impl Default for AnsiDecoder {
         Self {
             style: Style::new(),
             link: None,
+            link_id: None,
         }
     }
 }
@@ -145,9 +148,11 @@ impl AnsiDecoder {
 
     /// Get the current StyleMeta (for hyperlink), if any.
     fn meta_for_text(&self) -> Option<StyleMeta> {
-        self.link
-            .as_ref()
-            .map(|url| StyleMeta::with_link(url.clone()))
+        self.link.as_ref().map(|url| StyleMeta {
+            link: Some(url.clone()),
+            link_id: self.link_id.clone(),
+            meta: None,
+        })
     }
 
     /// Append text to a Text object with current style and meta.
@@ -173,12 +178,14 @@ impl AnsiDecoder {
         // Handle OSC 8 hyperlinks: "8;params;url" (url may be empty to clear).
         if let Some(after_8) = content.strip_prefix("8;") {
             // Split: "8;params;url"
-            if let Some((_params, url)) = after_8.split_once(';') {
+            if let Some((params, url)) = after_8.split_once(';') {
                 if url.is_empty() {
                     // Clear hyperlink
                     self.link = None;
+                    self.link_id = None;
                 } else {
                     self.link = Some(Arc::from(url));
+                    self.link_id = parse_osc8_link_id(params);
                 }
             }
         }
@@ -397,6 +404,20 @@ fn parse_osc(bytes: &[u8], start: usize) -> Option<(usize, usize, usize)> {
     None
 }
 
+fn parse_osc8_link_id(params: &str) -> Option<Arc<str>> {
+    // OSC 8 params are colon-separated key/value tokens, e.g. "id=abc:foo=bar".
+    params
+        .split(':')
+        .find_map(|token| token.strip_prefix("id="))
+        .and_then(|id| {
+            if id.is_empty() {
+                None
+            } else {
+                Some(Arc::<str>::from(id))
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,5 +531,22 @@ mod tests {
         assert!(span.meta.is_some());
         let meta = span.meta.as_ref().unwrap();
         assert_eq!(meta.link.as_deref(), Some("https://example.com"));
+        assert_eq!(meta.link_id, None);
+    }
+
+    #[test]
+    fn test_decode_osc8_hyperlink_with_id_and_sgr_reset_semantics() {
+        let mut decoder = AnsiDecoder::new();
+        let text =
+            decoder.decode_line("\x1b]8;id=src42;https://example.com\x07L\x1b[0mi\x1b]8;;\x07N");
+        assert_eq!(text.plain_text(), "LiN");
+        assert_eq!(text.spans().len(), 2);
+
+        // Link metadata persists across SGR reset and clears only on OSC 8 close.
+        for span in text.spans() {
+            let meta = span.meta.as_ref().expect("expected link metadata");
+            assert_eq!(meta.link.as_deref(), Some("https://example.com"));
+            assert_eq!(meta.link_id.as_deref(), Some("src42"));
+        }
     }
 }

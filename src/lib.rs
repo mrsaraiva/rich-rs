@@ -119,7 +119,7 @@ pub use align::{Align, VerticalAlignMethod};
 pub use bar::Bar;
 pub use columns::Columns;
 pub use constrain::Constrain;
-pub use group::{Group, Renderables};
+pub use group::{Group, Lines, Renderables};
 pub use padding::{Padding, PaddingDimensions};
 pub use panel::Panel;
 pub use rule::{AlignMethod, Rule};

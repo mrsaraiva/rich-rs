@@ -8,6 +8,7 @@
 
 use std::io;
 use std::io::Stdout;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -16,8 +17,17 @@ use std::time::Duration;
 use crossterm::terminal;
 
 use crate::Control;
+use crate::console::OverflowMethod;
+use crate::style::Style;
 use crate::text::Text;
-use crate::{Console, Renderable};
+use crate::{Console, JustifyMethod, Renderable};
+
+#[cfg(unix)]
+use std::fs::File;
+#[cfg(unix)]
+use std::io::{BufRead, BufReader};
+#[cfg(unix)]
+use std::os::fd::{FromRawFd, RawFd};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerticalOverflowMethod {
@@ -79,9 +89,33 @@ pub struct Live {
     stop_flag: Arc<AtomicBool>,
     started_flag: Arc<AtomicBool>,
     refresh_thread: Option<thread::JoinHandle<()>>,
+    #[cfg(unix)]
+    redirects: Vec<StreamRedirect>,
     /// Optional callback to get the current renderable on each refresh tick.
     /// When set, this is called instead of requiring manual `update()` calls.
     get_renderable: Option<Arc<dyn Fn() -> Box<dyn Renderable + Send + Sync> + Send + Sync>>,
+}
+
+#[cfg(unix)]
+struct StreamRedirect {
+    target_fd: RawFd,
+    original_fd: RawFd,
+    pipe_write_fd: RawFd,
+    worker: thread::JoinHandle<()>,
+}
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn dup(oldfd: i32) -> i32;
+    fn dup2(oldfd: i32, newfd: i32) -> i32;
+    fn pipe(fds: *mut i32) -> i32;
+    fn close(fd: i32) -> i32;
+}
+
+#[cfg(unix)]
+fn stream_redirect_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 impl Live {
@@ -130,6 +164,8 @@ impl Live {
             stop_flag: Arc::new(AtomicBool::new(false)),
             started_flag: Arc::new(AtomicBool::new(false)),
             refresh_thread: None,
+            #[cfg(unix)]
+            redirects: Vec::new(),
             get_renderable: None,
         }
     }
@@ -152,6 +188,14 @@ impl Live {
 
     pub(crate) fn started_flag(&self) -> Arc<AtomicBool> {
         self.started_flag.clone()
+    }
+
+    pub(crate) fn refresh_per_second(&self) -> f64 {
+        self.state
+            .lock()
+            .expect("live state mutex poisoned")
+            .options
+            .refresh_per_second
     }
 
     pub fn start(&mut self, refresh: bool) -> io::Result<()> {
@@ -180,23 +224,28 @@ impl Live {
             .take()
             .unwrap_or_else(|| Box::new(Text::plain("")));
 
-        let (id, is_root) = console.live_start(renderable, state.options.vertical_overflow);
+        let live_options = state.options.clone();
+        let (id, is_root) = console.live_start(renderable, live_options.vertical_overflow);
         state.live_id = Some(id);
         state.is_root = is_root;
         state.started = true;
         self.started_flag.store(true, Ordering::SeqCst);
 
         if is_root {
-            if state.options.screen {
+            if live_options.screen {
                 state.alt_screen = console.set_alt_screen(true)?;
             }
             let _ = console.show_cursor(false)?;
         }
 
         drop(console);
-        let auto_refresh = state.options.auto_refresh;
+        let auto_refresh = live_options.auto_refresh;
         let is_root = state.is_root;
         drop(state);
+
+        if is_root {
+            self.start_redirects(&live_options)?;
+        }
 
         if refresh {
             self.refresh()?;
@@ -214,6 +263,7 @@ impl Live {
         if let Some(handle) = self.refresh_thread.take() {
             let _ = handle.join();
         }
+        self.stop_redirects();
         self.started_flag.store(false, Ordering::SeqCst);
 
         let mut state = self.state.lock().expect("live state mutex poisoned");
@@ -346,6 +396,29 @@ impl Live {
         console.print(&Control::new(), None, None, None, false, "")
     }
 
+    pub fn print<R: Renderable + ?Sized>(
+        &self,
+        renderable: &R,
+        style: Option<Style>,
+        justify: Option<JustifyMethod>,
+        overflow: Option<OverflowMethod>,
+        no_wrap: bool,
+        end: &str,
+    ) -> io::Result<()> {
+        let mut console = self.console.lock().expect("console mutex poisoned");
+        console.print(renderable, style, justify, overflow, no_wrap, end)
+    }
+
+    pub fn log<R: Renderable + ?Sized>(
+        &self,
+        renderable: &R,
+        file: Option<&str>,
+        line: Option<u32>,
+    ) -> io::Result<()> {
+        let mut console = self.console.lock().expect("console mutex poisoned");
+        console.log(renderable, file, line)
+    }
+
     fn spawn_refresh_thread(&mut self) {
         if self.refresh_thread.is_some() {
             return;
@@ -389,8 +462,7 @@ impl Live {
                         };
                         console_guard.live_update(id, renderable);
                         sync_terminal_size(&mut console_guard);
-                        let _ =
-                            console_guard.print(&Control::new(), None, None, None, false, "");
+                        let _ = console_guard.print(&Control::new(), None, None, None, false, "");
                         continue;
                     }
                 }
@@ -405,6 +477,118 @@ impl Live {
         });
 
         self.refresh_thread = Some(handle);
+    }
+
+    #[cfg(not(unix))]
+    fn start_redirects(&mut self, _options: &LiveOptions) -> io::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn start_redirects(&mut self, options: &LiveOptions) -> io::Result<()> {
+        if options.redirect_stdout {
+            self.start_redirect_stream(1)?;
+        }
+        if options.redirect_stderr {
+            self.start_redirect_stream(2)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn stop_redirects(&mut self) {}
+
+    #[cfg(unix)]
+    fn stop_redirects(&mut self) {
+        for redirect in self.redirects.drain(..) {
+            let _guard = stream_redirect_lock()
+                .lock()
+                .expect("redirect lock mutex poisoned");
+            let _ = unsafe { dup2(redirect.original_fd, redirect.target_fd) };
+            let _ = unsafe { close(redirect.pipe_write_fd) };
+            let _ = unsafe { close(redirect.original_fd) };
+            drop(_guard);
+            let _ = redirect.worker.join();
+        }
+    }
+
+    #[cfg(unix)]
+    fn start_redirect_stream(&mut self, target_fd: RawFd) -> io::Result<()> {
+        let mut fds = [0_i32; 2];
+        if unsafe { pipe(fds.as_mut_ptr()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        let read_fd = fds[0];
+        let write_fd = fds[1];
+
+        let original_fd = unsafe { dup(target_fd) };
+        if original_fd == -1 {
+            let _ = unsafe { close(read_fd) };
+            let _ = unsafe { close(write_fd) };
+            return Err(io::Error::last_os_error());
+        }
+
+        if unsafe { dup2(write_fd, target_fd) } == -1 {
+            let _ = unsafe { close(read_fd) };
+            let _ = unsafe { close(write_fd) };
+            let _ = unsafe { close(original_fd) };
+            return Err(io::Error::last_os_error());
+        }
+
+        let console = self.console.clone();
+        let worker = thread::spawn(move || {
+            let file = unsafe { File::from_raw_fd(read_fd) };
+            let mut reader = BufReader::new(file);
+            let mut buf = Vec::<u8>::new();
+
+            loop {
+                buf.clear();
+                let bytes = match reader.read_until(b'\n', &mut buf) {
+                    Ok(n) => n,
+                    Err(_) => break,
+                };
+                if bytes == 0 {
+                    break;
+                }
+
+                let has_newline = buf.last().copied() == Some(b'\n');
+                let text_slice = if has_newline {
+                    &buf[..buf.len().saturating_sub(1)]
+                } else {
+                    &buf[..]
+                };
+                if text_slice.is_empty() && has_newline {
+                    continue;
+                }
+                let text = String::from_utf8_lossy(text_slice).to_string();
+                let end = if has_newline { "\n" } else { "" };
+
+                let _guard = stream_redirect_lock()
+                    .lock()
+                    .expect("redirect lock mutex poisoned");
+                if unsafe { dup2(original_fd, target_fd) } == -1 {
+                    break;
+                }
+                {
+                    let mut guard = match console.lock() {
+                        Ok(g) => g,
+                        Err(_) => break,
+                    };
+                    let _ = guard.print(&Text::plain(text), None, None, None, false, end);
+                }
+                if unsafe { dup2(write_fd, target_fd) } == -1 {
+                    break;
+                }
+            }
+        });
+
+        self.redirects.push(StreamRedirect {
+            target_fd,
+            original_fd,
+            pipe_write_fd: write_fd,
+            worker,
+        });
+        Ok(())
     }
 }
 
@@ -426,5 +610,51 @@ fn sync_terminal_size(console: &mut Console<Stdout>) {
         opts.size = (w, h);
         opts.max_width = w.max(1);
         opts.max_height = h;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_refresh_per_second_accessor() {
+        let live = Live::with_options(
+            Box::new(Text::plain("x")),
+            LiveOptions {
+                refresh_per_second: 7.5,
+                ..Default::default()
+            },
+        );
+        assert_eq!(live.refresh_per_second(), 7.5);
+    }
+
+    #[cfg(unix)]
+    fn redirect_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_redirect_stdout_lifecycle() {
+        let _guard = redirect_test_lock()
+            .lock()
+            .expect("redirect test lock poisoned");
+        let mut live = Live::with_options(
+            Box::new(Text::plain("x")),
+            LiveOptions {
+                redirect_stdout: true,
+                ..Default::default()
+            },
+        );
+        let options = LiveOptions {
+            redirect_stdout: true,
+            ..Default::default()
+        };
+        live.start_redirects(&options).unwrap();
+        assert_eq!(live.redirects.len(), 1);
+        live.stop_redirects();
+        assert!(live.redirects.is_empty());
     }
 }

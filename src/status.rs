@@ -86,7 +86,6 @@ impl Renderable for StatusRenderable {
     }
 }
 
-
 /// Internal state for Status that can be updated.
 struct StatusState {
     spinner_name: String,
@@ -320,6 +319,11 @@ impl Status {
         state.text.clone()
     }
 
+    /// Current refresh rate used by the underlying Live display.
+    pub fn refresh_per_second(&self) -> f64 {
+        self.live.refresh_per_second()
+    }
+
     fn rebuild_renderable(&mut self) {
         let state = self.state.lock().expect("state mutex poisoned");
         let spinner = Spinner::new(&state.spinner_name)
@@ -412,5 +416,11 @@ mod tests {
             10.0,
         );
         assert!(!status.is_started());
+    }
+
+    #[test]
+    fn test_status_refresh_per_second() {
+        let status = Status::with_options("Working...", "dots", None, 1.0, 8.0);
+        assert_eq!(status.refresh_per_second(), 8.0);
     }
 }

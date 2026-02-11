@@ -185,6 +185,20 @@ impl std::fmt::Debug for Tree {
 }
 
 impl Tree {
+    fn guides_for(options: &ConsoleOptions, guide_style: Style) -> &'static TreeGuides {
+        if options.ascii_only() {
+            &ASCII_GUIDES
+        } else if guide_style.bold == Some(true) {
+            &BOLD_TREE_GUIDES
+        } else if guide_style.underline == Some(true) {
+            // Use double guides for underline (Rust doesn't have underline2,
+            // so we use underline as the trigger, matching the spirit of Python Rich).
+            &DOUBLE_TREE_GUIDES
+        } else {
+            &TREE_GUIDES
+        }
+    }
+
     /// Create a new tree node with the given label.
     ///
     /// # Arguments
@@ -388,7 +402,6 @@ impl Tree {
     }
 }
 
-
 /// State for each node during stack-based traversal.
 struct TraversalState<'a> {
     /// Reference to the current tree node.
@@ -404,21 +417,6 @@ struct TraversalState<'a> {
 impl Renderable for Tree {
     fn render(&self, _console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
         let mut result = Segments::new();
-
-        // Select guides based on encoding and guide_style.
-        // Python Rich selects bold guides when guide_style has bold=True,
-        // and double guides when guide_style has underline2=True.
-        let guides = if options.ascii_only() {
-            &ASCII_GUIDES
-        } else if self.guide_style.bold == Some(true) {
-            &BOLD_TREE_GUIDES
-        } else if self.guide_style.underline == Some(true) {
-            // Use double guides for underline (Rust doesn't have underline2,
-            // so we use underline as the trigger, matching the spirit of Python Rich).
-            &DOUBLE_TREE_GUIDES
-        } else {
-            &TREE_GUIDES
-        };
 
         // When hide_root is true, render children as if they are root-level.
         // We push each child at depth 0 instead of the root.
@@ -461,6 +459,7 @@ impl Renderable for Tree {
 
             if *child_index == 0 {
                 // First time visiting this node - render its label
+                let node_guides = Self::guides_for(options, node.guide_style);
 
                 // Ensure levels vec is the right size
                 while levels.len() < *depth {
@@ -483,17 +482,17 @@ impl Renderable for Tree {
                     for i in 0..(*depth - 1) {
                         let ancestor_is_last = levels.get(i).copied().unwrap_or(false);
                         if ancestor_is_last {
-                            prefix.push_str(guides.space);
+                            prefix.push_str(node_guides.space);
                         } else {
-                            prefix.push_str(guides.vertical);
+                            prefix.push_str(node_guides.vertical);
                         }
                     }
 
                     // Add the connector for this node
                     if *is_last {
-                        prefix.push_str(guides.end);
+                        prefix.push_str(node_guides.end);
                     } else {
-                        prefix.push_str(guides.branch);
+                        prefix.push_str(node_guides.branch);
                     }
 
                     // Add styled guide prefix
@@ -505,7 +504,8 @@ impl Renderable for Tree {
                 // Calculate available width for label (subtract guide prefix width)
                 let guide_width = if *depth > 0 { *depth * 4 } else { 0 };
                 let label_width = options.max_width.saturating_sub(guide_width);
-                let label_options = options.update_width(label_width);
+                let mut label_options = options.update_width(label_width);
+                label_options.highlight = Some(node.highlight);
 
                 // Render the label - may produce multiple lines
                 let label_segments = node.label.render(&temp_console, &label_options);
@@ -521,9 +521,9 @@ impl Renderable for Tree {
                             for i in 0..*depth {
                                 let ancestor_is_last = levels.get(i).copied().unwrap_or(false);
                                 if ancestor_is_last {
-                                    prefix.push_str(guides.space);
+                                    prefix.push_str(node_guides.space);
                                 } else {
-                                    prefix.push_str(guides.vertical);
+                                    prefix.push_str(node_guides.vertical);
                                 }
                             }
                             result.push(Segment::styled(prefix, node.guide_style));
@@ -605,7 +605,24 @@ impl Renderable for Tree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Renderable;
     use crate::text::Text;
+    use std::io::Stdout;
+
+    struct HighlightAwareLabel;
+
+    impl Renderable for HighlightAwareLabel {
+        fn render(&self, _console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
+            if options.highlight == Some(true) {
+                Segments::one(Segment::styled(
+                    "highlighted",
+                    Style::parse("yellow").unwrap(),
+                ))
+            } else {
+                Segments::one(Segment::new("plain".to_string()))
+            }
+        }
+    }
 
     // ==================== TreeGuides tests ====================
 
@@ -759,6 +776,50 @@ mod tests {
         let child = tree.add_with_options(Box::new(Text::plain("Child")), TreeNodeOptions::new());
         // Should inherit parent style when options don't override
         assert_eq!(child.style().dim, Some(true));
+    }
+
+    #[test]
+    fn test_tree_add_with_options_highlight_affects_render() {
+        let mut tree = Tree::new(Box::new(Text::plain("Root")));
+        tree.add_with_options(
+            Box::new(HighlightAwareLabel),
+            TreeNodeOptions::new().with_highlight(true),
+        );
+
+        let console = Console::with_options(ConsoleOptions::default());
+        let options = console.options().clone();
+        let segments = tree.render(&console, &options);
+
+        assert!(
+            segments.iter().any(|seg| seg.text == "highlighted"),
+            "child label should render with highlight=true",
+        );
+        assert!(!segments.iter().any(|seg| seg.text == "plain"));
+        assert!(
+            segments
+                .iter()
+                .any(|seg| seg.text == "highlighted" && seg.style.and_then(|s| s.color).is_some()),
+            "highlighted label should include style from highlight-aware renderable",
+        );
+    }
+
+    #[test]
+    fn test_tree_add_with_options_guide_style_affects_guide_chars() {
+        let mut tree = Tree::new(Box::new(Text::plain("Root")));
+        tree.add_with_options(
+            Box::new(Text::plain("Bold child")),
+            TreeNodeOptions::new().with_guide_style(Style::new().with_bold(true)),
+        );
+
+        let console = Console::with_options(ConsoleOptions::default());
+        let options = console.options().clone();
+        let segments = tree.render(&console, &options);
+        let output: String = segments.iter().map(|s| s.text.to_string()).collect();
+
+        assert!(
+            output.contains("┗━━ "),
+            "child with bold guide_style should use bold guide connector",
+        );
     }
 
     // ==================== Guide variant tests ====================

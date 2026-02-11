@@ -13,10 +13,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::console::ConsoleOptions;
+use crate::console::OverflowMethod;
 use crate::filesize;
 use crate::live::{Live, LiveOptions};
 use crate::progress_bar::ProgressBar;
 use crate::spinner::Spinner;
+use crate::style::Style;
 use crate::table::{Column, Row, Table};
 use crate::text::Text;
 use crate::{Console, JustifyMethod, Renderable, Segments};
@@ -851,12 +853,30 @@ impl Renderable for SegmentsCell {
     }
 }
 
+enum DeferredConsoleCall {
+    Print {
+        segments: Segments,
+        style: Option<Style>,
+        justify: Option<JustifyMethod>,
+        overflow: Option<OverflowMethod>,
+        no_wrap: bool,
+        end: String,
+    },
+    Log {
+        segments: Segments,
+        file: Option<String>,
+        line: Option<u32>,
+    },
+}
+
 pub struct Progress {
     state: Arc<Mutex<ProgressState>>,
     columns: Arc<Vec<Box<dyn ProgressColumn>>>,
     live: Live,
     disable: bool,
     auto_refresh: bool,
+    started: Arc<AtomicBool>,
+    deferred_console_calls: Arc<Mutex<Vec<DeferredConsoleCall>>>,
 }
 
 impl Progress {
@@ -898,6 +918,8 @@ impl Progress {
             live,
             disable,
             auto_refresh,
+            started: Arc::new(AtomicBool::new(false)),
+            deferred_console_calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -922,13 +944,16 @@ impl Progress {
         if self.disable {
             return Ok(());
         }
-        self.live.start(true)
+        self.live.start(true)?;
+        self.started.store(true, Ordering::SeqCst);
+        self.flush_deferred_console_calls()
     }
 
     pub fn stop(&mut self) -> io::Result<()> {
         if self.disable {
             return Ok(());
         }
+        self.started.store(false, Ordering::SeqCst);
         self.live.stop()
     }
 
@@ -1251,6 +1276,109 @@ impl Progress {
 
         self.track(iter, task_id, config.update_period)
     }
+
+    fn render_to_deferred_segments<R: Renderable + ?Sized>(renderable: &R) -> Segments {
+        let options = ConsoleOptions::default();
+        let temp_console = Console::<Stdout>::with_options(options.clone());
+        renderable.render(&temp_console, &options)
+    }
+
+    fn flush_deferred_console_calls(&self) -> io::Result<()> {
+        let calls = {
+            let mut deferred = self
+                .deferred_console_calls
+                .lock()
+                .expect("deferred console calls mutex poisoned");
+            deferred.drain(..).collect::<Vec<_>>()
+        };
+
+        for call in calls {
+            match call {
+                DeferredConsoleCall::Print {
+                    segments,
+                    style,
+                    justify,
+                    overflow,
+                    no_wrap,
+                    end,
+                } => {
+                    let renderable = SegmentsCell::new(segments);
+                    self.live
+                        .print(&renderable, style, justify, overflow, no_wrap, &end)?;
+                }
+                DeferredConsoleCall::Log {
+                    segments,
+                    file,
+                    line,
+                } => {
+                    let renderable = SegmentsCell::new(segments);
+                    self.live.log(&renderable, file.as_deref(), line)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn print<R: Renderable + ?Sized>(
+        &self,
+        renderable: &R,
+        style: Option<Style>,
+        justify: Option<JustifyMethod>,
+        overflow: Option<OverflowMethod>,
+        no_wrap: bool,
+        end: &str,
+    ) -> io::Result<()> {
+        if self.disable {
+            return Ok(());
+        }
+
+        if self.started.load(Ordering::SeqCst) {
+            return self
+                .live
+                .print(renderable, style, justify, overflow, no_wrap, end);
+        }
+
+        let mut deferred = self
+            .deferred_console_calls
+            .lock()
+            .expect("deferred console calls mutex poisoned");
+        deferred.push(DeferredConsoleCall::Print {
+            segments: Self::render_to_deferred_segments(renderable),
+            style,
+            justify,
+            overflow,
+            no_wrap,
+            end: end.to_string(),
+        });
+        Ok(())
+    }
+
+    pub fn log<R: Renderable + ?Sized>(
+        &self,
+        renderable: &R,
+        file: Option<&str>,
+        line: Option<u32>,
+    ) -> io::Result<()> {
+        if self.disable {
+            return Ok(());
+        }
+
+        if self.started.load(Ordering::SeqCst) {
+            return self.live.log(renderable, file, line);
+        }
+
+        let mut deferred = self
+            .deferred_console_calls
+            .lock()
+            .expect("deferred console calls mutex poisoned");
+        deferred.push(DeferredConsoleCall::Log {
+            segments: Self::render_to_deferred_segments(renderable),
+            file: file.map(ToString::to_string),
+            line,
+        });
+        Ok(())
+    }
 }
 
 impl Progress {
@@ -1273,10 +1401,7 @@ impl Progress {
     /// Whether all tasks are complete.
     pub fn finished(&self) -> bool {
         let state = self.state.lock().expect("progress state mutex poisoned");
-        state
-            .tasks
-            .values()
-            .all(|t| t.finished())
+        state.tasks.values().all(|t| t.finished())
     }
 }
 
@@ -2406,5 +2531,79 @@ mod tests {
             let task = state.tasks.get(&task_id).unwrap();
             assert_eq!(task.completed, data.len() as f64);
         }
+    }
+
+    #[test]
+    fn test_progress_print_and_log_are_deferred_until_start() {
+        let mut console = Console::new();
+        console.set_quiet(true);
+
+        let live_options = LiveOptions {
+            auto_refresh: false,
+            ..Default::default()
+        };
+        let mut progress = Progress::with_console(
+            vec![Box::new(TextColumn::new("{task.description}"))],
+            console,
+            live_options,
+            false,
+            false,
+        );
+
+        progress
+            .print(&Text::plain("queued print"), None, None, None, false, "\n")
+            .unwrap();
+        progress
+            .log(&Text::plain("queued log"), Some("queued.rs"), Some(12))
+            .unwrap();
+
+        {
+            let deferred = progress
+                .deferred_console_calls
+                .lock()
+                .expect("deferred console calls mutex poisoned");
+            assert_eq!(deferred.len(), 2);
+        }
+
+        progress.start().unwrap();
+
+        let deferred = progress
+            .deferred_console_calls
+            .lock()
+            .expect("deferred console calls mutex poisoned");
+        assert!(deferred.is_empty());
+    }
+
+    #[test]
+    fn test_progress_print_and_log_do_not_queue_after_start() {
+        let mut console = Console::new();
+        console.set_quiet(true);
+
+        let live_options = LiveOptions {
+            auto_refresh: false,
+            ..Default::default()
+        };
+        let mut progress = Progress::with_console(
+            vec![Box::new(TextColumn::new("{task.description}"))],
+            console,
+            live_options,
+            false,
+            false,
+        );
+
+        progress.start().unwrap();
+
+        progress
+            .print(&Text::plain("live print"), None, None, None, false, "\n")
+            .unwrap();
+        progress
+            .log(&Text::plain("live log"), Some("live.rs"), Some(34))
+            .unwrap();
+
+        let deferred = progress
+            .deferred_console_calls
+            .lock()
+            .expect("deferred console calls mutex poisoned");
+        assert!(deferred.is_empty());
     }
 }

@@ -4,12 +4,15 @@
 //! It stores plain text with a list of spans that define styled regions.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use regex::Regex;
 
 use crate::Renderable;
 use crate::cells::cell_len;
 use crate::console::{Console, ConsoleOptions, JustifyMethod};
+use crate::control::strip_control_codes;
 use crate::error::Result;
 use crate::markup;
 use crate::measure::Measurement;
@@ -520,6 +523,52 @@ impl Text {
         // Insert at the beginning for lower priority
         self.spans
             .insert(0, Span::new(start, end.min(self.len()), style));
+    }
+
+    /// Apply metadata to the text (or a range), using a metadata-only span.
+    ///
+    /// Negative indices count from the end of the text (-1 is the last character).
+    /// If `end` is `None`, metadata is applied to the end of the text.
+    pub fn apply_meta(
+        &mut self,
+        meta: BTreeMap<String, crate::style::MetaValue>,
+        start: isize,
+        end: Option<isize>,
+    ) {
+        if meta.is_empty() {
+            return;
+        }
+
+        let length = self.len() as isize;
+
+        let start = if start < 0 {
+            (length + start).max(0) as usize
+        } else {
+            start as usize
+        };
+
+        let end = match end {
+            None => self.len(),
+            Some(e) if e < 0 => (length + e).max(0) as usize,
+            Some(e) => e as usize,
+        };
+
+        if start >= self.len() || end <= start {
+            return;
+        }
+
+        let meta = StyleMeta {
+            link: None,
+            link_id: None,
+            meta: Some(Arc::new(meta)),
+        };
+
+        self.spans.push(Span::new_with_meta(
+            start,
+            end.min(self.len()),
+            Style::new(),
+            Some(meta),
+        ));
     }
 
     /// Highlight text matching a regular expression.
@@ -1103,7 +1152,9 @@ impl Text {
     /// A new Text with indentation guides added.
     pub fn with_indent_guides(self, indent_size: usize, style: Option<crate::Style>) -> Text {
         let guide_style = style.unwrap_or_else(|| {
-            Style::new().with_dim(true).with_color(crate::color::SimpleColor::Standard(2))
+            Style::new()
+                .with_dim(true)
+                .with_color(crate::color::SimpleColor::Standard(2))
         });
         self.with_indent_guides_full(Some(indent_size), "│", guide_style)
     }
@@ -1615,9 +1666,15 @@ impl Text {
         // divide([start, end]) returns up to 3 segments: [0..start], [start..end], [end..len]
         // We want the middle one (index 1), or the first one if start==0.
         if start == 0 {
-            lines.into_iter().next().unwrap_or_else(|| self.blank_copy(""))
+            lines
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| self.blank_copy(""))
         } else if lines.len() > 1 {
-            lines.into_iter().nth(1).unwrap_or_else(|| self.blank_copy(""))
+            lines
+                .into_iter()
+                .nth(1)
+                .unwrap_or_else(|| self.blank_copy(""))
         } else {
             self.blank_copy("")
         }
@@ -1836,6 +1893,20 @@ impl Text {
         self.spans.extend(other.spans.iter().cloned());
     }
 
+    /// Append an iterable of `(content, style)` tokens.
+    ///
+    /// Control codes are stripped from each token before appending, matching append behavior.
+    pub fn append_tokens<I, S>(&mut self, tokens: I)
+    where
+        I: IntoIterator<Item = (S, Option<Style>)>,
+        S: AsRef<str>,
+    {
+        for (content, style) in tokens {
+            let sanitized = strip_control_codes(content.as_ref());
+            self.append(sanitized, style);
+        }
+    }
+
     /// Implement real indent guide rendering.
     ///
     /// Scans for leading whitespace and replaces indent positions with the guide
@@ -1872,8 +1943,11 @@ impl Text {
                 let indent_len = indent.len();
                 let full_indents = indent_len / indent_size;
                 let remaining_space = indent_len % indent_size;
-                let new_indent =
-                    format!("{}{}", indent_line.repeat(full_indents), " ".repeat(remaining_space));
+                let new_indent = format!(
+                    "{}{}",
+                    indent_line.repeat(full_indents),
+                    " ".repeat(remaining_space)
+                );
 
                 let mut result_line = line.clone();
                 // Replace the leading whitespace with guide characters
@@ -3184,6 +3258,78 @@ mod tests {
 
         text.copy_styles(&other);
         assert_eq!(text.spans().len(), 1);
+    }
+
+    // ==================== apply_meta tests ====================
+
+    #[test]
+    fn test_apply_meta_adds_metadata_span() {
+        let mut text = Text::plain("Hello World");
+        let mut meta = BTreeMap::new();
+        meta.insert("foo".to_string(), crate::style::MetaValue::str("bar"));
+
+        text.apply_meta(meta, 0, Some(5));
+
+        assert_eq!(text.spans().len(), 1);
+        let span = &text.spans()[0];
+        assert_eq!(span.start, 0);
+        assert_eq!(span.end, 5);
+        assert!(span.style.is_null());
+        let span_meta = span.meta.as_ref().and_then(|m| m.meta.as_ref());
+        assert!(span_meta.is_some());
+        assert_eq!(
+            span_meta.and_then(|m| m.get("foo")),
+            Some(&crate::style::MetaValue::str("bar"))
+        );
+    }
+
+    #[test]
+    fn test_apply_meta_supports_negative_offsets() {
+        let mut text = Text::plain("abcdef");
+        let mut meta = BTreeMap::new();
+        meta.insert(
+            "@click".to_string(),
+            crate::style::MetaValue::str("handler"),
+        );
+
+        text.apply_meta(meta, -3, None);
+
+        assert_eq!(text.spans().len(), 1);
+        assert_eq!(text.spans()[0].start, 3);
+        assert_eq!(text.spans()[0].end, 6);
+    }
+
+    // ==================== append_tokens tests ====================
+
+    #[test]
+    fn test_append_tokens_appends_content_and_styles() {
+        let mut text = Text::plain("A");
+        let bold = Style::new().with_bold(true);
+        let italic = Style::new().with_italic(true);
+
+        text.append_tokens(vec![("B", Some(bold)), ("C", None), ("D", Some(italic))]);
+
+        assert_eq!(text.plain_text(), "ABCD");
+        assert_eq!(text.spans().len(), 2);
+        assert_eq!(text.spans()[0].start, 1);
+        assert_eq!(text.spans()[0].end, 2);
+        assert_eq!(text.spans()[0].style.bold, Some(true));
+        assert_eq!(text.spans()[1].start, 3);
+        assert_eq!(text.spans()[1].end, 4);
+        assert_eq!(text.spans()[1].style.italic, Some(true));
+    }
+
+    #[test]
+    fn test_append_tokens_strips_control_codes() {
+        let mut text = Text::new();
+        let bold = Style::new().with_bold(true);
+
+        text.append_tokens(vec![("a\x07b", Some(bold))]);
+
+        assert_eq!(text.plain_text(), "ab");
+        assert_eq!(text.spans().len(), 1);
+        assert_eq!(text.spans()[0].start, 0);
+        assert_eq!(text.spans()[0].end, 2);
     }
 
     // ==================== Add trait tests ====================

@@ -22,8 +22,8 @@ use crate::color::{ColorSystem, ColorTriplet, SimpleColor};
 use crate::emoji::Emoji;
 use crate::export_format::{CONSOLE_HTML_FORMAT, CONSOLE_SVG_FORMAT};
 use crate::highlighter::Highlighter;
-use crate::segment::{ControlType, Segment, Segments};
 use crate::screen_buffer::ScreenBuffer;
+use crate::segment::{ControlType, Segment, Segments};
 use crate::style::Style;
 use crate::table::{Column, Row, Table};
 use crate::terminal_theme::{DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, TerminalTheme};
@@ -932,6 +932,16 @@ impl<W: Write> Console<W> {
         self.tab_size
     }
 
+    /// Get the configured output encoding.
+    pub fn encoding(&self) -> &str {
+        &self.options.encoding
+    }
+
+    /// Set the output encoding.
+    pub fn set_encoding(&mut self, encoding: impl Into<String>) {
+        self.options.encoding = encoding.into();
+    }
+
     /// Set the tab size.
     pub fn set_tab_size(&mut self, size: usize) {
         self.tab_size = size;
@@ -1063,10 +1073,18 @@ impl<W: Write> Console<W> {
         } else {
             segments
         };
+        let segments = self.apply_render_hooks(segments);
 
         // Split and crop lines
         let width = render_options.max_width;
         Segment::split_and_crop_lines(segments, width, style, pad, new_lines)
+    }
+
+    fn apply_render_hooks(&self, mut segments: Segments) -> Segments {
+        for hook in &self.render_hooks {
+            segments = hook(&segments);
+        }
+        segments
     }
 
     /// Render a string to Text with optional markup/emoji/highlight.
@@ -1422,9 +1440,7 @@ impl<W: Write> Console<W> {
                 if debug_segments_match_text(&segment.text) {
                     debug_segments_log(&format!(
                         "[segment][streaming] text={:?} style={:?} color_system={:?}",
-                        segment.text,
-                        segment.style,
-                        self.color_system
+                        segment.text, segment.style, self.color_system
                     ));
                 }
                 let target = StyleState::from_style(segment.style);
@@ -1445,8 +1461,7 @@ impl<W: Write> Console<W> {
                 if debug_segments_match_text(&segment.text) {
                     debug_segments_log(&format!(
                         "[segment][streaming] text={:?} style={:?} color_system=None",
-                        segment.text,
-                        segment.style
+                        segment.text, segment.style
                     ));
                 }
                 write!(self.writer, "{}", segment.text)?;
@@ -1550,9 +1565,7 @@ impl<W: Write> Console<W> {
                 if debug_segments_match_text(&segment.text) {
                     debug_segments_log(&format!(
                         "[segment][segment] text={:?} style={:?} color_system={:?}",
-                        segment.text,
-                        style,
-                        self.color_system
+                        segment.text, style, self.color_system
                     ));
                 }
                 if let Some(color_system) = self.color_system {
@@ -1575,8 +1588,7 @@ impl<W: Write> Console<W> {
                 if debug_segments_match_text(&segment.text) {
                     debug_segments_log(&format!(
                         "[segment][segment] text={:?} style=None color_system={:?}",
-                        segment.text,
-                        self.color_system
+                        segment.text, self.color_system
                     ));
                 }
                 write!(self.writer, "{}", segment.text)?;
@@ -1642,6 +1654,7 @@ impl<W: Write> Console<W> {
         } else {
             segments
         };
+        segments = self.apply_render_hooks(segments);
 
         let live_active = self.is_terminal() && !self.is_dumb_terminal() && self.has_live();
         let mut end_to_write = end;
@@ -1653,7 +1666,7 @@ impl<W: Write> Console<W> {
             }
             end_to_write = "";
 
-            let (live_segments, full_redraw) = self.render_live_segments(&temp_console, &options);
+            let (live_segments, full_redraw) = self.render_live_segments(&options);
             let mut wrapped = Segments::new();
             let cursor_controls = if full_redraw {
                 self.live_position_cursor()
@@ -2118,11 +2131,7 @@ impl<W: Write> Console<W> {
         Segments::from_iter(controls)
     }
 
-    fn render_live_segments(
-        &mut self,
-        temp_console: &Console<Stdout>,
-        options: &ConsoleOptions,
-    ) -> (Segments, bool) {
+    fn render_live_segments(&mut self, options: &ConsoleOptions) -> (Segments, bool) {
         let root = match self.live_root() {
             Some(root) => root,
             None => return (Segments::new(), false),
@@ -2131,13 +2140,8 @@ impl<W: Write> Console<W> {
         let mut lines: Vec<Vec<Segment>> = Vec::new();
         for id in self.live.stack.iter() {
             if let Some(entry) = self.live.entries.get(id) {
-                let mut rendered = temp_console.render_lines(
-                    entry.renderable.as_ref(),
-                    Some(options),
-                    None,
-                    false,
-                    false,
-                );
+                let mut rendered =
+                    self.render_lines(entry.renderable.as_ref(), Some(options), None, false, false);
                 lines.append(&mut rendered);
             }
         }
@@ -2154,7 +2158,7 @@ impl<W: Write> Console<W> {
                     let style = options.get_style("live.ellipsis").unwrap_or_default();
                     let ellipsis = Text::styled("...", style).center(options.max_width);
                     let ellipsis_lines =
-                        temp_console.render_lines(&ellipsis, Some(options), None, false, false);
+                        self.render_lines(&ellipsis, Some(options), None, false, false);
                     if let Some(first) = ellipsis_lines.into_iter().next() {
                         lines.push(first);
                     }
@@ -2169,12 +2173,9 @@ impl<W: Write> Console<W> {
         let height = shape.1.max(1);
         let current_buffer = ScreenBuffer::from_lines(&lines, width, height, None);
 
-        let use_diff = self
-            .live
-            .buffer
-            .as_ref()
-            .is_some_and(|previous| previous.width == current_buffer.width
-                && previous.height == current_buffer.height);
+        let use_diff = self.live.buffer.as_ref().is_some_and(|previous| {
+            previous.width == current_buffer.width && previous.height == current_buffer.height
+        });
 
         if use_diff {
             let previous = self.live.buffer.as_ref().expect("checked above");
@@ -2351,7 +2352,12 @@ impl<W: Write> Console<W> {
     ///
     /// Unlike `print()`, this won't pretty print, wrap text, or apply markup,
     /// but will optionally apply a basic style and highlighting.
-    pub fn out(&mut self, text: &str, style: Option<Style>, _highlight: Option<bool>) -> io::Result<()> {
+    pub fn out(
+        &mut self,
+        text: &str,
+        style: Option<Style>,
+        _highlight: Option<bool>,
+    ) -> io::Result<()> {
         if self.quiet {
             return Ok(());
         }
@@ -2407,10 +2413,7 @@ impl<W: Write> Console<W> {
     }
 
     /// Push a render hook that intercepts/transforms rendered segments before output.
-    pub fn push_render_hook(
-        &mut self,
-        hook: Box<dyn Fn(&Segments) -> Segments + Send + Sync>,
-    ) {
+    pub fn push_render_hook(&mut self, hook: Box<dyn Fn(&Segments) -> Segments + Send + Sync>) {
         self.render_hooks.push(hook);
     }
 
@@ -2429,19 +2432,15 @@ impl<W: Write> Console<W> {
         spinner: Option<&str>,
         spinner_style: Option<Style>,
         speed: Option<f64>,
-        _refresh_per_second: Option<f64>,
+        refresh_per_second: Option<f64>,
     ) -> crate::status::Status {
-        let mut s = crate::status::Status::new(status);
-        if let Some(name) = spinner {
-            s = s.spinner(name);
-        }
-        if let Some(style) = spinner_style {
-            s = s.spinner_style(style);
-        }
-        if let Some(spd) = speed {
-            s = s.speed(spd);
-        }
-        s
+        crate::status::Status::with_options(
+            status,
+            spinner.unwrap_or("dots"),
+            spinner_style,
+            speed.unwrap_or(1.0),
+            refresh_per_second.unwrap_or(12.5),
+        )
     }
 
     /// Pretty-print JSON.
@@ -2464,7 +2463,7 @@ impl<W: Write> Console<W> {
 impl Console<Stdout> {
     /// Render a Renderable to Segments.
     pub fn render<R: Renderable + ?Sized>(&self, renderable: &R) -> Segments {
-        renderable.render(self, &self.options)
+        self.apply_render_hooks(renderable.render(self, &self.options))
     }
 
     /// Render a Renderable with custom options.
@@ -2473,7 +2472,7 @@ impl Console<Stdout> {
         renderable: &R,
         options: &ConsoleOptions,
     ) -> Segments {
-        renderable.render(self, options)
+        self.apply_render_hooks(renderable.render(self, options))
     }
 
     /// Update rendered lines at an offset on the alternate screen.
@@ -3398,6 +3397,7 @@ fn make_tag(name: &str, content: Option<&str>, attribs: &[(&str, &str)]) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Control;
     use crate::StyleMeta;
 
     // ==================== JustifyMethod tests ====================
@@ -3442,6 +3442,7 @@ mod tests {
         assert_eq!(options.max_width, 80);
         assert_eq!(options.max_height, 24);
         assert!(options.is_terminal);
+        assert_eq!(options.encoding, "utf-8");
     }
 
     #[test]
@@ -3537,6 +3538,71 @@ mod tests {
         console.print_text("Test").unwrap();
         let bytes = console.get_captured_bytes();
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_render_hook_runs_in_print_pipeline() {
+        let mut console = Console::capture();
+        console.push_render_hook(Box::new(|segments: &Segments| {
+            Segments::from_iter(segments.iter().map(|seg| {
+                if seg.control.is_some() {
+                    seg.clone()
+                } else {
+                    Segment::new(seg.text.to_string().to_uppercase())
+                }
+            }))
+        }));
+
+        console
+            .print(&Text::plain("hooked"), None, None, None, false, "\n")
+            .unwrap();
+        let output = console.get_captured();
+        assert!(output.contains("HOOKED"));
+    }
+
+    #[test]
+    fn test_render_hook_runs_for_live_renderables() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            return;
+        }
+        console.push_render_hook(Box::new(|segments: &Segments| {
+            let mut out = Segments::new();
+            for seg in segments.iter() {
+                out.push(seg.clone());
+            }
+            out.push(Segment::new("!"));
+            out
+        }));
+
+        let (_id, _is_root) = console.live_start(
+            Box::new(Text::plain("LIVE")),
+            crate::live::VerticalOverflowMethod::Ellipsis,
+        );
+        console
+            .print(&Control::new(), None, None, None, false, "")
+            .unwrap();
+
+        let output = console.get_captured();
+        assert!(
+            output.contains("LIVE!"),
+            "expected hooked live output in captured text, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_console_status_honors_refresh_per_second() {
+        let console = Console::capture();
+        let status = console.status("Working...", None, None, None, Some(9.0));
+        assert_eq!(status.refresh_per_second(), 9.0);
     }
 
     #[test]
@@ -3672,6 +3738,66 @@ mod tests {
     }
 
     #[test]
+    fn test_print_text_from_ansi_emits_osc8_lifecycle_from_style_meta() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            return;
+        }
+
+        let text = Text::from_ansi("\x1b]8;id=src42;https://example.com\x07Link\x1b]8;;\x07 done");
+        console.print(&text, None, None, None, false, "").unwrap();
+        let out = console.get_captured();
+
+        let open = "\x1b]8;id=src42;https://example.com\x1b\\";
+        let close = "\x1b]8;;\x1b\\";
+        assert!(out.contains(open));
+        assert!(out.contains(close));
+
+        let open_pos = out.find(open).unwrap();
+        let link_text_pos = out.find("Link").unwrap();
+        let close_pos = out.find(close).unwrap();
+        let plain_pos = out.rfind(" done").unwrap();
+        assert!(open_pos < link_text_pos);
+        assert!(link_text_pos < close_pos);
+        assert!(close_pos < plain_pos);
+    }
+
+    #[test]
+    fn test_print_segments_closes_hyperlink_before_tail_reset() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            return;
+        }
+
+        let mut segments = Segments::new();
+        segments.push(Segment::styled_with_meta(
+            "X",
+            Style::new().with_bold(true),
+            StyleMeta::with_link("https://example.com"),
+        ));
+
+        console.print_segments(&segments).unwrap();
+        let out = console.get_captured();
+        let close_pos = out.find("\x1b]8;;\x1b\\").unwrap();
+        let reset_pos = out.rfind("\x1b[0m").unwrap();
+        assert!(close_pos < reset_pos);
+    }
+
+    #[test]
     fn test_parse_windows_render_mode_defaults_to_streaming() {
         assert_eq!(
             parse_windows_render_mode(None),
@@ -3762,6 +3888,16 @@ mod tests {
         assert_eq!(console.tab_size(), 8);
         console.set_tab_size(4);
         assert_eq!(console.tab_size(), 4);
+    }
+
+    #[test]
+    fn test_console_encoding() {
+        let mut console = Console::capture();
+        assert_eq!(console.encoding(), "utf-8");
+
+        console.set_encoding("latin-1");
+        assert_eq!(console.encoding(), "latin-1");
+        assert_eq!(console.options().encoding, "latin-1");
     }
 
     // ==================== Console render tests ====================
@@ -3905,6 +4041,11 @@ mod tests {
         assert_eq!(console.tab_size(), 4);
         assert_eq!(console.options().tab_size, 4);
 
+        // Test set_encoding
+        console.set_encoding("cp1252");
+        assert_eq!(console.encoding(), "cp1252");
+        assert_eq!(console.options().encoding, "cp1252");
+
         // Test set_color_system
         console.set_color_system(Some(ColorSystem::TrueColor));
         assert_eq!(console.color_system(), Some(ColorSystem::TrueColor));
@@ -3932,6 +4073,7 @@ mod tests {
         options.markup_enabled = false;
         options.emoji_enabled = false;
         options.tab_size = 4;
+        options.encoding = "ascii".to_string();
         options.color_system = Some(ColorSystem::Standard);
 
         // Create console from options
@@ -3941,6 +4083,7 @@ mod tests {
         assert!(!console.is_markup_enabled());
         assert!(!console.is_emoji_enabled());
         assert_eq!(console.tab_size(), 4);
+        assert_eq!(console.encoding(), "ascii");
         assert_eq!(console.color_system(), Some(ColorSystem::Standard));
     }
 

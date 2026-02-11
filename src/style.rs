@@ -588,6 +588,123 @@ impl Style {
         result
     }
 
+    /// Create a style with only foreground/background colors.
+    ///
+    /// This is equivalent to Python Rich's `Style.from_color`.
+    pub fn from_color(color: Option<Color>, bgcolor: Option<Color>) -> Self {
+        Self {
+            color,
+            bgcolor,
+            ..Default::default()
+        }
+    }
+
+    /// Create blank style metadata with optional event handlers.
+    ///
+    /// In Python Rich, `Style.on(...)` returns a Style with metadata attached.
+    /// In this crate, metadata is represented separately as `StyleMeta`.
+    pub fn on<I, K>(meta: Option<BTreeMap<String, MetaValue>>, handlers: I) -> StyleMeta
+    where
+        I: IntoIterator<Item = (K, MetaValue)>,
+        K: Into<String>,
+    {
+        let mut merged = meta.unwrap_or_default();
+        for (key, value) in handlers {
+            merged.insert(format!("@{}", key.into()), value);
+        }
+
+        StyleMeta {
+            meta: if merged.is_empty() {
+                None
+            } else {
+                Some(Arc::new(merged))
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Normalize a style definition to a canonical representation.
+    ///
+    /// This is equivalent to Python Rich's `Style.normalize`.
+    /// Returns lowercased/trimmed input for syntactically invalid definitions.
+    pub fn normalize(style: &str) -> String {
+        let normalized = style.trim().to_lowercase();
+        if normalized.is_empty() {
+            return "none".to_string();
+        }
+
+        fn is_attr(word: &str) -> bool {
+            matches!(
+                word,
+                "bold"
+                    | "b"
+                    | "dim"
+                    | "d"
+                    | "italic"
+                    | "i"
+                    | "underline"
+                    | "u"
+                    | "blink"
+                    | "blink2"
+                    | "reverse"
+                    | "r"
+                    | "conceal"
+                    | "c"
+                    | "strike"
+                    | "s"
+                    | "underline2"
+                    | "uu"
+                    | "frame"
+                    | "encircle"
+                    | "overline"
+                    | "o"
+            )
+        }
+
+        let mut words = normalized.split_whitespace().peekable();
+        while let Some(word) = words.next() {
+            match word {
+                "on" => match words.next() {
+                    Some(color) if Color::parse(color).is_some() => {}
+                    _ => return normalized,
+                },
+                "not" => match words.next() {
+                    Some(attr) if is_attr(attr) => {}
+                    _ => return normalized,
+                },
+                _ => {
+                    if is_attr(word)
+                        || Color::parse(word).is_some()
+                        || crate::theme::get_default_style(word).is_some()
+                    {
+                        continue;
+                    }
+                    return normalized;
+                }
+            }
+        }
+
+        let parsed = Self::parse(&normalized).unwrap_or_default();
+        let canonical = parsed.to_markup_string();
+        if canonical.is_empty() {
+            "none".to_string()
+        } else {
+            canonical
+        }
+    }
+
+    /// Return the first non-`None` style from a sequence.
+    ///
+    /// Panics if all styles are `None`, matching Python Rich's ValueError behavior.
+    pub fn pick_first(values: &[Option<Style>]) -> Style {
+        values
+            .iter()
+            .flatten()
+            .copied()
+            .next()
+            .expect("expected at least one non-None style")
+    }
+
     /// Apply the style to text and return the ANSI string.
     ///
     /// This is equivalent to Python Rich's `Style.test()`.
@@ -682,7 +799,10 @@ impl Style {
 
         // Background color
         if let Some(ref bgcolor) = self.bgcolor {
-            owned_parts.push(format!("on {}", simple_color_name(bgcolor, &ANSI_COLOR_NAMES)));
+            owned_parts.push(format!(
+                "on {}",
+                simple_color_name(bgcolor, &ANSI_COLOR_NAMES)
+            ));
         }
 
         owned_parts.join(" ")
@@ -690,10 +810,7 @@ impl Style {
 }
 
 /// Convert a SimpleColor to its markup name.
-fn simple_color_name(
-    color: &Color,
-    color_names: &std::collections::HashMap<&str, u8>,
-) -> String {
+fn simple_color_name(color: &Color, color_names: &std::collections::HashMap<&str, u8>) -> String {
     match color {
         Color::Default => String::new(),
         Color::Standard(n) => {
@@ -1770,6 +1887,74 @@ mod tests {
         assert_eq!(result.italic, Some(true));
         assert_eq!(result.underline, Some(true));
         assert_eq!(result.color, Some(Color::Standard(1)));
+    }
+
+    #[test]
+    fn test_from_color() {
+        let style = Style::from_color(Some(Color::Standard(1)), Some(Color::Standard(4)));
+        assert_eq!(style.color, Some(Color::Standard(1)));
+        assert_eq!(style.bgcolor, Some(Color::Standard(4)));
+        assert_eq!(style.bold, None);
+        assert_eq!(style.italic, None);
+    }
+
+    #[test]
+    fn test_on_builds_meta_with_handlers() {
+        let meta = Style::on(
+            None,
+            [
+                ("click", MetaValue::str("handler")),
+                ("focus", MetaValue::Bool(true)),
+            ],
+        );
+
+        assert!(meta.link.is_none());
+        assert!(meta.link_id.is_none());
+        let map = meta.meta.as_ref().expect("meta should be present");
+        assert_eq!(map.get("@click"), Some(&MetaValue::str("handler")));
+        assert_eq!(map.get("@focus"), Some(&MetaValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_on_merges_existing_meta() {
+        let mut base = BTreeMap::new();
+        base.insert("existing".to_string(), MetaValue::Int(1));
+
+        let meta = Style::on(Some(base), [("blur", MetaValue::Bool(false))]);
+        let map = meta.meta.as_ref().expect("meta should be present");
+        assert_eq!(map.get("existing"), Some(&MetaValue::Int(1)));
+        assert_eq!(map.get("@blur"), Some(&MetaValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_normalize_valid_style() {
+        assert_eq!(Style::normalize("  BOLD red ON blue "), "bold red on blue");
+        assert_eq!(Style::normalize(""), "none");
+        assert_eq!(Style::normalize(" none "), "none");
+    }
+
+    #[test]
+    fn test_normalize_invalid_style_returns_trimmed_lower() {
+        assert_eq!(Style::normalize("  no_such_token  "), "no_such_token");
+        assert_eq!(Style::normalize("foo bold"), "foo bold");
+        assert_eq!(
+            Style::normalize("bold on not_a_color"),
+            "bold on not_a_color"
+        );
+    }
+
+    #[test]
+    fn test_pick_first_returns_first_non_none() {
+        let first = Style::new().with_bold(true);
+        let second = Style::new().with_italic(true);
+        let picked = Style::pick_first(&[None, Some(first), Some(second)]);
+        assert_eq!(picked, first);
+    }
+
+    #[test]
+    #[should_panic(expected = "expected at least one non-None style")]
+    fn test_pick_first_panics_when_all_none() {
+        let _ = Style::pick_first(&[None, None]);
     }
 
     #[test]

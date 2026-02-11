@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use crate::segment::{Segment, Segments};
-use crate::{Console, ConsoleOptions, Measurement, Renderable, measure_renderables};
+use crate::{Console, ConsoleOptions, Measurement, Renderable, Text, measure_renderables};
 
 /// A renderable that renders multiple children sequentially.
 #[derive(Clone, Default)]
@@ -200,10 +200,111 @@ impl Renderable for Renderables {
     }
 }
 
+// ============================================================================
+// Lines — a text line container with list-like API
+// ============================================================================
+
+/// A container of [`Text`] lines that renders one line per row.
+///
+/// This type is equivalent to Python Rich's `rich.containers.Lines`.
+#[derive(Clone, Default)]
+pub struct Lines {
+    lines: Vec<Text>,
+}
+
+impl Lines {
+    /// Create `Lines` from an iterator of [`Text`].
+    pub fn new<I>(lines: I) -> Self
+    where
+        I: IntoIterator<Item = Text>,
+    {
+        Self {
+            lines: lines.into_iter().collect(),
+        }
+    }
+
+    /// Create an empty `Lines`.
+    pub fn empty() -> Self {
+        Self { lines: Vec::new() }
+    }
+
+    /// Append a line.
+    pub fn append(&mut self, line: Text) {
+        self.lines.push(line);
+    }
+
+    /// Extend with multiple lines.
+    pub fn extend<I>(&mut self, lines: I)
+    where
+        I: IntoIterator<Item = Text>,
+    {
+        self.lines.extend(lines);
+    }
+
+    /// Pop the last line.
+    pub fn pop(&mut self) -> Option<Text> {
+        self.lines.pop()
+    }
+
+    /// Number of lines.
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    /// True if there are no lines.
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    /// Borrow contained lines.
+    pub fn lines(&self) -> &[Text] {
+        &self.lines
+    }
+}
+
+impl std::fmt::Debug for Lines {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Lines")
+            .field("len", &self.lines.len())
+            .finish()
+    }
+}
+
+impl Renderable for Lines {
+    fn render(&self, console: &Console, options: &ConsoleOptions) -> Segments {
+        let mut out = Segments::new();
+        let mut first = true;
+
+        for line in &self.lines {
+            let segs = line.render(console, options);
+
+            if !first && !segments_end_with_newline(&out) {
+                out.push(Segment::line());
+            }
+            first = false;
+
+            out.extend(segs.into_iter());
+        }
+
+        out
+    }
+
+    fn measure(&self, console: &Console, options: &ConsoleOptions) -> Measurement {
+        if self.lines.is_empty() {
+            return Measurement::new(1, 1);
+        }
+        let refs: Vec<&dyn Renderable> = self
+            .lines
+            .iter()
+            .map(|line| line as &dyn Renderable)
+            .collect();
+        measure_renderables(console, options, &refs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Text;
 
     #[test]
     fn test_group_renders_children_with_newlines() {
@@ -243,7 +344,10 @@ mod tests {
         let pos_a = rendered.find('A').unwrap();
         let pos_b = rendered.find('B').unwrap();
         let between = &rendered[pos_a + 1..pos_b];
-        assert!(!between.contains('\n'), "Should not insert newline between children");
+        assert!(
+            !between.contains('\n'),
+            "Should not insert newline between children"
+        );
     }
 
     #[test]
@@ -274,5 +378,57 @@ mod tests {
         let m = group.measure(&console, &options);
         assert_eq!(m.minimum, 42);
         assert_eq!(m.maximum, 42);
+    }
+
+    #[test]
+    fn test_lines_render_inserts_newlines_between_lines() {
+        let lines = Lines::new([Text::plain("A"), Text::plain("B")]);
+        let console = Console::new();
+        let options = console.options();
+        let rendered: String = lines
+            .render(&console, options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
+        assert_eq!(rendered, "A\nB");
+    }
+
+    #[test]
+    fn test_lines_render_does_not_double_insert_newlines() {
+        let lines = Lines::new([Text::plain("A\n"), Text::plain("B")]);
+        let console = Console::new();
+        let options = console.options();
+        let rendered: String = lines
+            .render(&console, options)
+            .iter()
+            .map(|s| s.text.to_string())
+            .collect();
+        assert_eq!(rendered, "A\nB");
+    }
+
+    #[test]
+    fn test_lines_list_api() {
+        let mut lines = Lines::empty();
+        assert!(lines.is_empty());
+
+        lines.append(Text::plain("A"));
+        lines.extend([Text::plain("B"), Text::plain("C")]);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.lines()[0].plain_text(), "A");
+        assert_eq!(lines.lines()[2].plain_text(), "C");
+
+        let popped = lines.pop().unwrap();
+        assert_eq!(popped.plain_text(), "C");
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn test_lines_measure_uses_widest_line() {
+        let lines = Lines::new([Text::plain("cat"), Text::plain("hippo")]);
+        let console = Console::new();
+        let options = console.options();
+        let m = lines.measure(&console, options);
+        assert_eq!(m.minimum, 5);
+        assert_eq!(m.maximum, 5);
     }
 }
