@@ -11,6 +11,7 @@ use rich_rs::markdown::Markdown;
 use rich_rs::{
     Column, Columns, Console, ConsoleOptions, JustifyMethod, MONOKAI, Measurement, Panel, Pretty,
     Renderable, Row, Segment, Segments, SimpleColor, Style, Syntax, Table, Text, Tree,
+    TreeNodeOptions,
 };
 
 const IMG_DIR: &str = "imgs";
@@ -446,9 +447,12 @@ fn generate_tree() -> std::io::Result<()> {
     ));
 
     // Add src directory with children
-    let src = tree.add(Box::new(
-        Text::from_markup("[blue]:open_file_folder: src[/]", true).unwrap(),
-    ));
+    let src = tree.add_with_options(
+        Box::new(Text::from_markup("[blue]:open_file_folder: src[/]", true).unwrap()),
+        TreeNodeOptions::new()
+            .with_style(Style::parse("dim").unwrap_or_default())
+            .with_guide_style(Style::parse("dim").unwrap_or_default()),
+    );
     src.add(Box::new(
         Text::from_markup("[green]:page_facing_up: main.rs[/]", true).unwrap(),
     ));

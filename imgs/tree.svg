@@ -19,85 +19,88 @@
         font-weight: 700;
     }
 
-    .terminal-2154827691-matrix {
+    .terminal-1671949729-matrix {
         font-family: Fira Code, monospace;
         font-size: 20px;
         line-height: 24.4px;
         font-variant-east-asian: full-width;
     }
 
-    .terminal-2154827691-title {
+    .terminal-1671949729-title {
         font-size: 18px;
         font-weight: bold;
         font-family: arial;
     }
 
-    .terminal-2154827691-r5 { fill: #fd971f }
-.terminal-2154827691-r2 { fill: #d9d9d9 }
-.terminal-2154827691-r4 { fill: #98e024 }
-.terminal-2154827691-r3 { fill: #9d65ff }
-.terminal-2154827691-r1 { fill: #d9d9d9;font-weight: bold }
-.terminal-2154827691-r6 { fill: #58d1eb }
+    .terminal-1671949729-r2 { fill: #878787 }
+.terminal-1671949729-r6 { fill: #9d65ff }
+.terminal-1671949729-r7 { fill: #98e024 }
+.terminal-1671949729-r5 { fill: #d9d9d9 }
+.terminal-1671949729-r4 { fill: #608b1a }
+.terminal-1671949729-r3 { fill: #63419d }
+.terminal-1671949729-r8 { fill: #fd971f }
+.terminal-1671949729-r9 { fill: #58d1eb }
+.terminal-1671949729-r1 { fill: #d9d9d9;font-weight: bold }
     </style>
 
     <defs>
-    <clipPath id="terminal-2154827691-clip-terminal">
+    <clipPath id="terminal-1671949729-clip-terminal">
       <rect x="0" y="0" width="487" height="243" />
     </clipPath>
-    <clipPath id="terminal-2154827691-line-0">
+    <clipPath id="terminal-1671949729-line-0">
     <rect x="0" y="1.5" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-1">
+<clipPath id="terminal-1671949729-line-1">
     <rect x="0" y="25.9" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-2">
+<clipPath id="terminal-1671949729-line-2">
     <rect x="0" y="50.3" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-3">
+<clipPath id="terminal-1671949729-line-3">
     <rect x="0" y="74.7" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-4">
+<clipPath id="terminal-1671949729-line-4">
     <rect x="0" y="99.1" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-5">
+<clipPath id="terminal-1671949729-line-5">
     <rect x="0" y="123.5" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-6">
+<clipPath id="terminal-1671949729-line-6">
     <rect x="0" y="147.9" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-7">
+<clipPath id="terminal-1671949729-line-7">
     <rect x="0" y="172.3" width="488" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-2154827691-line-8">
+<clipPath id="terminal-1671949729-line-8">
     <rect x="0" y="196.7" width="488" height="24.65"/>
             </clipPath>
     </defs>
 
-    <rect fill="#0c0c0c" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="504" height="292" rx="8"/><text class="terminal-2154827691-title" fill="#d9d9d9" text-anchor="middle" x="252" y="27">Tree&#160;View</text>
+    <rect fill="#0c0c0c" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="504" height="292" rx="8"/><text class="terminal-1671949729-title" fill="#d9d9d9" text-anchor="middle" x="252" y="27">Tree&#160;View</text>
             <g transform="translate(26,22)">
             <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
             <circle cx="22" cy="0" r="7" fill="#febc2e"/>
             <circle cx="44" cy="0" r="7" fill="#28c840"/>
             </g>
         
-    <g transform="translate(9, 41)" clip-path="url(#terminal-2154827691-clip-terminal)">
+    <g transform="translate(9, 41)" clip-path="url(#terminal-1671949729-clip-terminal)">
     
-    <g class="terminal-2154827691-matrix">
-    <text class="terminal-2154827691-r1" x="0" y="20" textLength="122" clip-path="url(#terminal-2154827691-line-0)">📂&#160;Project</text>
-<text class="terminal-2154827691-r2" x="0" y="44.4" textLength="48.8" clip-path="url(#terminal-2154827691-line-1)">├──&#160;</text>
-<text class="terminal-2154827691-r3" x="48.8" y="44.4" textLength="73.2" clip-path="url(#terminal-2154827691-line-1)">📂&#160;src</text>
-<text class="terminal-2154827691-r2" x="0" y="68.8" textLength="97.6" clip-path="url(#terminal-2154827691-line-2)">│&#160;&#160;&#160;├──&#160;</text>
-<text class="terminal-2154827691-r4" x="97.6" y="68.8" textLength="122" clip-path="url(#terminal-2154827691-line-2)">📄&#160;main.rs</text>
-<text class="terminal-2154827691-r2" x="0" y="93.2" textLength="97.6" clip-path="url(#terminal-2154827691-line-3)">│&#160;&#160;&#160;└──&#160;</text>
-<text class="terminal-2154827691-r4" x="97.6" y="93.2" textLength="109.8" clip-path="url(#terminal-2154827691-line-3)">📄&#160;lib.rs</text>
-<text class="terminal-2154827691-r2" x="0" y="117.6" textLength="48.8" clip-path="url(#terminal-2154827691-line-4)">├──&#160;</text>
-<text class="terminal-2154827691-r3" x="48.8" y="117.6" textLength="97.6" clip-path="url(#terminal-2154827691-line-4)">📂&#160;tests</text>
-<text class="terminal-2154827691-r2" x="0" y="142" textLength="97.6" clip-path="url(#terminal-2154827691-line-5)">│&#160;&#160;&#160;└──&#160;</text>
-<text class="terminal-2154827691-r4" x="97.6" y="142" textLength="268.4" clip-path="url(#terminal-2154827691-line-5)">📄&#160;integration_test.rs</text>
-<text class="terminal-2154827691-r2" x="0" y="166.4" textLength="48.8" clip-path="url(#terminal-2154827691-line-6)">├──&#160;</text>
-<text class="terminal-2154827691-r5" x="48.8" y="166.4" textLength="158.6" clip-path="url(#terminal-2154827691-line-6)">📄&#160;Cargo.toml</text>
-<text class="terminal-2154827691-r2" x="0" y="190.8" textLength="48.8" clip-path="url(#terminal-2154827691-line-7)">└──&#160;</text>
-<text class="terminal-2154827691-r6" x="48.8" y="190.8" textLength="146.4" clip-path="url(#terminal-2154827691-line-7)">📄&#160;README.md</text>
+    <g class="terminal-1671949729-matrix">
+    <text class="terminal-1671949729-r1" x="0" y="20" textLength="122" clip-path="url(#terminal-1671949729-line-0)">📂&#160;Project</text>
+<text class="terminal-1671949729-r2" x="0" y="44.4" textLength="48.8" clip-path="url(#terminal-1671949729-line-1)">├──&#160;</text>
+<text class="terminal-1671949729-r3" x="48.8" y="44.4" textLength="73.2" clip-path="url(#terminal-1671949729-line-1)">📂&#160;src</text>
+<text class="terminal-1671949729-r2" x="0" y="68.8" textLength="97.6" clip-path="url(#terminal-1671949729-line-2)">│&#160;&#160;&#160;├──&#160;</text>
+<text class="terminal-1671949729-r4" x="97.6" y="68.8" textLength="122" clip-path="url(#terminal-1671949729-line-2)">📄&#160;main.rs</text>
+<text class="terminal-1671949729-r2" x="0" y="93.2" textLength="97.6" clip-path="url(#terminal-1671949729-line-3)">│&#160;&#160;&#160;└──&#160;</text>
+<text class="terminal-1671949729-r4" x="97.6" y="93.2" textLength="109.8" clip-path="url(#terminal-1671949729-line-3)">📄&#160;lib.rs</text>
+<text class="terminal-1671949729-r5" x="0" y="117.6" textLength="48.8" clip-path="url(#terminal-1671949729-line-4)">├──&#160;</text>
+<text class="terminal-1671949729-r6" x="48.8" y="117.6" textLength="97.6" clip-path="url(#terminal-1671949729-line-4)">📂&#160;tests</text>
+<text class="terminal-1671949729-r5" x="0" y="142" textLength="97.6" clip-path="url(#terminal-1671949729-line-5)">│&#160;&#160;&#160;└──&#160;</text>
+<text class="terminal-1671949729-r7" x="97.6" y="142" textLength="268.4" clip-path="url(#terminal-1671949729-line-5)">📄&#160;integration_test.rs</text>
+<text class="terminal-1671949729-r5" x="0" y="166.4" textLength="48.8" clip-path="url(#terminal-1671949729-line-6)">├──&#160;</text>
+<text class="terminal-1671949729-r8" x="48.8" y="166.4" textLength="158.6" clip-path="url(#terminal-1671949729-line-6)">📄&#160;Cargo.toml</text>
+<text class="terminal-1671949729-r5" x="0" y="190.8" textLength="48.8" clip-path="url(#terminal-1671949729-line-7)">└──&#160;</text>
+<text class="terminal-1671949729-r9" x="48.8" y="190.8" textLength="146.4" clip-path="url(#terminal-1671949729-line-7)">📄&#160;README.md</text>
     </g>
     </g>
 </svg>

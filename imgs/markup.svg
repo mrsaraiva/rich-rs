@@ -19,56 +19,56 @@
         font-weight: 700;
     }
 
-    .terminal-176653007-matrix {
+    .terminal-2478628836-matrix {
         font-family: Fira Code, monospace;
         font-size: 20px;
         line-height: 24.4px;
         font-variant-east-asian: full-width;
     }
 
-    .terminal-176653007-title {
+    .terminal-2478628836-title {
         font-size: 18px;
         font-weight: bold;
         font-family: arial;
     }
 
-    .terminal-176653007-r4 { fill: #fd971f }
-.terminal-176653007-r1 { fill: #f4005f;font-weight: bold }
-.terminal-176653007-r2 { fill: #d9d9d9 }
-.terminal-176653007-r3 { fill: #58d1eb;text-decoration: underline }
+    .terminal-2478628836-r3 { fill: #58d1eb;text-decoration: underline }
+.terminal-2478628836-r1 { fill: #f4005f;font-weight: bold }
+.terminal-2478628836-r4 { fill: #fd971f }
+.terminal-2478628836-r2 { fill: #d9d9d9 }
     </style>
 
     <defs>
-    <clipPath id="terminal-176653007-clip-terminal">
+    <clipPath id="terminal-2478628836-clip-terminal">
       <rect x="0" y="0" width="731" height="96.6" />
     </clipPath>
-    <clipPath id="terminal-176653007-line-0">
+    <clipPath id="terminal-2478628836-line-0">
     <rect x="0" y="1.5" width="732" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-176653007-line-1">
+<clipPath id="terminal-2478628836-line-1">
     <rect x="0" y="25.9" width="732" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-176653007-line-2">
+<clipPath id="terminal-2478628836-line-2">
     <rect x="0" y="50.3" width="732" height="24.65"/>
             </clipPath>
     </defs>
 
-    <rect fill="#0c0c0c" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="748" height="145.6" rx="8"/><text class="terminal-176653007-title" fill="#d9d9d9" text-anchor="middle" x="374" y="27">Markup&#160;Examples</text>
+    <rect fill="#0c0c0c" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="748" height="145.6" rx="8"/><text class="terminal-2478628836-title" fill="#d9d9d9" text-anchor="middle" x="374" y="27">Markup&#160;Examples</text>
             <g transform="translate(26,22)">
             <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
             <circle cx="22" cy="0" r="7" fill="#febc2e"/>
             <circle cx="44" cy="0" r="7" fill="#28c840"/>
             </g>
         
-    <g transform="translate(9, 41)" clip-path="url(#terminal-176653007-clip-terminal)">
+    <g transform="translate(9, 41)" clip-path="url(#terminal-2478628836-clip-terminal)">
     
-    <g class="terminal-176653007-matrix">
-    <text class="terminal-176653007-r1" x="0" y="20" textLength="73.2" clip-path="url(#terminal-176653007-line-0)">Error:</text>
-<text class="terminal-176653007-r2" x="73.2" y="20" textLength="256.2" clip-path="url(#terminal-176653007-line-0)">&#160;Something&#160;went&#160;wrong</text>
-<text class="terminal-176653007-r3" x="0" y="44.4" textLength="122" clip-path="url(#terminal-176653007-line-1)">Click&#160;here</text>
-<text class="terminal-176653007-r2" x="0" y="68.8" textLength="24.4" clip-path="url(#terminal-176653007-line-2)">⚠&#160;</text>
-<text class="terminal-176653007-r4" x="24.4" y="68.8" textLength="85.4" clip-path="url(#terminal-176653007-line-2)">Warning</text>
-<text class="terminal-176653007-r2" x="109.8" y="68.8" textLength="24.4" clip-path="url(#terminal-176653007-line-2)">&#160;⚠</text>
+    <g class="terminal-2478628836-matrix">
+    <text class="terminal-2478628836-r1" x="0" y="20" textLength="73.2" clip-path="url(#terminal-2478628836-line-0)">Error:</text>
+<text class="terminal-2478628836-r2" x="73.2" y="20" textLength="256.2" clip-path="url(#terminal-2478628836-line-0)">&#160;Something&#160;went&#160;wrong</text>
+<text class="terminal-2478628836-r3" x="0" y="44.4" textLength="122" clip-path="url(#terminal-2478628836-line-1)">Click&#160;here</text>
+<text class="terminal-2478628836-r2" x="0" y="68.8" textLength="24.4" clip-path="url(#terminal-2478628836-line-2)">⚠&#160;</text>
+<text class="terminal-2478628836-r4" x="24.4" y="68.8" textLength="85.4" clip-path="url(#terminal-2478628836-line-2)">Warning</text>
+<text class="terminal-2478628836-r2" x="109.8" y="68.8" textLength="24.4" clip-path="url(#terminal-2478628836-line-2)">&#160;⚠</text>
     </g>
     </g>
 </svg>

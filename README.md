@@ -102,25 +102,33 @@ Tables automatically resize columns to fit the terminal width, wrapping text as 
 rich-rs can render multiple flicker-free progress bars to track long-running tasks.
 
 ```rust
-use rich_rs::progress::{Progress, ProgressIteratorExt};
+use std::thread::sleep;
+use std::time::Duration;
+use rich_rs::{LiveOptions, Progress, TrackConfig};
 
-// Simple iterator progress
-for item in (0..100).progress() {
-    std::thread::sleep(std::time::Duration::from_millis(50));
+let mut progress = Progress::new_default(LiveOptions::default(), false, false, false);
+progress.start().unwrap();
+
+let config = TrackConfig {
+    total: None,
+    completed: 0.0,
+    task_id: None,
+    description: "Working...".to_string(),
+    update_period: Duration::from_millis(100),
+};
+
+for _ in progress.track_sequence(0..100, config) {
+    sleep(Duration::from_millis(25));
 }
+
+progress.stop().unwrap();
 ```
 
-For more control, create a `Progress` instance with custom columns:
+For lower-level control, use `add_task(...)`, `update(...)`, and custom columns via `Progress::new(...)`.
 
-```rust
-use rich_rs::progress::Progress;
+The progress API also supports `print(...)` and `log(...)` while the display is active.
 
-let progress = Progress::new();
-let task = progress.add_task("Downloading...", Some(100));
-// ... update task progress
-```
-
-Built-in columns include percentage, file size, transfer speed, time elapsed, and time remaining.
+For a full runnable example: `cargo run --example progress`.
 
 </details>
 
@@ -130,21 +138,32 @@ Built-in columns include percentage, file size, transfer speed, time elapsed, an
 rich-rs can update content in-place for real-time displays.
 
 ```rust
-use rich_rs::{Console, Live, Text};
+use rich_rs::{Live, Text};
 use std::time::Duration;
 
-let console = Console::new();
-let mut live = Live::new(console);
+let mut live = Live::new(Box::new(Text::plain("Count: 0")));
 
-live.start().unwrap();
+live.start(true).unwrap();
 for i in 0..10 {
-    live.update(Text::plain(&format!("Count: {}", i)));
+    live.update(Box::new(Text::plain(&format!("Count: {}", i))), true).unwrap();
     std::thread::sleep(Duration::from_millis(500));
 }
 live.stop().unwrap();
 ```
 
 Live display supports transient mode (clears on exit), alt-screen mode, and vertical overflow handling.
+
+</details>
+
+<details>
+<summary>Logging Adapters</summary>
+
+rich-rs provides logging adapters in a companion crate:
+
+- `rich-tracing::RichTracingLayer` for `tracing_subscriber`
+- `rich-tracing::RichLogger` for the `log` crate ecosystem
+
+See `crates/rich-tracing/README.md` and `crates/rich-tracing/examples/tracing_basic.rs` for usage.
 
 </details>
 
@@ -217,12 +236,17 @@ Supports CommonMark + GitHub Flavored Markdown including tables, task lists, and
 rich-rs can render hierarchical data with guide lines.
 
 ```rust
-use rich_rs::{Console, Tree, Text, Style, SimpleColor};
+use rich_rs::{Console, Style, Text, Tree, TreeNodeOptions};
 
 let mut console = Console::new();
 
 let mut tree = Tree::new(Box::new(Text::from_markup("[bold]:open_file_folder: Project[/]", true).unwrap()));
-let src = tree.add(Box::new(Text::from_markup("[blue]:open_file_folder: src[/]", true).unwrap()));
+let src = tree.add_with_options(
+    Box::new(Text::from_markup("[blue]:open_file_folder: src[/]", true).unwrap()),
+    TreeNodeOptions::new()
+        .with_style(Style::parse("dim").unwrap_or_default())
+        .with_guide_style(Style::parse("dim").unwrap_or_default()),
+);
 src.add(Box::new(Text::from_markup("[green]:page_facing_up: main.rs[/]", true).unwrap()));
 src.add(Box::new(Text::from_markup("[green]:page_facing_up: lib.rs[/]", true).unwrap()));
 tree.add(Box::new(Text::from_markup("[yellow]:page_facing_up: Cargo.toml[/]", true).unwrap()));
