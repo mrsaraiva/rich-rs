@@ -32,15 +32,15 @@
         font-family: arial;
     }
 
-    .terminal-1671949729-r2 { fill: #878787 }
-.terminal-1671949729-r6 { fill: #9d65ff }
-.terminal-1671949729-r7 { fill: #98e024 }
-.terminal-1671949729-r5 { fill: #d9d9d9 }
-.terminal-1671949729-r4 { fill: #608b1a }
-.terminal-1671949729-r3 { fill: #63419d }
+    .terminal-1671949729-r6 { fill: #9d65ff }
 .terminal-1671949729-r8 { fill: #fd971f }
-.terminal-1671949729-r9 { fill: #58d1eb }
+.terminal-1671949729-r7 { fill: #98e024 }
+.terminal-1671949729-r3 { fill: #63419d }
 .terminal-1671949729-r1 { fill: #d9d9d9;font-weight: bold }
+.terminal-1671949729-r2 { fill: #878787 }
+.terminal-1671949729-r9 { fill: #58d1eb }
+.terminal-1671949729-r4 { fill: #608b1a }
+.terminal-1671949729-r5 { fill: #d9d9d9 }
     </style>
 
     <defs>

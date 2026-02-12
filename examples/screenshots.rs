@@ -8,6 +8,7 @@ use std::io::Stdout;
 
 use rich_rs::r#box::{ROUNDED, SIMPLE};
 use rich_rs::markdown::Markdown;
+use rich_rs::traceback::{Frame, Stack, Trace, Traceback};
 use rich_rs::{
     Column, Columns, Console, ConsoleOptions, JustifyMethod, MONOKAI, Measurement, Panel, Pretty,
     Renderable, Row, Segment, Segments, SimpleColor, Style, Syntax, Table, Text, Tree,
@@ -31,6 +32,7 @@ fn main() -> std::io::Result<()> {
     generate_panel()?;
     generate_pretty()?;
     generate_columns()?;
+    generate_backtrace()?;
 
     println!("Generated all screenshots in {}/", IMG_DIR);
     Ok(())
@@ -539,4 +541,25 @@ fn generate_columns() -> std::io::Result<()> {
         .print(&columns, None, None, None, false, "\n")
         .unwrap();
     save_svg(&mut console, "columns.svg", "Columns Layout")
+}
+
+fn generate_backtrace() -> std::io::Result<()> {
+    let mut console = recording_console(88);
+
+    // Build a realistic Rust panic backtrace using real source files
+    // so the renderer can show syntax-highlighted code context.
+    let frame1 = Frame::new("src/color.rs", 934, "Color::parse");
+    let frame2 = Frame::new("src/style.rs", 210, "Style::parse");
+
+    let stack = Stack::new(
+        "PanicInfo",
+        "called `Result::unwrap()` on an `Err` value: ParseError(\"invalid color: 'bolf'\")",
+    )
+    .with_frames(vec![frame1, frame2]);
+
+    let trace = Trace::new(vec![stack]);
+    let tb = Traceback::builder(trace).extra_lines(3).build();
+
+    console.print(&tb, None, None, None, false, "\n").unwrap();
+    save_svg(&mut console, "backtrace.svg", "Backtrace")
 }

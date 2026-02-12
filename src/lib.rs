@@ -66,6 +66,7 @@ pub mod region;
 pub mod rule;
 pub mod scope;
 pub mod screen;
+pub mod recorder;
 pub mod screen_buffer;
 pub mod screen_context;
 pub mod spinner;
@@ -147,6 +148,7 @@ pub use progress::{
     TransferSpeedColumn, WrapFileBuilder,
 };
 pub use progress_bar::ProgressBar;
+pub use recorder::FrameRecorder;
 pub use region::Region;
 pub use screen::Screen;
 pub use screen_buffer::{Cell, ScreenBuffer};

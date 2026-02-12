@@ -35,11 +35,11 @@
     .terminal-3979487321-r3 { fill: #58d1eb;font-weight: bold }
 .terminal-3979487321-r4 { fill: #f4005f;font-weight: bold }
 .terminal-3979487321-r5 { fill: #98e024;font-weight: bold }
-.terminal-3979487321-r1 { fill: #d9d9d9 }
-.terminal-3979487321-r8 { fill: #98e024 }
-.terminal-3979487321-r7 { fill: #f4005f }
-.terminal-3979487321-r2 { fill: #d9d9d9;font-weight: bold }
 .terminal-3979487321-r6 { fill: #58d1eb }
+.terminal-3979487321-r7 { fill: #f4005f }
+.terminal-3979487321-r1 { fill: #d9d9d9 }
+.terminal-3979487321-r2 { fill: #d9d9d9;font-weight: bold }
+.terminal-3979487321-r8 { fill: #98e024 }
     </style>
 
     <defs>

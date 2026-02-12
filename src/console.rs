@@ -3171,7 +3171,7 @@ impl Console<Stdout> {
 // ============================================================================
 
 /// Get CSS style rules for a segment style.
-fn get_svg_style_for_segment(style: &Style, theme: &TerminalTheme) -> String {
+pub(crate) fn get_svg_style_for_segment(style: &Style, theme: &TerminalTheme) -> String {
     let mut css_rules = Vec::new();
 
     // Get foreground color
@@ -3287,7 +3287,7 @@ fn get_html_style_for_segment(style: &Style, theme: &TerminalTheme) -> String {
 }
 
 /// Resolve a SimpleColor to a ColorTriplet using the terminal theme.
-fn resolve_color_for_svg(
+pub(crate) fn resolve_color_for_svg(
     color: SimpleColor,
     theme: &TerminalTheme,
     is_foreground: bool,
@@ -3314,12 +3314,16 @@ fn resolve_color_for_svg(
 }
 
 /// Check if a color is the default color.
-fn is_default_color(color: Option<SimpleColor>) -> bool {
+pub(crate) fn is_default_color(color: Option<SimpleColor>) -> bool {
     matches!(color, None | Some(SimpleColor::Default))
 }
 
 /// Blend two colors for dim effect.
-fn blend_rgb_for_svg(color: ColorTriplet, background: ColorTriplet, factor: f64) -> ColorTriplet {
+pub(crate) fn blend_rgb_for_svg(
+    color: ColorTriplet,
+    background: ColorTriplet,
+    factor: f64,
+) -> ColorTriplet {
     let r = (color.red as f64 + (background.red as f64 - color.red as f64) * factor) as u8;
     let g = (color.green as f64 + (background.green as f64 - color.green as f64) * factor) as u8;
     let b = (color.blue as f64 + (background.blue as f64 - color.blue as f64) * factor) as u8;
@@ -3327,7 +3331,7 @@ fn blend_rgb_for_svg(color: ColorTriplet, background: ColorTriplet, factor: f64)
 }
 
 /// Simple Adler-32 checksum for generating unique IDs.
-fn adler32(data: &str) -> u32 {
+pub(crate) fn adler32(data: &str) -> u32 {
     let mut a: u32 = 1;
     let mut b: u32 = 0;
     const MOD_ADLER: u32 = 65521;
@@ -3341,7 +3345,7 @@ fn adler32(data: &str) -> u32 {
 }
 
 /// Escape text for SVG/HTML.
-fn escape_text(text: &str) -> String {
+pub(crate) fn escape_text(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -3364,7 +3368,7 @@ fn escape_html_attr(text: &str) -> String {
 }
 
 /// Format a number for SVG attributes (removes trailing zeros).
-fn format_number(value: f64) -> String {
+pub(crate) fn format_number(value: f64) -> String {
     if value.fract() == 0.0 {
         format!("{}", value as i64)
     } else {
@@ -3376,7 +3380,7 @@ fn format_number(value: f64) -> String {
 }
 
 /// Make an SVG tag with attributes.
-fn make_tag(name: &str, content: Option<&str>, attribs: &[(&str, &str)]) -> String {
+pub(crate) fn make_tag(name: &str, content: Option<&str>, attribs: &[(&str, &str)]) -> String {
     let attribs_str: String = attribs
         .iter()
         .map(|(k, v)| format!("{}=\"{}\"", k, v))

@@ -539,7 +539,7 @@ fn main() {
     // "Help ensure Rich is maintained" panel (matches Python Rich demo output).
     let sponsor_body = Text::from_markup(
         "[b magenta]Hope you enjoy using Rich-rs![/]\n\n\
-Consider sponsoring to ensure the upstream project is maintained.\n\n\
+Consider sponsoring the upstream port to ensure it's maintained.\n\n\
 [cyan]https://github.com/sponsors/willmcgugan[/cyan] | [b]Rust port: [/b]\
 [green]Marcos Saraiva - https://github.com/mrsaraiva/rich-rs[/green]",
         false,

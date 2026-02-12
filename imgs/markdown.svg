@@ -32,14 +32,14 @@
         font-family: arial;
     }
 
-    .terminal-423951281-r7 { fill: #a6e22e }
+    .terminal-423951281-r8 { fill: #e6db74 }
+.terminal-423951281-r1 { fill: #d9d9d9 }
+.terminal-423951281-r4 { fill: #d9d9d9;font-style: italic }
 .terminal-423951281-r2 { fill: #d9d9d9;font-weight: bold;text-decoration: underline }
 .terminal-423951281-r3 { fill: #d9d9d9;font-weight: bold }
-.terminal-423951281-r6 { fill: #f8f8f2 }
-.terminal-423951281-r8 { fill: #e6db74 }
-.terminal-423951281-r1 { fill: #d9d9d9 }
+.terminal-423951281-r7 { fill: #a6e22e }
 .terminal-423951281-r5 { fill: #66d9ef }
-.terminal-423951281-r4 { fill: #d9d9d9;font-style: italic }
+.terminal-423951281-r6 { fill: #f8f8f2 }
     </style>
 
     <defs>

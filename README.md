@@ -124,6 +124,8 @@ for _ in progress.track_sequence(0..100, config) {
 progress.stop().unwrap();
 ```
 
+![Progress Bars](imgs/progress.svg)
+
 For lower-level control, use `add_task(...)`, `update(...)`, and custom columns via `Progress::new(...)`.
 
 The progress API also supports `print(...)` and `log(...)` while the display is active.
@@ -150,6 +152,8 @@ for i in 0..10 {
 }
 live.stop().unwrap();
 ```
+
+![Live Display](imgs/live_display.svg)
 
 Live display supports transient mode (clears on exit), alt-screen mode, and vertical overflow handling.
 
@@ -201,7 +205,7 @@ Available themes include `base16-ocean.dark`, `Solarized (dark)`, `InspiredGitHu
 
 rich-rs can render markdown with syntax-highlighted code blocks.
 
-```rust
+````rust
 use rich_rs::{Console, markdown::Markdown};
 
 let mut console = Console::new();
@@ -222,7 +226,7 @@ fn main() {
 
 let markdown = Markdown::new(md);
 console.print(&markdown, None, None, None, false, "\n").unwrap();
-```
+````
 
 ![Markdown](imgs/markdown.svg)
 
@@ -287,7 +291,7 @@ console.print(&panel, None, None, None, false, "\n").unwrap();
 </details>
 
 <details>
-<summary>Tracebacks</summary>
+<summary>Backtraces</summary>
 
 rich-rs can render beautiful panic backtraces with syntax-highlighted source context.
 
@@ -297,10 +301,12 @@ use rich_rs::traceback;
 // Install as the default panic handler
 traceback::install();
 
-// Now panics will show beautiful tracebacks
+// Now panics will show beautiful backtraces
 ```
 
-Tracebacks show the call stack with source code snippets and local variable values.
+![Backtrace](imgs/backtrace.svg)
+
+Backtraces show the call stack with source code snippets and local variable values.
 
 </details>
 

@@ -32,13 +32,13 @@
         font-family: arial;
     }
 
-    .terminal-221577195-r3 { fill: #b48ead }
-.terminal-221577195-r5 { fill: #8fa1b3 }
+    .terminal-221577195-r4 { fill: #c0c5ce }
 .terminal-221577195-r2 { fill: #656660 }
 .terminal-221577195-r8 { fill: #d08770 }
+.terminal-221577195-r3 { fill: #b48ead }
 .terminal-221577195-r6 { fill: #d9d9d9 }
 .terminal-221577195-r1 { fill: #d9d9d9;font-weight: bold }
-.terminal-221577195-r4 { fill: #c0c5ce }
+.terminal-221577195-r5 { fill: #8fa1b3 }
 .terminal-221577195-r7 { fill: #a3be8c }
     </style>
 

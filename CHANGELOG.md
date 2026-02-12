@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Comprehensive Python Rich Parity Pass
+- **Style**: 6 new attributes (`overline`, `blink2`, `conceal`, `underline2`, `frame`, `encircle`) with builders, parse support, and ANSI codes; `chain()`, `StyleStack`, `test()`, `background_style()`, `without_color()`, `to_markup_string()`.
+- **Segment**: `align_top()`/`align_bottom()`/`align_middle()`, `split_lines_terminator()`, `strip_links()`, `remove_color()`, `SegmentLines` renderable.
+- **Text**: `slice()`, `align()`, `with_indent_guides()` (full implementation), `contains()`, `to_markup()`, `get_style_at_offset()`, `set_length()`, `right_crop()`, `fit()`, `remove_suffix()`, `extend_style()`, `detect_indentation()`, `copy_styles()`, `Add` trait impl.
+- **Console**: `status()`, `print_json()`, `export_text()`, `save_text()`, `out()`, `push_render_hook()`/`pop_render_hook()`.
+- **Control**: convenience constructors (`bell`, `clear`, `show_cursor`, `alt_screen`, `title`), `strip_control_codes()`, `escape_control_codes()`.
+- **Cells**: `split_graphemes()`.
+- **JSON**: new `Json` renderable module (no serde dependency).
+- **Table**: `title_style`/`caption_style`, 4-way cell padding.
+- **Tree**: `hide_root`, `add_with_options(TreeNodeOptions)`, `BOLD_TREE_GUIDES`.
+- **Group**: `Renderables` container (no newlines between children).
+- **Layout**: `to_tree()` for hierarchy visualization.
+- **Syntax**: `stylize_range()`, `with_highlight_range()`.
+- **Constrain**: `with_default_width()` constructor.
+- **Markup**: `render_with_emoji_variant()`.
+- **Rule**: parse titles as markup.
+- **Markdown**: `with_style()` builder.
+- **Spinner**: `text` field, `Renderable` impl, `update()`.
+- **Progress**: `RenderableColumn`, `tasks()`/`task_ids()`/`finished()` accessors.
+- **Progress bar**: `percentage_completed()`.
+- **Status**: `Renderable` impl, `status_text()`.
+- **Prompt**: `with_stream()`, `pre_prompt` hook, numeric prompt choices.
+- **Scope**: `overflow`, `max_depth` parameters.
+- **Highlighter**: `highlight_text()` default trait method.
+- **Filesize**: `decimal_with_params(size, precision, separator)`.
+- **Lib**: `get_console()` singleton, `rich_print!` macro.
+
+#### Live, Links, and Adapters
+- **Live**: `redirect_stdout()`/`redirect_stderr()`, `get_renderable` callback, `console_mut()` accessor, `is_started()` query.
+- **Console**: `begin_capture()`/`end_capture()` for output interception, `push_theme()`/`pop_theme()` for theme stacking, hyperlink rendering in `export_html()`.
+- **Style**: `link` field on `Style` via `StyleMeta` integration, `meta()` accessor.
+- **Text**: `highlight_words()`, `highlight_regex()` for text search highlighting.
+- **Tree**: `ROUNDED_TREE_GUIDES` style constant.
+- **Group**: `Lines` renderable (newline between each child).
+- **ANSI decoder**: SGR 53/54/55 (overline/encircle/frame) support, OSC 8 hyperlink parsing.
+- **rich-tracing** companion crate: `RichTracingLayer` for `tracing_subscriber`, `RichLogger` for `log` crate.
+
+#### Animated Recordings and Screenshots
+- `FrameRecorder` for generating animated SVG (CSS `@keyframes`) and asciicast v2 recordings of terminal output.
+- `examples/recordings.rs` generating animated SVGs for README Progress Bars and Live Display sections.
+- Backtrace screenshot in `examples/screenshots.rs` using real source files for syntax-highlighted code context.
+
+### Changed
+- Consolidated duplicated style serialization into `Style::to_markup_string()` (removes workarounds from `text.rs` and `theme.rs`).
+- Added `markdown.table.border`, `markdown.table.header`, `blink2` to default theme styles.
+- ANSI decoder now handles SGR 6/8/21/51-55 escape codes.
+
+### Fixed
+- Fixed `Padding` style application to content lines.
+- Fixed README Markdown section broken by nested code fences (4-backtick outer fence).
+- Renamed README "Tracebacks" section to "Backtraces" (Rust-idiomatic term).
+
 ## [1.0.5] - 2026-02-10
 
 ### Changed

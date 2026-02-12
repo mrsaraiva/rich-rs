@@ -3,3 +3,4 @@
 .idea/
 docs/devel/
 .DS_Store
+tmp/
