@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Live display cursor repositioning now uses previous frame shape, preventing visual glitches when live content changes height.
+
 ## [1.1.0] - 2026-02-12
 
 ### Added

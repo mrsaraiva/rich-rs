@@ -76,9 +76,6 @@ pub mod table;
 pub mod traceback;
 pub mod tree;
 
-// Builtin renderables
-mod renderables;
-
 // Re-exports for public API
 pub use cells::{cell_len, chop_cells, set_cell_size, split_graphemes};
 pub use color::{

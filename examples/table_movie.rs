@@ -248,13 +248,15 @@ fn main() {
     }
     refresh();
 
-    // Note: Emojis like :popcorn: are not directly supported in rich-rs markup,
-    // so we use a plain title variant here
     beat(10);
     {
         let mut table = shared_table.lock();
         table.set_title(Some(
-            Text::from_markup("[not italic]Star Wars Box Office[/]", false).unwrap(),
+            Text::from_markup(
+                "[not italic]:popcorn:[/] Star Wars Box Office [not italic]:popcorn:[/]",
+                true,
+            )
+            .unwrap(),
         ));
     }
     refresh();
@@ -263,7 +265,7 @@ fn main() {
     beat(10);
     {
         let mut table = shared_table.lock();
-        table.set_caption(Some(Text::plain("Made with Rich")));
+        table.set_caption(Some(Text::plain("Made with Rich-rs")));
     }
     refresh();
 
@@ -271,7 +273,7 @@ fn main() {
     {
         let mut table = shared_table.lock();
         table.set_caption(Some(
-            Text::from_markup("Made with [b]Rich[/b]", false).unwrap(),
+            Text::from_markup("Made with [b]Rich-rs[/b]", false).unwrap(),
         ));
     }
     refresh();
@@ -280,7 +282,7 @@ fn main() {
     {
         let mut table = shared_table.lock();
         table.set_caption(Some(
-            Text::from_markup("Made with [b magenta not dim]Rich[/]", false).unwrap(),
+            Text::from_markup("Made with [b magenta not dim]Rich-rs[/]", false).unwrap(),
         ));
     }
     refresh();

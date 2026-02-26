@@ -1659,6 +1659,9 @@ impl<W: Write> Console<W> {
         let live_active = self.is_terminal() && !self.is_dumb_terminal() && self.has_live();
         let mut end_to_write = end;
         if live_active {
+            // Cursor repositioning must be based on the *previous* live shape
+            // (the currently visible frame), not the newly rendered shape.
+            let previous_live_shape = self.live.shape;
             // When Live is active, the trailing newline belongs to the *printed* content,
             // and the live render must be re-drawn after it (Rich behavior).
             if !end.is_empty() {
@@ -1669,9 +1672,9 @@ impl<W: Write> Console<W> {
             let (live_segments, full_redraw) = self.render_live_segments(&options);
             let mut wrapped = Segments::new();
             let cursor_controls = if full_redraw {
-                self.live_position_cursor()
+                self.live_position_cursor_for_shape(previous_live_shape, true)
             } else {
-                self.live_position_cursor_no_erase()
+                self.live_position_cursor_for_shape(previous_live_shape, false)
             };
             for seg in cursor_controls.iter() {
                 wrapped.push(seg.clone());
@@ -2081,8 +2084,12 @@ impl<W: Write> Console<W> {
         self.live.entries.get(&id)
     }
 
-    pub(crate) fn live_position_cursor(&self) -> Segments {
-        let Some((_, height)) = self.live.shape else {
+    fn live_position_cursor_for_shape(
+        &self,
+        shape: Option<(usize, usize)>,
+        erase: bool,
+    ) -> Segments {
+        let Some((_, height)) = shape else {
             return Segments::new();
         };
         if height == 0 {
@@ -2090,26 +2097,15 @@ impl<W: Write> Console<W> {
         }
         let mut controls = Vec::new();
         controls.push(Segment::control(ControlType::CarriageReturn));
-        controls.push(Segment::control(ControlType::EraseInLine(2)));
-        for _ in 0..height.saturating_sub(1) {
-            controls.push(Segment::control(ControlType::CursorUp(1)));
-            controls.push(Segment::control(ControlType::CarriageReturn));
+        if erase {
             controls.push(Segment::control(ControlType::EraseInLine(2)));
         }
-        Segments::from_iter(controls)
-    }
-
-    pub(crate) fn live_position_cursor_no_erase(&self) -> Segments {
-        let Some((_, height)) = self.live.shape else {
-            return Segments::new();
-        };
-        if height == 0 {
-            return Segments::new();
-        }
-        let mut controls = Vec::new();
-        controls.push(Segment::control(ControlType::CarriageReturn));
         for _ in 0..height.saturating_sub(1) {
             controls.push(Segment::control(ControlType::CursorUp(1)));
+            if erase {
+                controls.push(Segment::control(ControlType::CarriageReturn));
+                controls.push(Segment::control(ControlType::EraseInLine(2)));
+            }
         }
         Segments::from_iter(controls)
     }
@@ -3645,6 +3641,46 @@ mod tests {
         assert!(
             out.contains("\r"),
             "expected cursor repositioning (\\r) in second live render, got: {:?}",
+            out,
+        );
+    }
+
+    #[test]
+    fn test_live_full_redraw_repositions_from_previous_shape() {
+        let mut console = Console::with_writer(
+            Vec::new(),
+            ConsoleOptions {
+                is_terminal: true,
+                ..Default::default()
+            },
+        );
+        console.set_force_terminal(Some(true));
+        if console.is_dumb_terminal() {
+            return;
+        }
+
+        let (id, _is_root) = console.live_start(
+            Box::new(Text::plain("one line")),
+            crate::live::VerticalOverflowMethod::Ellipsis,
+        );
+
+        // Establish an initial 1-line live frame.
+        console
+            .print(&Control::new(), None, None, None, false, "")
+            .unwrap();
+        console.clear_captured();
+
+        // Grow the live render to 2 lines. Full redraw should position cursor
+        // using the previous (1-line) frame, so no cursor-up should be emitted.
+        console.live_update(id, Box::new(Text::plain("line 1\nline 2")));
+        console
+            .print(&Control::new(), None, None, None, false, "")
+            .unwrap();
+
+        let out = console.get_captured();
+        assert!(
+            !out.contains("\x1b[1A"),
+            "did not expect cursor-up for previous 1-line frame, got: {:?}",
             out,
         );
     }
