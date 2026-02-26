@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Live display cursor repositioning now uses previous frame shape, preventing visual glitches when live content changes height.
+- `Measurement::from_segments()` now correctly measures multi-line content by tracking per-line width instead of summing all lines.
+- `Columns` now preserves original renderables instead of flattening to plain text, allowing proper per-cell measurement and rendering.
 
 ## [1.1.0] - 2026-02-12
 

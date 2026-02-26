@@ -247,10 +247,7 @@ impl FrameRecorder {
                                     "textLength",
                                     &format_number(char_width * text_length as f64),
                                 ),
-                                (
-                                    "clip-path",
-                                    &format!("url(#{}-line-{})", unique_id, y),
-                                ),
+                                ("clip-path", &format!("url(#{}-line-{})", unique_id, y)),
                             ],
                         ));
                     }
@@ -272,8 +269,10 @@ impl FrameRecorder {
 
         if deduped.len() == 1 {
             // Single frame: always visible, no animation needed.
-            animation_css
-                .push_str(&format!("    .{}-f0 {{ visibility: visible; }}\n", unique_id));
+            animation_css.push_str(&format!(
+                "    .{}-f0 {{ visibility: visible; }}\n",
+                unique_id
+            ));
         } else {
             // All frames hidden by default.
             animation_css.push_str(&format!(
@@ -537,11 +536,7 @@ impl FrameRecorder {
     }
 
     /// Save asciicast v2 to a file.
-    pub fn save_asciicast(
-        &self,
-        path: &str,
-        theme: Option<&TerminalTheme>,
-    ) -> io::Result<()> {
+    pub fn save_asciicast(&self, path: &str, theme: Option<&TerminalTheme>) -> io::Result<()> {
         let cast = self.export_asciicast(theme);
         let mut file = std::fs::File::create(path)?;
         file.write_all(cast.as_bytes())

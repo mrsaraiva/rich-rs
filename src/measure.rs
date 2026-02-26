@@ -186,23 +186,27 @@ impl Measurement {
     /// Create a measurement from rendered segments.
     ///
     /// This is the default measurement strategy: render and measure the result.
-    /// The minimum is the longest word, maximum is the total width.
-    ///
-    /// **Note**: This method assumes single-line content. For multi-line content,
-    /// the maximum will include the total width of all lines combined rather than
-    /// the width of the widest line. Handle multi-line content by splitting into
-    /// lines first and taking the union of per-line measurements.
+    /// The minimum is the longest word, maximum is the widest rendered line.
     pub fn from_segments(segments: &Segments) -> Self {
-        let mut total_width = 0;
+        let mut max_line_width = 0;
+        let mut current_line_width = 0;
         let mut max_word_width = 0;
         let mut current_word_width = 0;
 
         for segment in segments.iter() {
             for c in segment.text.chars() {
-                let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-                total_width += char_width;
+                if c == '\n' {
+                    max_line_width = max_line_width.max(current_line_width);
+                    max_word_width = max_word_width.max(current_word_width);
+                    current_line_width = 0;
+                    current_word_width = 0;
+                    continue;
+                }
 
-                if c.is_whitespace() || c == '\n' {
+                let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                current_line_width += char_width;
+
+                if c.is_whitespace() {
                     max_word_width = max_word_width.max(current_word_width);
                     current_word_width = 0;
                 } else {
@@ -210,12 +214,14 @@ impl Measurement {
                 }
             }
         }
-        // Don't forget the last word
+
+        // Account for trailing line / word when input doesn't end with '\n'.
+        max_line_width = max_line_width.max(current_line_width);
         max_word_width = max_word_width.max(current_word_width);
 
         Measurement {
             minimum: max_word_width,
-            maximum: total_width,
+            maximum: max_line_width,
         }
     }
 }
@@ -262,6 +268,7 @@ pub fn measure_renderables(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::segment::Segment;
 
     #[test]
     fn test_measurement_basic() {
@@ -471,5 +478,14 @@ mod tests {
         // max of maximums: max(10, 4, 8) = 10
         assert_eq!(measurement.minimum, 10);
         assert_eq!(measurement.maximum, 10);
+    }
+
+    #[test]
+    fn test_from_segments_multiline_uses_widest_line() {
+        let segments: Segments = vec![Segment::new("abcd\nef")].into();
+        let measurement = Measurement::from_segments(&segments);
+
+        assert_eq!(measurement.minimum, 4);
+        assert_eq!(measurement.maximum, 4);
     }
 }

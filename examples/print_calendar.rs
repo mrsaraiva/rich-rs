@@ -4,12 +4,10 @@
 //!
 //! Run with:
 //!   cargo run --example print_calendar 2026
-//!
-//! Or for current year:
-//!   cargo run --example print_calendar $(date +%Y)
 
 use std::env;
 use std::io::Stdout;
+use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rich_rs::r#box::SIMPLE_HEAVY;
@@ -175,6 +173,7 @@ impl Renderable for MonthCalendar {
 
         let mut table = Table::new()
             .with_title(&title)
+            .with_title_style(Style::new().with_italic(true))
             .with_style(Style::parse("green").unwrap_or_default())
             .with_box(Some(SIMPLE_HEAVY))
             .with_padding(0, 0);
@@ -255,35 +254,41 @@ fn print_calendar(year: i32) {
 
     // Print year rule at top
     let top_rule = Rule::new()
-        .with_title(year.to_string())
-        .with_style(Style::parse("bold").unwrap_or_default());
+        .with_title_text(Text::styled(
+            &year.to_string(),
+            Style::parse("bold cyan").unwrap_or_default(),
+        ))
+        .with_style(Style::parse("bright_green").unwrap_or_default());
     let _ = console.print(&top_rule, None, None, None, false, "");
 
     // Print empty line
     let _ = console.line(1);
 
     // Print the columns of calendars
-    let _ = console.print(&columns, None, None, None, false, "\n");
+    let _ = console.print(&columns, None, None, None, false, "");
 
     // Print year rule at bottom
     let bottom_rule = Rule::new()
-        .with_title(year.to_string())
-        .with_style(Style::parse("bold").unwrap_or_default());
+        .with_title_text(Text::styled(
+            &year.to_string(),
+            Style::parse("bold cyan").unwrap_or_default(),
+        ))
+        .with_style(Style::parse("bright_green").unwrap_or_default());
     let _ = console.print(&bottom_rule, None, None, None, false, "");
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let year: i32 = if args.len() > 1 {
-        args[1].parse().unwrap_or_else(|_| {
-            eprintln!("Invalid year: {}. Using current year.", args[1]);
-            today().2
-        })
-    } else {
-        // Default to current year
-        today().2
-    };
+    if args.len() != 2 {
+        eprintln!("Usage: print_calendar <year>");
+        process::exit(2);
+    }
+
+    let year: i32 = args[1].parse().unwrap_or_else(|_| {
+        eprintln!("Invalid year: {}", args[1]);
+        process::exit(2);
+    });
 
     print_calendar(year);
 }

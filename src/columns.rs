@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 use std::io::Stdout;
+use std::sync::Arc;
 
 use crate::align::Align;
 use crate::console::ConsoleOptions;
@@ -57,7 +58,7 @@ use crate::{Console, Renderable};
 /// ```
 pub struct Columns {
     /// The renderables to display in columns.
-    renderables: Vec<Box<dyn Renderable + Send + Sync>>,
+    renderables: Vec<Arc<dyn Renderable + Send + Sync>>,
     /// Optional fixed width for each column.
     width: Option<usize>,
     /// Padding around cells (top, right, bottom, left).
@@ -112,7 +113,7 @@ impl Columns {
     /// Create a new Columns layout with the given renderables.
     pub fn new(renderables: Vec<Box<dyn Renderable + Send + Sync>>) -> Self {
         Self {
-            renderables,
+            renderables: renderables.into_iter().map(Arc::from).collect(),
             ..Default::default()
         }
     }
@@ -124,12 +125,12 @@ impl Columns {
 
     /// Add a renderable to the columns.
     pub fn add(&mut self, renderable: Box<dyn Renderable + Send + Sync>) {
-        self.renderables.push(renderable);
+        self.renderables.push(Arc::from(renderable));
     }
 
     /// Add a string as a renderable.
     pub fn add_str(&mut self, text: &str) {
-        self.renderables.push(Box::new(Text::plain(text)));
+        self.renderables.push(Arc::new(Text::plain(text)));
     }
 
     /// Set fixed width for each column.
@@ -185,7 +186,7 @@ impl Columns {
 
     /// Calculate optimal column count and build the table.
     fn build_table(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Table {
-        let (_top, right, _bottom, left) = self.padding;
+        let (top, right, bottom, left) = self.padding;
         let width_padding = left.max(right);
         let max_width = options.max_width;
 
@@ -212,6 +213,7 @@ impl Columns {
 
         // Apply padding (Table uses left, right only for cells)
         table = table.with_padding(left, right);
+        table = table.with_leading(top.saturating_add(bottom));
 
         // Apply expand setting
         table = table.with_expand(self.expand);
@@ -288,12 +290,9 @@ impl Columns {
                 let renderable_idx = idx.filter(|&i| i < self.renderables.len());
 
                 if let Some(ridx) = renderable_idx {
-                    // Get the renderable and render it to text
-                    let r = &self.renderables[ridx];
-                    let segments = r.render(console, options);
-                    let text_content: String =
-                        segments.iter().map(|s| s.text.to_string()).collect();
-                    let text = Text::plain(&text_content);
+                    // Keep the renderable intact so table layout can measure and render it
+                    // with the correct per-cell constraints (instead of flattening it to text).
+                    let renderable = self.renderables[ridx].clone();
 
                     // Wrap in alignment if specified
                     let cell: Box<dyn Renderable + Send + Sync> = if let Some(align) = self.align {
@@ -303,16 +302,22 @@ impl Columns {
                             None
                         };
                         if let Some(w) = width {
-                            Box::new(Align::new(Box::new(text), align).with_width(w))
+                            Box::new(
+                                Align::new(Box::new(ArcRenderable::new(renderable)), align)
+                                    .with_width(w),
+                            )
                         } else {
-                            Box::new(Align::new(Box::new(text), align))
+                            Box::new(Align::new(Box::new(ArcRenderable::new(renderable)), align))
                         }
                     } else if self.equal {
                         // Constrain to equal width
                         let width = renderable_widths.first().copied().unwrap_or(0);
-                        Box::new(Align::new(Box::new(text), AlignMethod::Left).with_width(width))
+                        Box::new(
+                            Align::new(Box::new(ArcRenderable::new(renderable)), AlignMethod::Left)
+                                .with_width(width),
+                        )
                     } else {
-                        Box::new(text)
+                        Box::new(ArcRenderable::new(renderable))
                     };
                     row_items.push(cell);
                 } else {
@@ -384,6 +389,27 @@ impl Columns {
                 }
             }
         })
+    }
+}
+
+#[derive(Clone)]
+struct ArcRenderable {
+    inner: Arc<dyn Renderable + Send + Sync>,
+}
+
+impl ArcRenderable {
+    fn new(inner: Arc<dyn Renderable + Send + Sync>) -> Self {
+        Self { inner }
+    }
+}
+
+impl Renderable for ArcRenderable {
+    fn render(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Segments {
+        self.inner.render(console, options)
+    }
+
+    fn measure(&self, console: &Console<Stdout>, options: &ConsoleOptions) -> Measurement {
+        self.inner.measure(console, options)
     }
 }
 
