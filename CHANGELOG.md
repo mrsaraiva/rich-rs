@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-#### Comprehensive Python Rich Parity Pass
+#### Python Rich parity pass
 - **Style**: 6 new attributes (`overline`, `blink2`, `conceal`, `underline2`, `frame`, `encircle`) with builders, parse support, and ANSI codes; `chain()`, `StyleStack`, `test()`, `background_style()`, `without_color()`, `to_markup_string()`.
 - **Segment**: `align_top()`/`align_bottom()`/`align_middle()`, `split_lines_terminator()`, `strip_links()`, `remove_color()`, `SegmentLines` renderable.
 - **Text**: `slice()`, `align()`, `with_indent_guides()` (full implementation), `contains()`, `to_markup()`, `get_style_at_offset()`, `set_length()`, `right_crop()`, `fit()`, `remove_suffix()`, `extend_style()`, `detect_indentation()`, `copy_styles()`, `Add` trait impl.

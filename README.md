@@ -391,4 +391,4 @@ console.print(&columns, None, None, None, false, "\n").unwrap();
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
