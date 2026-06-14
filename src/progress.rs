@@ -785,10 +785,19 @@ impl Renderable for ProgressRenderable {
                 Vec::with_capacity(self.columns.len());
             for (col_index, col) in self.columns.iter().enumerate() {
                 let segs = if let Some(max_refresh) = col.max_refresh() {
-                    let key = (task.id, col_index);
-                    if let Some((last_ts, cached)) = new_cache.get(&key) {
-                        if now - *last_ts < max_refresh.as_secs_f64() {
-                            cached.clone()
+                    // Match Python Rich behavior in ProgressColumn.__call__:
+                    // apply max_refresh caching only while task.completed is zero.
+                    if task.completed <= 0.0 {
+                        let key = (task.id, col_index);
+                        if let Some((last_ts, cached)) = new_cache.get(&key) {
+                            if now - *last_ts < max_refresh.as_secs_f64() {
+                                cached.clone()
+                            } else {
+                                let renderable = col.render(task, now, options);
+                                let segs = renderable.render(console, options);
+                                new_cache.insert(key, (now, segs.clone()));
+                                segs
+                            }
                         } else {
                             let renderable = col.render(task, now, options);
                             let segs = renderable.render(console, options);
@@ -797,9 +806,7 @@ impl Renderable for ProgressRenderable {
                         }
                     } else {
                         let renderable = col.render(task, now, options);
-                        let segs = renderable.render(console, options);
-                        new_cache.insert(key, (now, segs.clone()));
-                        segs
+                        renderable.render(console, options)
                     }
                 } else {
                     let renderable = col.render(task, now, options);

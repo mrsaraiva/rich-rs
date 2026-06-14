@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-14
+
 ### Fixed
 - Live display cursor repositioning now uses previous frame shape, preventing visual glitches when live content changes height.
 - `Measurement::from_segments()` now correctly measures multi-line content by tracking per-line width instead of summing all lines.
 - `Columns` now preserves original renderables instead of flattening to plain text, allowing proper per-cell measurement and rendering.
+- `Pretty` now renders strings in Python `repr` style (single quotes, e.g. `'value'`) instead of leaking Rust `Debug` double quotes, matching Python Rich. Uses CPython's quote selection (double quotes only when the string contains a single quote and no double quote).
+- `Progress` columns with a `max_refresh` now only apply refresh-rate caching while the task's `completed` is zero, matching Python Rich's `ProgressColumn.__call__` behavior (avoids stale column values once a task starts progressing).
+
+### Changed
+- Example `columns.rs` ported closer to Python Rich's `columns.py` (fetches and parses JSON user data via `serde_json`, a dev-dependency).
+- Example `cp_progress.rs` now copies via a worker thread using `fs::copy` (kernel fast paths) while polling progress, instead of a userspace read/write loop.
 
 ## [1.1.0] - 2026-02-12
 

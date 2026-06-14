@@ -636,7 +636,10 @@ impl<'a> DebugParser<'a> {
             }
         }
 
-        Node::atomic(s)
+        // Render strings Python-`repr` style (single quotes), matching Rich.
+        // Rust's `Debug` emits double-quoted literals; convert them so pretty
+        // output matches Python (`'value'`, not `"value"`).
+        Node::atomic(double_to_python_quotes(&s))
     }
 
     fn parse_char(&mut self) -> Node {
@@ -1337,6 +1340,62 @@ impl Renderable for Pretty {
     }
 }
 
+/// Convert a Rust `Debug` string literal (`"..."`) to Python `repr` style.
+///
+/// Rich's `Pretty` renders strings with single quotes (Python `repr`), e.g.
+/// `'value'`. Rust's `Debug` emits double-quoted literals; this normalizes them
+/// so pretty output matches Python. Follows CPython's quote selection: prefer
+/// single quotes, but use double quotes when the string contains a single quote
+/// and no double quote. The chosen quote is escaped inside the content.
+fn double_to_python_quotes(literal: &str) -> String {
+    let bytes = literal.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'"' || bytes[bytes.len() - 1] != b'"' {
+        return literal.to_string();
+    }
+    let inner = &literal[1..literal.len() - 1];
+
+    // Decode the body, unescaping `\"` to a bare `"`. Other escapes (`\n`, `\t`,
+    // `\\`, `\u{..}`) are shared between Rust and Python and kept verbatim.
+    let mut raw = String::with_capacity(inner.len());
+    let mut has_single = false;
+    let mut has_double = false;
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('"') => {
+                    raw.push('"');
+                    has_double = true;
+                }
+                Some(n) => {
+                    raw.push('\\');
+                    raw.push(n);
+                }
+                None => raw.push('\\'),
+            }
+        } else {
+            if c == '\'' {
+                has_single = true;
+            } else if c == '"' {
+                has_double = true;
+            }
+            raw.push(c);
+        }
+    }
+
+    let quote = if has_single && !has_double { '"' } else { '\'' };
+    let mut out = String::with_capacity(raw.len() + 2);
+    out.push(quote);
+    for c in raw.chars() {
+        if c == quote {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push(quote);
+    out
+}
+
 // ============================================================================
 // Public API functions
 // ============================================================================
@@ -1520,14 +1579,26 @@ mod tests {
 
     #[test]
     fn test_parse_string() {
+        // Strings render Python-repr style (single quotes), matching Rich.
         let node = parse_debug_output("\"hello\"", None, None, None);
-        assert_eq!(node.to_string_inline(), "\"hello\"");
+        assert_eq!(node.to_string_inline(), "'hello'");
     }
 
     #[test]
     fn test_parse_escaped_string() {
         let node = parse_debug_output("\"hello\\nworld\"", None, None, None);
-        assert_eq!(node.to_string_inline(), "\"hello\\nworld\"");
+        assert_eq!(node.to_string_inline(), "'hello\\nworld'");
+    }
+
+    #[test]
+    fn test_string_quote_selection() {
+        // Contains a single quote, no double quote → use double quotes.
+        let node = parse_debug_output("\"it's\"", None, None, None);
+        assert_eq!(node.to_string_inline(), "\"it's\"");
+        // Contains a double quote (escaped in Rust debug) → single quotes, with
+        // the double quote left bare.
+        let node = parse_debug_output("\"say \\\"hi\\\"\"", None, None, None);
+        assert_eq!(node.to_string_inline(), "'say \"hi\"'");
     }
 
     #[test]

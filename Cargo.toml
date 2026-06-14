@@ -1,6 +1,6 @@
 [package]
 name = "rich-rs"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 rust-version = "1.85.0"
 description = "Rich text and beautiful formatting for the terminal"
@@ -38,3 +38,4 @@ pulldown-cmark = "0.12"
 rand = "0.9.2"
 ureq = "3"
 ctrlc = "3"
+serde_json = "1"
