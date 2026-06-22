@@ -16,6 +16,7 @@ exclude = [
     "docs/devel/",
     "tests/parity/",
     "tools/",
+    "ffi/",
 ]
 
 [package.metadata.docs.rs]

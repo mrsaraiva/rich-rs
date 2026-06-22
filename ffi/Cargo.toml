@@ -1,0 +1,31 @@
+[package]
+name = "rich-ffi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT"
+description = "C ABI bindings for rich-rs (for C/C++ consumers such as SafeTunnel)"
+publish = false
+
+[lib]
+# `rich_ffi` is the symbol/library base name: librich_ffi.a / .so, rich_ffi.lib / .dll
+name = "rich_ffi"
+# staticlib  -> librich_ffi.a / rich_ffi.lib  (link straight into the C++ binary; preferred)
+# cdylib     -> librich_ffi.so / .dylib / rich_ffi.dll (offered for flexibility)
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+# Crate name is `rich-rs`; imported in code as `rich_rs`.
+rich-rs = { path = ".." }
+
+# 0.28+ is required: it understands the edition-2024 `#[unsafe(no_mangle)]`
+# attribute. Older cbindgen silently emits an empty header.
+[build-dependencies]
+cbindgen = "0.29"
+
+# NOTE on panic strategy: we deliberately keep the default `unwind` and wrap every
+# FFI entry point in `catch_unwind`, converting any rich-rs panic into a NULL / no-op
+# return. We do NOT use `panic = "abort"` — aborting the whole SafeTunnel daemon or
+# CLI because a styling call panicked would be a regression. A panic that escaped a
+# bare `extern "C"` fn already aborts in current Rust, so the boundary is sound either
+# way; catch_unwind just lets us fail gracefully instead of killing the host process.
