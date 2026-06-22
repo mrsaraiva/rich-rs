@@ -41,6 +41,7 @@ use common::{parse_style, render_to_cstring};
 // and export regardless of module privacy; cbindgen reads each file directly.
 mod content;
 mod layout;
+mod live;
 mod panel;
 mod table;
 mod tree;
