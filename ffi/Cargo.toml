@@ -18,6 +18,9 @@ crate-type = ["staticlib", "cdylib"]
 # Crate name is `rich-rs`; imported in code as `rich_rs`.
 rich-rs = { path = ".." }
 
+# Used only to VALIDATE JSON input in `rich_json_new` (parse-and-discard).
+serde_json = "1"
+
 # 0.28+ is required: it understands the edition-2024 `#[unsafe(no_mangle)]`
 # attribute. Older cbindgen silently emits an empty header.
 [build-dependencies]

@@ -106,6 +106,28 @@ int main() {
     }
 
     // ---------------------------------------------------------------
+    // 3b. Json validation: valid JSON => non-NULL and renders;
+    //     malformed JSON => NULL (honoring the spec contract).
+    // ---------------------------------------------------------------
+    {
+        // Valid JSON: must construct, finish, and render.
+        RichJson *good = rich_json_new("{\"a\":1}", 2, true, false);
+        assert(good != nullptr && "valid JSON must yield a non-NULL handle");
+        RichRenderable *r = rich_json_finish(good); // good now invalid
+        assert(r != nullptr);
+        rich_console_set_force_terminal(con, false);
+        std::string out = render(con, r);
+        assert(!out.empty() && "valid JSON must render non-empty output");
+        rich_renderable_free(r);
+
+        // Malformed JSON: must be rejected with NULL (no handle to free).
+        RichJson *bad = rich_json_new("{bad", 2, true, false);
+        assert(bad == nullptr && "malformed JSON must yield NULL");
+
+        std::printf("json validation OK (valid renders, malformed => NULL)\n");
+    }
+
+    // ---------------------------------------------------------------
     // 4. Container composition: a Json consumed via rich_text path is
     //    not double-freed. Here we exercise the consume contract by
     //    finishing a Text child and rendering it, plus verifying a
