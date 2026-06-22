@@ -55,6 +55,60 @@ jobs:
           CARGO_INCREMENTAL: "0"
         run: cargo package
 
+  # Build the C/C++ FFI artifacts (librich_ffi static + shared libs + headers)
+  # for each platform/arch on a NATIVE runner. Native runners avoid cross-compiling
+  # the vendored oniguruma C (onig_sys) — each runner has its own C toolchain.
+  ffi-build:
+    name: ffi (${{ matrix.target }})
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-apple-darwin,       os: macos-13 }
+          - { target: aarch64-apple-darwin,      os: macos-14 }
+          - { target: x86_64-pc-windows-msvc,    os: windows-2022 }
+          - { target: aarch64-pc-windows-msvc,   os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build static + shared libraries
+        run: cargo build --release --manifest-path ffi/Cargo.toml --target ${{ matrix.target }}
+      - name: Package (include/ + lib/ + headers)
+        id: pkg
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="rich-ffi-${version}-${{ matrix.target }}"
+          out="ffi/target/${{ matrix.target }}/release"
+          mkdir -p "pkg/${name}/include" "pkg/${name}/lib"
+          cp ffi/include/rich.h ffi/include/rich.hpp "pkg/${name}/include/"
+          # Copy whichever library artifacts this platform produced.
+          for f in librich_ffi.a librich_ffi.so librich_ffi.dylib \
+                   rich_ffi.lib rich_ffi.dll rich_ffi.dll.lib; do
+            if [ -f "${out}/${f}" ]; then cp "${out}/${f}" "pkg/${name}/lib/"; fi
+          done
+          cp LICENSE "pkg/${name}/" 2>/dev/null || true
+          tar -C pkg -czf "${name}.tar.gz" "${name}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "--- packaged ${name}.tar.gz ---"
+          tar -tzf "${name}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffi-${{ matrix.target }}
+          path: ${{ steps.pkg.outputs.name }}.tar.gz
+          if-no-files-found: error
+
   publish:
     runs-on: ubuntu-latest
     permissions:
@@ -101,10 +155,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [test, parity, package, publish]
+    needs: [test, parity, package, publish, ffi-build]
     steps:
       - uses: actions/checkout@v4
+      - name: Download FFI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ffi-*
+          path: dist
+          merge-multiple: true
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz | tee SHA256SUMS
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS

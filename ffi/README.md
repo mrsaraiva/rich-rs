@@ -72,13 +72,35 @@ g++ -std=c++17 -Iinclude examples/smoke.cpp \
 script -qec /tmp/rich_smoke /dev/null   # PTY -> ANSI
 ```
 
+## Release artifacts
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the FFI
+libraries on a **native runner per platform/arch** and attaches one tarball per
+target to the GitHub Release, plus a `SHA256SUMS` file. Asset naming:
+
+```
+rich-ffi-<version>-<target>.tar.gz
+```
+
+| target triple | runner | contents |
+|---------------|--------|----------|
+| `x86_64-unknown-linux-gnu`  | ubuntu-22.04     | `librich_ffi.a`, `librich_ffi.so` |
+| `aarch64-unknown-linux-gnu` | ubuntu-22.04-arm | `librich_ffi.a`, `librich_ffi.so` |
+| `x86_64-apple-darwin`       | macos-13         | `librich_ffi.a`, `librich_ffi.dylib` |
+| `aarch64-apple-darwin`      | macos-14         | `librich_ffi.a`, `librich_ffi.dylib` |
+| `x86_64-pc-windows-msvc`    | windows-2022     | `rich_ffi.lib`, `rich_ffi.dll`, `rich_ffi.dll.lib` |
+| `aarch64-pc-windows-msvc`   | windows-11-arm   | `rich_ffi.lib`, `rich_ffi.dll`, `rich_ffi.dll.lib` |
+
+Each tarball unpacks to `rich-ffi-<version>-<target>/{include/{rich.h,rich.hpp},lib/...}`
+— drop `include/` + `lib/` straight into `third_party/rich/<arch>/`.
+
 ## Consuming from SafeTunnel (the Slint pattern)
 
-1. CI in rich-rs cross-compiles `librich_ffi.a` per platform/arch and publishes
-   them as release assets.
+1. CI in rich-rs builds the libraries per platform/arch (see above) and attaches
+   them to the GitHub Release.
 2. SafeTunnel adds `third_party/rich/fetch_rich.sh` + `MANIFEST.md` (copied from
-   the Slint fetch script) that downloads + checksums the artifacts into
-   `third_party/rich/<arch>/{include,lib}`.
+   the Slint fetch script) that downloads + checksums the matching
+   `rich-ffi-<version>-<target>.tar.gz` into `third_party/rich/<arch>/{include,lib}`.
 3. CMake links them:
 
    ```cmake
