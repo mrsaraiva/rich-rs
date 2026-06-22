@@ -126,6 +126,58 @@ pub extern "C" fn rich_table_set_caption(table: *mut RichTable, caption: *const 
     });
 }
 
+/// Set the table title by parsing console markup (e.g. `[bold]Peers[/]`).
+///
+/// Honors the console's markup/emoji/highlight settings via
+/// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
+/// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
+/// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
+/// the table handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_table_set_title_markup(
+    table: *mut RichTable,
+    console: *mut crate::RichConsole,
+    markup: *const c_char,
+) {
+    if console.is_null() || markup.is_null() {
+        return;
+    }
+    with_table(table, |t| {
+        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
+        let con = unsafe { &mut *console };
+        if let Ok(s) = unsafe { CStr::from_ptr(markup) }.to_str() {
+            let text = con.inner.render_str(s, None, None, None, None);
+            t.set_title(Some(text));
+        }
+    });
+}
+
+/// Set the table caption by parsing console markup (e.g. `[dim]src[/]`).
+///
+/// Honors the console's markup/emoji/highlight settings via
+/// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
+/// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
+/// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
+/// the table handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_table_set_caption_markup(
+    table: *mut RichTable,
+    console: *mut crate::RichConsole,
+    markup: *const c_char,
+) {
+    if console.is_null() || markup.is_null() {
+        return;
+    }
+    with_table(table, |t| {
+        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
+        let con = unsafe { &mut *console };
+        if let Ok(s) = unsafe { CStr::from_ptr(markup) }.to_str() {
+            let text = con.inner.render_str(s, None, None, None, None);
+            t.set_caption(Some(text));
+        }
+    });
+}
+
 /// Set the box-drawing style by stable int id (see `box_ids::from_int`).
 /// An out-of-range id is a no-op (the box is left unchanged).
 #[unsafe(no_mangle)]

@@ -82,6 +82,35 @@ int main() {
     // r still owned by us (render borrows): free it once.
     rich_renderable_free(r);
 
+    // --- Table markup title/caption variants -------------------------------
+    // set_title_markup("[bold]Peers[/]") must emit ESC under force_terminal(true)
+    // and zero ESC under force_terminal(false). The console is BORROWED.
+    rich_console_set_force_terminal(con, true);
+    RichTable *tm = rich_table_new();
+    assert(tm != nullptr);
+    rich_table_set_title_markup(tm, con, "[bold]Peers[/]");
+    rich_table_set_caption_markup(tm, con, "[dim]src[/]");
+    rich_table_set_title_markup(tm, nullptr, "[bold]x[/]"); // NULL console: no-op
+    rich_table_set_title_markup(tm, con, nullptr);          // NULL markup: no-op
+    rich_table_add_column(tm, "Peer");
+    const char *mrow[1] = {"alice"};
+    rich_table_add_row_strs(tm, mrow, 1);
+    RichRenderable *rm = rich_table_finish(tm);             // tm now invalid
+    assert(rm != nullptr);
+
+    char *styled_title = rich_console_render(con, rm);
+    assert(styled_title != nullptr);
+    assert(has_esc(styled_title) && "markup title must emit ESC under force_terminal(true)");
+    rich_string_free(styled_title);
+
+    rich_console_set_force_terminal(con, false);
+    char *plain_title = rich_console_render(con, rm);
+    assert(plain_title != nullptr);
+    assert(!has_esc(plain_title) && "markup title must have zero ESC under force_terminal(false)");
+    rich_string_free(plain_title);
+
+    rich_renderable_free(rm);
+
     // --- NULL / lifecycle hygiene ------------------------------------------
     rich_table_free(nullptr);                 // no-op
     rich_renderable_free(nullptr);            // no-op
