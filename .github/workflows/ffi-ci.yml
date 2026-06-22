@@ -1,0 +1,65 @@
+name: ffi-ci
+
+# Build the C/C++ FFI artifacts across the full platform/arch matrix on every
+# change — WITHOUT publishing anything. This catches a broken Windows/arm build
+# long before a release tag, so the `release` workflow's ffi-build legs are
+# already known-green when you tag.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ffi-ci.yml"
+  pull_request:
+    paths:
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ffi-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ffi (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-apple-darwin,       os: macos-13 }
+          - { target: aarch64-apple-darwin,      os: macos-14 }
+          - { target: x86_64-pc-windows-msvc,    os: windows-2022 }
+          - { target: aarch64-pc-windows-msvc,   os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+      - name: Build (release, static + shared)
+        run: cargo build --release --manifest-path ffi/Cargo.toml --target ${{ matrix.target }}
+      - name: Clippy (-D warnings)
+        run: cargo clippy --manifest-path ffi/Cargo.toml --target ${{ matrix.target }} --all-targets -- -D warnings
+      # The C++ smoke link/run uses platform-specific link flags; we exercise it
+      # on Linux (the canonical -lpthread -ldl -lm line). macOS/Windows verify the
+      # Rust library builds + clippy; the header/ABI is identical across targets.
+      - name: C++ smoke tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          lib="ffi/target/${{ matrix.target }}/release/librich_ffi.a"
+          for s in smoke smoke_phase2 smoke_phase3 smoke_phase4 smoke_phase5 smoke_phase6 smoke_phase7 smoke_hpp; do
+            g++ -std=c++17 -Iffi/include "ffi/examples/$s.cpp" "$lib" -lpthread -ldl -lm -o "/tmp/$s"
+            "/tmp/$s" >/dev/null && echo "ok: $s"
+          done
