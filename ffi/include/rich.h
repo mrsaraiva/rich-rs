@@ -8,12 +8,52 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+// Opaque `Align` builder handle. Wraps a child renderable with horizontal
+// (and optional vertical) alignment. Build it, configure it, then either
+// `rich_align_finish` it into a `RichRenderable` or `rich_align_free` it.
+typedef struct RichAlign RichAlign;
+
+// Opaque `Columns` (flow-layout) builder handle. Build it, add children and
+// configure it, then either `rich_columns_finish` it into a `RichRenderable`
+// or `rich_columns_free` it.
+typedef struct RichColumns RichColumns;
+
 // Opaque console handle. C/C++ only ever sees a `RichConsole*`.
 //
 // Backed by a capture console: rendering writes ANSI (or plain) text to an
 // in-memory buffer that `rich_console_render_markup` hands back as an owned
 // string. The caller decides where it goes (stdout, a log line, etc.).
 typedef struct RichConsole RichConsole;
+
+// Opaque `Json` builder handle. Build it, then either `rich_json_finish` it
+// into a `RichRenderable` or `rich_json_free` it.
+//
+// The inner `Option<Json>` lets `rich_json_finish` move the value out.
+typedef struct RichJson RichJson;
+
+// Opaque `Markdown` builder handle. Build it, optionally configure it, then
+// either `rich_markdown_finish` it into a `RichRenderable` or
+// `rich_markdown_free` it.
+//
+// The inner `Option<Markdown>` lets the consuming builder setters take/replace
+// the value and lets `rich_markdown_finish` move it out.
+typedef struct RichMarkdown RichMarkdown;
+
+// Opaque `Padding` builder handle. Wraps a child renderable with cell padding
+// on each side. Build it, configure it, then either `rich_padding_finish` it
+// into a `RichRenderable` or `rich_padding_free` it.
+typedef struct RichPadding RichPadding;
+
+// Opaque `Panel` builder handle. Wraps a content `Renderable` in a styled
+// border box.
+//
+// Build it from a `RichRenderable` content handle (which is CONSUMED), apply
+// any setters, then either `rich_panel_finish` it into a `RichRenderable` or
+// `rich_panel_free` it.
+//
+// The inner `Option<Panel>` lets `rich_panel_finish` and the consuming
+// `with_*` builders take the value by move.
+typedef struct RichPanel RichPanel;
 
 // Opaque, type-erased renderable — the universal composition currency.
 //
@@ -24,16 +64,76 @@ typedef struct RichConsole RichConsole;
 // container constructor, or freed with `rich_renderable_free`.
 typedef struct RichRenderable RichRenderable;
 
+// Opaque `Rule` (horizontal divider) builder handle. Build it, optionally
+// configure it, then either `rich_rule_finish` it into a `RichRenderable` or
+// `rich_rule_free` it.
+//
+// The inner `Option<Rule>` lets consuming builder setters take/replace the
+// value and lets `rich_rule_finish` move it out.
+typedef struct RichRule RichRule;
+
 // Opaque parsed-style handle wrapping a `rich_rs::Style`. Created by
 // `rich_style_parse`, freed by `rich_style_free`. Held opaque for
 // forward-compat even though `Style` is `Copy` underneath.
 typedef struct RichStyle RichStyle;
+
+// Opaque `Syntax` builder handle. Build it, optionally configure it, then
+// either `rich_syntax_finish` it into a `RichRenderable` or `rich_syntax_free`
+// it.
+//
+// The inner `Option<Syntax>` lets the consuming builder setters take/replace
+// the value and lets `rich_syntax_finish` move it out.
+typedef struct RichSyntax RichSyntax;
+
+// Opaque `Table` builder handle. Build it with setters / `add_column*` /
+// `add_row*`, then either `rich_table_finish` it into a `RichRenderable` or
+// `rich_table_free` it.
+//
+// The inner `Option<Table>` lets `rich_table_finish` take the value by move
+// and lets the consuming `with_*` builders take/replace it in place.
+typedef struct RichTable RichTable;
 
 // Opaque `Text` builder handle. Build it, optionally style it, then either
 // `rich_text_finish` it into a `RichRenderable` or `rich_text_free` it.
 //
 // The inner `Option<Text>` lets `rich_text_finish` take the value by move.
 typedef struct RichText RichText;
+
+// Opaque owning `Tree` builder handle.
+//
+// Wraps `Option<rich_rs::Tree>` so the consuming `rich_tree_finish` can move
+// the value out. Create with `rich_tree_new` / `rich_tree_new_renderable`,
+// then either `rich_tree_finish` (consumes into a `RichRenderable`) or
+// `rich_tree_free`.
+//
+// While a `RichTree` is alive you may obtain `RichTreeNode*` borrows into it
+// via `rich_tree_add` / `rich_tree_add_renderable`; those borrows are only
+// valid until this handle is finished or freed.
+typedef struct RichTree RichTree;
+
+// Opaque, NON-OWNING handle to a child node inside an owning [`RichTree`].
+//
+// A `RichTreeNode*` is, quite literally, a borrowed pointer to a child
+// `rich_rs::Tree` living inside the `children` vector of an owning `RichTree`.
+// The pointer value handed to C is that interior pointer reinterpreted as
+// `RichTreeNode*` — no separate allocation is made, so there is nothing to
+// free. It exists only so callers can attach grandchildren to a specific
+// sub-node (`rich_tree_node_add` / `rich_tree_node_add_renderable`).
+//
+// # Lifetime contract (read carefully)
+//
+// * A `RichTreeNode*` is valid ONLY while its owning `RichTree` is alive
+//   (i.e. before `rich_tree_finish` or `rich_tree_free` is called on it).
+//   After the owning `RichTree` is finished/freed, every node handle derived
+//   from it is DANGLING — do not use it.
+// * There is NO `rich_tree_node_free`. Node handles are not owned by the
+//   caller and must never be freed; their storage is owned by the `RichTree`.
+// * Adding further children to a *parent* node may reallocate that parent's
+//   `children` vector, which can invalidate previously returned sibling
+//   `RichTreeNode*` handles that point into the same vector. To stay safe,
+//   finish building one sub-node's descendants (depth-first) before requesting
+//   another sibling handle from the same parent, or re-fetch handles as needed.
+typedef struct RichTreeNode RichTreeNode;
 
 #ifdef __cplusplus
 extern "C" {
@@ -144,6 +244,479 @@ RichStyle *rich_style_parse(const char *style);
 
 // Free a `RichStyle` created by `rich_style_parse`. NULL is a no-op.
 void rich_style_free(RichStyle *style);
+
+// Create a `RichSyntax` from a code string and an explicit lexer name.
+//
+// `code` and `lexer` must be valid NUL-terminated UTF-8 (e.g. `lexer = "rust"`,
+// `"python"`, `"json"`). Returns NULL if either pointer is NULL or not valid
+// UTF-8. Free with `rich_syntax_finish` or `rich_syntax_free`.
+RichSyntax *rich_syntax_new(const char *code, const char *lexer);
+
+// Create a `RichSyntax` by reading a source file from disk; the lexer is
+// auto-detected from the file extension.
+//
+// `path` must be valid NUL-terminated UTF-8. Returns NULL if `path` is NULL,
+// not valid UTF-8, or the file cannot be read (any IO error). Free with
+// `rich_syntax_finish` or `rich_syntax_free`.
+RichSyntax *rich_syntax_from_path(const char *path);
+
+// Set the syntax-highlighting theme by name (e.g. `"monokai"`, `"ansi_dark"`).
+//
+// `theme` must be valid NUL-terminated UTF-8. A NULL/invalid `theme` is a
+// no-op. Does not consume the handle.
+void rich_syntax_set_theme(RichSyntax *syntax, const char *theme);
+
+// Enable or disable line-number gutter display. No-op if `syntax` is NULL.
+// Does not consume the handle.
+void rich_syntax_set_line_numbers(RichSyntax *syntax, bool enabled);
+
+// Enable or disable word wrapping of long lines. No-op if `syntax` is NULL.
+// Does not consume the handle.
+void rich_syntax_set_word_wrap(RichSyntax *syntax, bool enabled);
+
+// Restrict rendering to a line range (1-based, inclusive).
+//
+// Pass `-1` for either `start` or `end` to leave that bound unset (`None`).
+// Negative values other than `-1` are treated as unset too. No-op if `syntax`
+// is NULL. Does not consume the handle.
+void rich_syntax_set_line_range(RichSyntax *syntax, int start, int end);
+
+// CONSUME a `RichSyntax`, erasing it into the type-erased `RichRenderable`
+// composition currency. The `RichSyntax*` is invalid afterward.
+//
+// Returns NULL if `syntax` is NULL or was already finished. The returned
+// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+// passed into a consuming container).
+RichRenderable *rich_syntax_finish(RichSyntax *syntax);
+
+// Free a `RichSyntax` that was created but never `rich_syntax_finish`ed.
+// NULL is a no-op.
+void rich_syntax_free(RichSyntax *syntax);
+
+// Create a `RichMarkdown` from a Markdown source string.
+//
+// `source` must be valid NUL-terminated UTF-8. Returns NULL if `source` is
+// NULL or not valid UTF-8. Free with `rich_markdown_finish` or
+// `rich_markdown_free`.
+RichMarkdown *rich_markdown_new(const char *source);
+
+// Set the theme used for fenced code blocks (e.g. `"monokai"`).
+//
+// `theme` must be valid NUL-terminated UTF-8. A NULL/invalid `theme` is a
+// no-op. Does not consume the handle.
+void rich_markdown_set_code_theme(RichMarkdown *markdown, const char *theme);
+
+// Enable or disable rendering of links as terminal hyperlinks. No-op if
+// `markdown` is NULL. Does not consume the handle.
+void rich_markdown_set_hyperlinks(RichMarkdown *markdown, bool enabled);
+
+// Set the justification for Markdown text blocks.
+//
+// `justify` codes: `0` = Default, `1` = Left, `2` = Center, `3` = Right,
+// `4` = Full. Any other value is a no-op (justification left unchanged). No-op
+// if `markdown` is NULL. Does not consume the handle.
+void rich_markdown_set_justify(RichMarkdown *markdown, int justify);
+
+// CONSUME a `RichMarkdown`, erasing it into the type-erased `RichRenderable`
+// composition currency. The `RichMarkdown*` is invalid afterward.
+//
+// Returns NULL if `markdown` is NULL or was already finished. The returned
+// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+// passed into a consuming container).
+RichRenderable *rich_markdown_finish(RichMarkdown *markdown);
+
+// Free a `RichMarkdown` that was created but never `rich_markdown_finish`ed.
+// NULL is a no-op.
+void rich_markdown_free(RichMarkdown *markdown);
+
+// Create a `RichJson` from a JSON string.
+//
+// Re-formats `data` with `indent` spaces per level, optionally applies JSON
+// syntax `highlight`ing, and optionally `sort_keys` on objects.
+//
+// `data` must be valid NUL-terminated UTF-8. Returns NULL if `data` is NULL or
+// not valid UTF-8.
+//
+// NOTE: `rich_rs::Json::new` does NOT validate the input — if `data` is not
+// well-formed JSON it is rendered as-is (passed through unformatted) rather
+// than rejected. This function therefore returns a non-NULL handle for any
+// valid-UTF-8 `data`; it does not (and cannot, without a parser dependency)
+// signal invalid JSON by returning NULL. Free with `rich_json_finish` or
+// `rich_json_free`.
+RichJson *rich_json_new(const char *data, unsigned int indent, bool highlight, bool sort_keys);
+
+// CONSUME a `RichJson`, erasing it into the type-erased `RichRenderable`
+// composition currency. The `RichJson*` is invalid afterward.
+//
+// Returns NULL if `json` is NULL or was already finished. The returned
+// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+// passed into a consuming container).
+RichRenderable *rich_json_finish(RichJson *json);
+
+// Free a `RichJson` that was created but never `rich_json_finish`ed.
+// NULL is a no-op.
+void rich_json_free(RichJson *json);
+
+// Create a new `Rule` with default settings (no title, "─" line, centered).
+//
+// Returns NULL on allocation failure. Free with `rich_rule_finish` or
+// `rich_rule_free`.
+RichRule *rich_rule_new(void);
+
+// Set the rule's title (supports BBCode-style markup). `title` must be valid
+// NUL-terminated UTF-8. A NULL/invalid `title` is a no-op. Does not consume
+// the handle.
+void rich_rule_set_title(RichRule *rule, const char *title);
+
+// Set the characters used to draw the rule line (e.g. "═" or "-="). `characters`
+// must be valid NUL-terminated UTF-8. A NULL/invalid value is a no-op. Does not
+// consume the handle.
+void rich_rule_set_characters(RichRule *rule, const char *characters);
+
+// Set the rule's line style (e.g. `"bold red"`). Parsed with `Style::parse`;
+// a NULL/invalid/unparseable `style` is a no-op. Does not consume the handle.
+void rich_rule_set_style(RichRule *rule, const char *style);
+
+// Set the title alignment: 0 = Left, 1 = Center, 2 = Right. Out-of-range
+// values are a no-op. Does not consume the handle.
+void rich_rule_set_align(RichRule *rule, int align);
+
+// CONSUME a `RichRule`, erasing it into a `RichRenderable`. The `RichRule*` is
+// invalid afterward. Returns NULL if `rule` is NULL or was already finished.
+// The returned `RichRenderable*` must be freed with `rich_renderable_free`
+// (unless passed into a consuming container).
+RichRenderable *rich_rule_finish(RichRule *rule);
+
+// Free a `RichRule` that was created but never `rich_rule_finish`ed.
+// NULL is a no-op.
+void rich_rule_free(RichRule *rule);
+
+// Create a new empty `Columns`. Returns NULL on allocation failure. Free with
+// `rich_columns_finish` or `rich_columns_free`.
+RichColumns *rich_columns_new(void);
+
+// CONSUME a `RichRenderable` and append it as a column child. The
+// `RichRenderable*` is invalid afterward (it is freed even if `columns` is
+// NULL, so no leak). A NULL `renderable` is a no-op. Does not consume the
+// `columns` handle.
+void rich_columns_add(RichColumns *columns, RichRenderable *renderable);
+
+// Append a plain-text column child. `text` must be valid NUL-terminated UTF-8.
+// A NULL/invalid `text` is a no-op. Does not consume the handle.
+void rich_columns_add_str(RichColumns *columns, const char *text);
+
+// Set whether all columns share equal width. A NULL handle is a no-op. Does
+// not consume the handle.
+void rich_columns_set_equal(RichColumns *columns, bool equal);
+
+// Set whether columns expand to fill the available width. A NULL handle is a
+// no-op. Does not consume the handle.
+void rich_columns_set_expand(RichColumns *columns, bool expand);
+
+// Set the inter-column padding as `(vertical, horizontal)` cell counts. A NULL
+// handle is a no-op. Does not consume the handle.
+void rich_columns_set_padding(RichColumns *columns, unsigned int vertical, unsigned int horizontal);
+
+// CONSUME a `RichColumns`, erasing it into a `RichRenderable`. The
+// `RichColumns*` is invalid afterward. Returns NULL if `columns` is NULL or
+// was already finished. The returned `RichRenderable*` must be freed with
+// `rich_renderable_free` (unless passed into a consuming container).
+RichRenderable *rich_columns_finish(RichColumns *columns);
+
+// Free a `RichColumns` that was created but never `rich_columns_finish`ed.
+// NULL is a no-op.
+void rich_columns_free(RichColumns *columns);
+
+// Create an `Align` wrapping `content` with horizontal alignment `h_align`
+// (0 = Left, 1 = Center, 2 = Right; any other value defaults to Left).
+//
+// CONSUMES `content`: the `RichRenderable*` is invalid afterward. Returns NULL
+// if `content` is NULL. Free the result with `rich_align_finish` or
+// `rich_align_free`.
+RichAlign *rich_align_new(RichRenderable *content, int h_align);
+
+// Create an `Align` that centers `content` horizontally.
+//
+// CONSUMES `content`: the `RichRenderable*` is invalid afterward. Returns NULL
+// if `content` is NULL. Free the result with `rich_align_finish` or
+// `rich_align_free`.
+RichAlign *rich_align_center(RichRenderable *content);
+
+// Set vertical alignment: 0 = Top, 1 = Middle, 2 = Bottom. Out-of-range values
+// are a no-op. A NULL handle is a no-op. Does not consume the handle.
+void rich_align_set_vertical(RichAlign *align, int vertical);
+
+// Set the fixed alignment width in cells. A NULL handle is a no-op. Does not
+// consume the handle.
+void rich_align_set_width(RichAlign *align, unsigned int width);
+
+// CONSUME a `RichAlign`, erasing it into a `RichRenderable`. The `RichAlign*`
+// is invalid afterward. Returns NULL if `align` is NULL or was already
+// finished. The returned `RichRenderable*` must be freed with
+// `rich_renderable_free` (unless passed into a consuming container).
+RichRenderable *rich_align_finish(RichAlign *align);
+
+// Free a `RichAlign` that was created but never `rich_align_finish`ed.
+// NULL is a no-op.
+void rich_align_free(RichAlign *align);
+
+// Create a `Padding` wrapping `content` with `top`/`right`/`bottom`/`left`
+// cell padding.
+//
+// CONSUMES `content`: the `RichRenderable*` is invalid afterward. Returns NULL
+// if `content` is NULL. Free the result with `rich_padding_finish` or
+// `rich_padding_free`.
+RichPadding *rich_padding_new(RichRenderable *content,
+                              unsigned int top,
+                              unsigned int right,
+                              unsigned int bottom,
+                              unsigned int left);
+
+// Set the padding background style (e.g. `"on blue"`). Parsed with
+// `Style::parse`; a NULL/invalid/unparseable `style` is a no-op. Does not
+// consume the handle.
+void rich_padding_set_style(RichPadding *padding, const char *style);
+
+// Set whether the padding expands to fill the available width. A NULL handle
+// is a no-op. Does not consume the handle.
+void rich_padding_set_expand(RichPadding *padding, bool expand);
+
+// CONSUME a `RichPadding`, erasing it into a `RichRenderable`. The
+// `RichPadding*` is invalid afterward. Returns NULL if `padding` is NULL or
+// was already finished. The returned `RichRenderable*` must be freed with
+// `rich_renderable_free` (unless passed into a consuming container).
+RichRenderable *rich_padding_finish(RichPadding *padding);
+
+// Free a `RichPadding` that was created but never `rich_padding_finish`ed.
+// NULL is a no-op.
+void rich_padding_free(RichPadding *padding);
+
+// Create a `Panel` wrapping the given content renderable.
+//
+// CONSUMES `content`: the `RichRenderable*` is moved into the panel and is
+// invalid afterward (do NOT free it). Returns NULL if `content` is NULL.
+// Free the result with `rich_panel_finish` or `rich_panel_free`.
+RichPanel *rich_panel_new(RichRenderable *content);
+
+// Set the panel's title (rendered into the top border). `title` is parsed as
+// plain text. A NULL/invalid-UTF-8 `title` is a no-op. Does not consume the
+// handle.
+void rich_panel_set_title(RichPanel *panel, const char *title);
+
+// Set the panel's subtitle (rendered into the bottom border). `subtitle` is
+// parsed as plain text. A NULL/invalid-UTF-8 `subtitle` is a no-op. Does not
+// consume the handle.
+void rich_panel_set_subtitle(RichPanel *panel, const char *subtitle);
+
+// Set the panel's box-drawing style by integer id (see `box_ids` in the
+// generated header: 0 = ROUNDED, 1 = HEAVY, 2 = DOUBLE, 3 = ASCII, ...).
+// An out-of-range id is a no-op (leaves the box unchanged). Does not consume
+// the handle.
+void rich_panel_set_box(RichPanel *panel, int box_id);
+
+// Set whether the panel expands to the full available width (`true`) or fits
+// its content (`false`). Does not consume the handle. NULL handle is a no-op.
+void rich_panel_set_expand(RichPanel *panel, bool expand);
+
+// Set a fixed panel width in cells. Does not consume the handle. NULL handle
+// is a no-op.
+void rich_panel_set_width(RichPanel *panel, unsigned int width);
+
+// Set the panel's interior padding in cells, in CSS order
+// (top, right, bottom, left). Does not consume the handle. NULL handle is a
+// no-op.
+void rich_panel_set_padding(RichPanel *panel,
+                            unsigned int top,
+                            unsigned int right,
+                            unsigned int bottom,
+                            unsigned int left);
+
+// Set the panel's content/background style (e.g. `"on grey15"`).
+//
+// Parses `style` with `Style::parse`. A NULL/invalid/unparseable `style` is a
+// no-op (the panel is left unchanged). Does not consume the handle.
+void rich_panel_set_style(RichPanel *panel, const char *style);
+
+// Set the panel's border style (e.g. `"bold cyan"`).
+//
+// Parses `style` with `Style::parse`. A NULL/invalid/unparseable `style` is a
+// no-op (the panel is left unchanged). Does not consume the handle.
+void rich_panel_set_border_style(RichPanel *panel, const char *style);
+
+// CONSUME a `RichPanel`, erasing it into the type-erased `RichRenderable`
+// composition currency. The `RichPanel*` is invalid afterward.
+//
+// Returns NULL if `panel` is NULL or was already finished. The returned
+// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+// passed into a consuming container).
+RichRenderable *rich_panel_finish(RichPanel *panel);
+
+// Free a `RichPanel` that was created but never `rich_panel_finish`ed.
+// NULL is a no-op.
+void rich_panel_free(RichPanel *panel);
+
+// Create an empty `Table`. Returns NULL on allocation failure.
+//
+// Free with `rich_table_finish` (which consumes it into a `RichRenderable`)
+// or `rich_table_free`.
+RichTable *rich_table_new(void);
+
+// CONSUME a `RichTable`, erasing it into the type-erased `RichRenderable`
+// composition currency. The `RichTable*` is invalid afterward.
+//
+// Returns NULL if `table` is NULL or was already finished. The returned
+// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+// passed into a consuming container).
+RichRenderable *rich_table_finish(RichTable *table);
+
+// Free a `RichTable` that was created but never `rich_table_finish`ed.
+// NULL is a no-op.
+void rich_table_free(RichTable *table);
+
+// Set the table title (parsed as plain text). NULL/non-UTF-8 is a no-op.
+// Does not consume the handle.
+void rich_table_set_title(RichTable *table, const char *title);
+
+// Set the table caption (parsed as plain text). NULL/non-UTF-8 is a no-op.
+// Does not consume the handle.
+void rich_table_set_caption(RichTable *table, const char *caption);
+
+// Set the box-drawing style by stable int id (see `box_ids::from_int`).
+// An out-of-range id is a no-op (the box is left unchanged).
+void rich_table_set_box(RichTable *table, int box_id);
+
+// Show or hide the header row.
+void rich_table_set_show_header(RichTable *table, bool show);
+
+// Show or hide horizontal lines between rows.
+void rich_table_set_show_lines(RichTable *table, bool show);
+
+// Show or hide the outer edge/border.
+void rich_table_set_show_edge(RichTable *table, bool show);
+
+// Expand the table to the full available width.
+void rich_table_set_expand(RichTable *table, bool expand);
+
+// Set left/right cell padding (top/bottom stay 0).
+void rich_table_set_padding(RichTable *table, unsigned int left, unsigned int right);
+
+// Set the base table style from a style string (e.g. `"on grey23"`).
+// NULL/non-UTF-8/unparseable input is a no-op. Does not consume the handle.
+void rich_table_set_style(RichTable *table, const char *style);
+
+// Add a column with a plain-text header. NULL/non-UTF-8 header is a no-op.
+// Does not consume the handle.
+void rich_table_add_column(RichTable *table, const char *header);
+
+// Add a column whose header is a `RichRenderable`. CONSUMES `header`: the
+// pointer is invalid afterward (do NOT free it). A NULL `header` is a no-op.
+//
+// If `table` is NULL or already finished, the `header` is still consumed and
+// dropped (it cannot be returned to the caller).
+void rich_table_add_column_renderable(RichTable *table, RichRenderable *header);
+
+// Add a row of plain-text cells. `cells` is an array of `count` NUL-terminated
+// UTF-8 strings. NULL `cells`, a NULL/non-UTF-8 element, or `count == 0` is a
+// no-op. Does not consume the handle.
+void rich_table_add_row_strs(RichTable *table, const char *const *cells, unsigned int count);
+
+// Add a row of `RichRenderable` cells. `cells` is an array of `count`
+// `RichRenderable*`. CONSUMES every cell pointer (do NOT free them). A NULL
+// `cells` or `count == 0` is a no-op; any NULL element is skipped.
+//
+// All non-NULL cells are consumed regardless of whether `table` is valid; if
+// `table` is NULL or already finished, the cells are dropped.
+void rich_table_add_row_renderables(RichTable *table,
+                                    RichRenderable *const *cells,
+                                    unsigned int count);
+
+// Create a `RichTree` from a plain-text label (no markup parsing).
+//
+// Equivalent to `Tree::new(Box::new(Text::plain(label)))`. `label` must be
+// valid NUL-terminated UTF-8. Returns NULL if `label` is NULL or not valid
+// UTF-8. Free with `rich_tree_finish` or `rich_tree_free`.
+RichTree *rich_tree_new(const char *label);
+
+// Create a `RichTree` whose root label is an arbitrary renderable.
+//
+// CONSUMES `label`: the `RichRenderable*` is invalid afterward (do not free or
+// reuse it). Returns NULL if `label` is NULL. Free the returned handle with
+// `rich_tree_finish` or `rich_tree_free`.
+RichTree *rich_tree_new_renderable(RichRenderable *label);
+
+// Add a child node with a plain-text label to a `RichTree`.
+//
+// Returns a `RichTreeNode*` BORROW into the new child (for attaching
+// grandchildren via `rich_tree_node_add*`). The returned handle is valid only
+// until `tree` is finished/freed and must NOT be freed (see [`RichTreeNode`]).
+//
+// `label` must be valid NUL-terminated UTF-8. Returns NULL if `tree`/`label`
+// is NULL, `label` is not valid UTF-8, or the tree was already finished.
+RichTreeNode *rich_tree_add(RichTree *tree, const char *label);
+
+// Add a child node whose label is an arbitrary renderable to a `RichTree`.
+//
+// CONSUMES `label`: the `RichRenderable*` is invalid afterward. Returns a
+// `RichTreeNode*` BORROW into the new child (valid only until `tree` is
+// finished/freed; must NOT be freed — see [`RichTreeNode`]).
+//
+// Returns NULL if `tree`/`label` is NULL or the tree was already finished. If
+// it returns NULL the `label` renderable has still been consumed only when a
+// non-NULL `label` was passed and the tree was valid; on a NULL-pointer guard
+// nothing is consumed.
+RichTreeNode *rich_tree_add_renderable(RichTree *tree, RichRenderable *label);
+
+// Add a plain-text child to a sub-node, returning a handle to the grandchild.
+//
+// `node` must be a live `RichTreeNode*` whose owning `RichTree` has not been
+// finished/freed. Returns a `RichTreeNode*` BORROW into the new grandchild
+// (same lifetime/never-free contract — see [`RichTreeNode`]).
+//
+// `label` must be valid NUL-terminated UTF-8. Returns NULL if `node`/`label`
+// is NULL or `label` is not valid UTF-8.
+RichTreeNode *rich_tree_node_add(RichTreeNode *node, const char *label);
+
+// Add a renderable-labelled child to a sub-node, returning a grandchild handle.
+//
+// CONSUMES `label`: the `RichRenderable*` is invalid afterward. `node` must be
+// a live `RichTreeNode*` whose owning `RichTree` is still alive. Returns a
+// `RichTreeNode*` BORROW into the new grandchild (never free it — see
+// [`RichTreeNode`]).
+//
+// Returns NULL if `node`/`label` is NULL.
+RichTreeNode *rich_tree_node_add_renderable(RichTreeNode *node, RichRenderable *label);
+
+// Set the label style (e.g. `"bold cyan"`) on a `RichTree`.
+//
+// Parses `style` with `Style::parse`; a NULL/invalid/unparseable style is a
+// no-op (the tree is left unchanged). Maps to `Tree::with_style`. Does not
+// consume the handle.
+void rich_tree_set_style(RichTree *tree, const char *style);
+
+// Set the guide-line style (e.g. `"dim"`) on a `RichTree`.
+//
+// Parses `style` with `Style::parse`; a NULL/invalid/unparseable style is a
+// no-op. Maps to `Tree::with_guide_style`. Does not consume the handle.
+void rich_tree_set_guide_style(RichTree *tree, const char *style);
+
+// Set whether the root node is hidden when rendering.
+//
+// When `true`, only children render (no root label/guides). Maps to
+// `Tree::with_hide_root`. NULL `tree` is a no-op. Does not consume the handle.
+void rich_tree_set_hide_root(RichTree *tree, bool hide);
+
+// CONSUME a `RichTree`, erasing it into the type-erased `RichRenderable`
+// composition currency. The `RichTree*` is invalid afterward, and so is every
+// `RichTreeNode*` previously derived from it.
+//
+// Returns NULL if `tree` is NULL or was already finished. The returned
+// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+// passed into a consuming container).
+RichRenderable *rich_tree_finish(RichTree *tree);
+
+// Free a `RichTree` that was created but never `rich_tree_finish`ed. NULL is a
+// no-op. This also invalidates every `RichTreeNode*` derived from this tree.
+void rich_tree_free(RichTree *tree);
 
 #ifdef __cplusplus
 }  // extern "C"
