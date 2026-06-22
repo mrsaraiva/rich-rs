@@ -18,6 +18,8 @@ fn main() {
         }
     }
 
-    println!("cargo:rerun-if-changed=src/lib.rs");
+    // Rerun on ANY source change, not just lib.rs — Wave-2 moves exported fns into
+    // per-renderable modules, and the generated header must not silently drift.
+    println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=cbindgen.toml");
 }
