@@ -55,6 +55,19 @@ typedef struct RichPadding RichPadding;
 // `with_*` builders take the value by move.
 typedef struct RichPanel RichPanel;
 
+// Opaque `Progress` handle — a multi-task progress display.
+//
+// Built with `rich_progress_new` (default columns: description, bar,
+// percentage, time remaining). Tasks are added with `rich_progress_add_task`
+// and advanced with `rich_progress_update`. Each `rich_progress_render_frame`
+// renders the CURRENT state of all tasks to one owned string; the C/C++ caller
+// owns the animation loop and the terminal cursor (see the module contract —
+// no background thread crosses the FFI). Free with `rich_progress_free`.
+//
+// `Progress` uses interior mutability (a `Mutex` over its task state), so the
+// task-mutating functions take a shared handle and never need exclusive access.
+typedef struct RichProgress RichProgress;
+
 // Opaque, type-erased renderable — the universal composition currency.
 //
 // Anything that can be rendered or nested inside a container (Panel, Table,
@@ -71,6 +84,28 @@ typedef struct RichRenderable RichRenderable;
 // The inner `Option<Rule>` lets consuming builder setters take/replace the
 // value and lets `rich_rule_finish` move it out.
 typedef struct RichRule RichRule;
+
+// Opaque `Spinner` handle — a single terminal spinner animation.
+//
+// Built with `rich_spinner_new` (NULL if the spinner name is unknown). Each
+// `rich_spinner_render_frame` renders the glyph for an explicit elapsed time
+// supplied by the caller, so the caller controls the animation phase exactly
+// (no internal clock crosses the FFI). Free with `rich_spinner_free`.
+//
+// The inner `Option<Spinner>` mirrors the other live-widget handles' move idiom.
+typedef struct RichSpinner RichSpinner;
+
+// Opaque `Status` handle — a spinner animation with a status message.
+//
+// Built with `rich_status_new`. Each `rich_status_render_frame` renders one
+// frame (spinner glyph + message) to an owned string; the spinner advances
+// according to wall-clock time elapsed since creation, so successive frames
+// animate. The C/C++ caller owns the loop and cursor (no thread crosses the
+// FFI). Free with `rich_status_free`.
+//
+// The inner `Option<Status>` lets the handle hold the value by move for a
+// uniform new/free idiom (the option is always `Some` while live).
+typedef struct RichStatus RichStatus;
 
 // Opaque parsed-style handle wrapping a `rich_rs::Style`. Created by
 // `rich_style_parse`, freed by `rich_style_free`. Held opaque for
@@ -334,15 +369,13 @@ void rich_markdown_free(RichMarkdown *markdown);
 // Re-formats `data` with `indent` spaces per level, optionally applies JSON
 // syntax `highlight`ing, and optionally `sort_keys` on objects.
 //
-// `data` must be valid NUL-terminated UTF-8. Returns NULL if `data` is NULL or
-// not valid UTF-8.
+// `data` must be valid NUL-terminated UTF-8 AND well-formed JSON. Returns NULL
+// if `data` is NULL, not valid UTF-8, or not well-formed JSON.
 //
-// NOTE: `rich_rs::Json::new` does NOT validate the input — if `data` is not
-// well-formed JSON it is rendered as-is (passed through unformatted) rather
-// than rejected. This function therefore returns a non-NULL handle for any
-// valid-UTF-8 `data`; it does not (and cannot, without a parser dependency)
-// signal invalid JSON by returning NULL. Free with `rich_json_finish` or
-// `rich_json_free`.
+// The input is validated with `serde_json` (parse-and-discard) before
+// construction so this function honors the spec contract of rejecting
+// malformed JSON, rather than passing it through unformatted. Free with
+// `rich_json_finish` or `rich_json_free`.
 RichJson *rich_json_new(const char *data, unsigned int indent, bool highlight, bool sort_keys);
 
 // CONSUME a `RichJson`, erasing it into the type-erased `RichRenderable`
@@ -491,6 +524,96 @@ RichRenderable *rich_padding_finish(RichPadding *padding);
 // NULL is a no-op.
 void rich_padding_free(RichPadding *padding);
 
+// Create a `Progress` with Rich's default columns (description, bar,
+// percentage, time remaining). Returns NULL on allocation/init failure.
+//
+// The returned handle MUST be freed with `rich_progress_free`. Auto-refresh is
+// disabled: this ABI never starts a background thread — the caller renders each
+// frame explicitly via `rich_progress_render_frame`.
+RichProgress *rich_progress_new(void);
+
+// Add a task to the progress display, returning its task id.
+//
+// `description` must be valid NUL-terminated UTF-8. `total` is the total amount
+// of work (e.g. `100.0`); pass a non-positive/`0` value to still create a task
+// (it is forwarded as-is). The task is started immediately and made visible.
+//
+// Returns the new task id as an `unsigned long long` (maps to rich-rs
+// `TaskID(usize)`). Returns `0` if `progress`/`description` is NULL or
+// `description` is not valid UTF-8 — note `0` is also the FIRST legitimately
+// assigned task id, so this sentinel is only meaningful for distinguishing a
+// NULL-argument early-out, not for in-band error detection.
+uint64_t rich_progress_add_task(RichProgress *progress, const char *description, double total);
+
+// Set a task's completed amount to `completed`.
+//
+// `task_id` is a value previously returned by `rich_progress_add_task`. An
+// unknown id is a silent no-op (matching rich-rs `Progress::update`). Does not
+// trigger a refresh (the caller renders frames explicitly). NULL `progress`
+// is a no-op.
+void rich_progress_update(RichProgress *progress, uint64_t task_id, double completed);
+
+// Render the CURRENT progress state to an owned, NUL-terminated C string.
+//
+// Renders every visible task's row (the tasks table) through `console`,
+// honoring its force-terminal / color / width settings: with
+// `set_force_terminal(true)` the frame contains ANSI escapes; with `false` it
+// is plain text with zero escapes. No trailing newline is appended — the caller
+// owns line endings and cursor positioning.
+//
+// BORROWS both handles (neither is consumed). Returns NULL if
+// `progress`/`console` is NULL or rendering fails. A non-NULL result MUST be
+// freed with `rich_string_free`.
+char *rich_progress_render_frame(RichProgress *progress, RichConsole *console);
+
+// Free a `Progress` created by `rich_progress_new`. NULL is a no-op.
+void rich_progress_free(RichProgress *progress);
+
+// Create a `Status` with the given message (uses the default "dots" spinner).
+//
+// `message` may contain console markup (e.g. `"[bold green]Working..."`). It
+// must be valid NUL-terminated UTF-8. Returns NULL if `message` is NULL or not
+// valid UTF-8. The returned handle MUST be freed with `rich_status_free`.
+RichStatus *rich_status_new(const char *message);
+
+// Render the CURRENT status frame (spinner glyph + message) to an owned C
+// string through `console`.
+//
+// Honors the console's force-terminal / color / width settings: styled (with
+// ANSI escapes) when forced, plain (zero escapes) otherwise. No trailing
+// newline is appended. BORROWS both handles (neither consumed).
+//
+// Returns NULL if `status`/`console` is NULL, the status was somehow empty, or
+// rendering fails. A non-NULL result MUST be freed with `rich_string_free`.
+char *rich_status_render_frame(RichStatus *status, RichConsole *console);
+
+// Free a `Status` created by `rich_status_new`. NULL is a no-op.
+void rich_status_free(RichStatus *status);
+
+// Create a `Spinner` by name (e.g. `"dots"`, `"line"`, `"earth"`).
+//
+// `name` must be valid NUL-terminated UTF-8. Returns NULL if `name` is NULL,
+// not valid UTF-8, or NOT a known spinner (rich-rs `Spinner::new` returns an
+// error for unknown names). The returned handle MUST be freed with
+// `rich_spinner_free`.
+RichSpinner *rich_spinner_new(const char *name);
+
+// Render the spinner glyph for `time_seconds` of elapsed time to an owned C
+// string through `console`.
+//
+// `time_seconds` is the elapsed time (from the caller's chosen epoch) used to
+// pick the animation frame; advancing it across calls animates the spinner.
+// Honors the console's force-terminal / color / width settings: styled (ANSI)
+// when forced, plain (zero escapes) otherwise. No trailing newline is appended.
+// BORROWS both handles (neither consumed).
+//
+// Returns NULL if `spinner`/`console` is NULL or rendering fails. A non-NULL
+// result MUST be freed with `rich_string_free`.
+char *rich_spinner_render_frame(RichSpinner *spinner, RichConsole *console, double time_seconds);
+
+// Free a `Spinner` created by `rich_spinner_new`. NULL is a no-op.
+void rich_spinner_free(RichSpinner *spinner);
+
 // Create a `Panel` wrapping the given content renderable.
 //
 // CONSUMES `content`: the `RichRenderable*` is moved into the panel and is
@@ -580,6 +703,24 @@ void rich_table_set_title(RichTable *table, const char *title);
 // Set the table caption (parsed as plain text). NULL/non-UTF-8 is a no-op.
 // Does not consume the handle.
 void rich_table_set_caption(RichTable *table, const char *caption);
+
+// Set the table title by parsing console markup (e.g. `[bold]Peers[/]`).
+//
+// Honors the console's markup/emoji/highlight settings via
+// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
+// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
+// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
+// the table handle.
+void rich_table_set_title_markup(RichTable *table, RichConsole *console, const char *markup);
+
+// Set the table caption by parsing console markup (e.g. `[dim]src[/]`).
+//
+// Honors the console's markup/emoji/highlight settings via
+// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
+// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
+// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
+// the table handle.
+void rich_table_set_caption_markup(RichTable *table, RichConsole *console, const char *markup);
 
 // Set the box-drawing style by stable int id (see `box_ids::from_int`).
 // An out-of-range id is a no-op (the box is left unchanged).
