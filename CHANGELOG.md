@@ -8,7 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **C ABI bindings** (`ffi/` crate, `rich-ffi`) for consuming rich-rs from C/C++. Opaque-handle `Console` API with a cbindgen-generated `rich.h`, a header-only C++ RAII wrapper (`rich.hpp`), and static/shared library output (`librich_ffi.{a,so}` / `rich_ffi.{lib,dll}`). Honors a terminal/plain-text contract via `rich_console_set_force_terminal` so piped output emits zero ANSI (daemon-safe) while a TTY emits full styling. Panic-guarded boundaries and explicit string ownership. Excluded from the published crate tarball.
+- **C ABI bindings** (`ffi/` crate, `rich-ffi`) for consuming rich-rs from C/C++. Opaque-handle API with a cbindgen-generated `rich.h`, a header-only C++ RAII wrapper (`rich.hpp`), and static/shared library output (`librich_ffi.{a,so}` / `rich_ffi.{lib,dll}`). Honors a terminal/plain-text contract via `rich_console_set_force_terminal` so piped output emits zero ANSI (daemon-safe) while a TTY emits full styling. Panic-guarded boundaries and explicit ownership throughout. Excluded from the published crate tarball.
+  - **Console + text:** create/configure a console, markup rendering, and a type-erased `RichRenderable` composition currency (`rich_console_render`), plus `RichText` and `RichStyle` handles.
+  - **Renderables:** `RichTable`, `RichPanel`, `RichTree` (with borrowed `RichTreeNode` children), layout (`RichRule`, `RichColumns`, `RichAlign`, `RichPadding`), and content (`RichSyntax`, `RichMarkdown`, `RichJson`) — container constructors accept and consume `RichRenderable*` for arbitrary nesting.
 
 ## [1.1.1] - 2026-06-14
 
