@@ -114,7 +114,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: [test, parity, package]
+    # Gate crate publish on ALL ffi-build arches succeeding: a release is
+    # atomic — if any platform's library fails to build, we publish nothing
+    # (no crates.io upload, no GitHub Release).
+    needs: [test, parity, package, ffi-build]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
