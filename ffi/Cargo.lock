@@ -619,6 +619,7 @@ version = "0.1.0"
 dependencies = [
  "cbindgen",
  "rich-rs",
+ "serde_json",
 ]
 
 [[package]]

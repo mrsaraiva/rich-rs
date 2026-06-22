@@ -318,15 +318,13 @@ pub struct RichJson(Option<rich_rs::Json>);
 /// Re-formats `data` with `indent` spaces per level, optionally applies JSON
 /// syntax `highlight`ing, and optionally `sort_keys` on objects.
 ///
-/// `data` must be valid NUL-terminated UTF-8. Returns NULL if `data` is NULL or
-/// not valid UTF-8.
+/// `data` must be valid NUL-terminated UTF-8 AND well-formed JSON. Returns NULL
+/// if `data` is NULL, not valid UTF-8, or not well-formed JSON.
 ///
-/// NOTE: `rich_rs::Json::new` does NOT validate the input — if `data` is not
-/// well-formed JSON it is rendered as-is (passed through unformatted) rather
-/// than rejected. This function therefore returns a non-NULL handle for any
-/// valid-UTF-8 `data`; it does not (and cannot, without a parser dependency)
-/// signal invalid JSON by returning NULL. Free with `rich_json_finish` or
-/// `rich_json_free`.
+/// The input is validated with `serde_json` (parse-and-discard) before
+/// construction so this function honors the spec contract of rejecting
+/// malformed JSON, rather than passing it through unformatted. Free with
+/// `rich_json_finish` or `rich_json_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_json_new(
     data: *const c_char,
@@ -340,6 +338,8 @@ pub extern "C" fn rich_json_new(
     let result = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: caller guarantees a valid NUL-terminated string.
         let data = unsafe { CStr::from_ptr(data) }.to_str().ok()?;
+        // Validate input: reject malformed JSON by returning NULL.
+        serde_json::from_str::<serde_json::Value>(data).ok()?;
         let json = Json::new(data, indent as usize, highlight, sort_keys);
         Some(Box::into_raw(Box::new(RichJson(Some(json)))))
     }));
