@@ -346,10 +346,10 @@ pub fn render_with_emoji_variant(
                         Some(meta),
                     ));
                 } else if open_tag.name == "link" {
-                    // Link tag - apply underline+cyan as visual indicator
-                    let link_style = Style::new()
-                        .with_underline(true)
-                        .with_color(crate::color::SimpleColor::Standard(6)); // cyan
+                    // Link tag — Python Rich applies OSC8 hyperlink metadata only;
+                    // no visual color or underline is added by the markup parser itself.
+                    // Visual link styling (underline, color) is handled separately by
+                    // Console/Theme link_style, not hardcoded here.
                     let meta = open_tag
                         .parameters
                         .as_ref()
@@ -358,7 +358,7 @@ pub fn render_with_emoji_variant(
                     spans.push(Span::new_with_meta(
                         start,
                         text.len(),
-                        link_style,
+                        Style::new(),
                         Some(meta),
                     ));
                 } else {
@@ -403,10 +403,7 @@ pub fn render_with_emoji_variant(
                 Some(meta),
             ));
         } else if tag.name == "link" {
-            // Link tag - apply underline+cyan (matches explicit close behavior)
-            let link_style = Style::new()
-                .with_underline(true)
-                .with_color(crate::color::SimpleColor::Standard(6)); // cyan
+            // Link tag — no visual style; OSC8 link metadata only.
             let meta = tag
                 .parameters
                 .as_ref()
@@ -415,7 +412,7 @@ pub fn render_with_emoji_variant(
             spans.push(Span::new_with_meta(
                 start,
                 text_length,
-                link_style,
+                Style::new(),
                 Some(meta),
             ));
         } else {
@@ -611,12 +608,13 @@ mod tests {
 
     #[test]
     fn test_render_unclosed_link() {
-        // Unclosed link should apply underline+cyan to end of text
+        // Unclosed link: Python Rich applies OSC8 hyperlink metadata only — no
+        // visual underline or colour from the markup parser itself.
         let text = render("[link=https://x]hi", false).unwrap();
         assert_eq!(text.plain_text(), "hi");
         assert!(!text.spans().is_empty());
-        // Should have underline from link style
-        assert!(text.spans()[0].style.underline == Some(true));
+        // No visual style on the link span (underline / fg handled by Console/Theme)
+        assert!(text.spans()[0].style.is_null());
         assert_eq!(
             text.spans()[0]
                 .meta
