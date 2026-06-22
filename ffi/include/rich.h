@@ -15,6 +15,26 @@
 // string. The caller decides where it goes (stdout, a log line, etc.).
 typedef struct RichConsole RichConsole;
 
+// Opaque, type-erased renderable — the universal composition currency.
+//
+// Anything that can be rendered or nested inside a container (Panel, Table,
+// Tree, Align, ...) is moved through one of these. A `RichRenderable*` is
+// produced by a typed builder's `*_finish` function (e.g. `rich_text_finish`)
+// and either rendered with `rich_console_render`, passed into a consuming
+// container constructor, or freed with `rich_renderable_free`.
+typedef struct RichRenderable RichRenderable;
+
+// Opaque parsed-style handle wrapping a `rich_rs::Style`. Created by
+// `rich_style_parse`, freed by `rich_style_free`. Held opaque for
+// forward-compat even though `Style` is `Copy` underneath.
+typedef struct RichStyle RichStyle;
+
+// Opaque `Text` builder handle. Build it, optionally style it, then either
+// `rich_text_finish` it into a `RichRenderable` or `rich_text_free` it.
+//
+// The inner `Option<Text>` lets `rich_text_finish` take the value by move.
+typedef struct RichText RichText;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -64,6 +84,66 @@ char *rich_console_render_markup(RichConsole *console, const char *markup);
 
 // Free a string returned by `rich_console_render_markup`. NULL is a no-op.
 void rich_string_free(char *s);
+
+// Render a `RichRenderable` to an owned, NUL-terminated C string.
+//
+// BORROWS `renderable`: the handle stays valid and the caller still owns it
+// (free it later with `rich_renderable_free` unless it was consumed by a
+// container). Honors the console's current force-terminal / color / width
+// settings, so `set_force_terminal(false)` yields plain text with zero ANSI.
+// No trailing newline is appended.
+//
+// Returns NULL if `console`/`renderable` is NULL or rendering fails. A
+// non-NULL result MUST be freed with `rich_string_free`.
+char *rich_console_render(RichConsole *console, const RichRenderable *renderable);
+
+// Free a `RichRenderable` created by a `*_finish` function but never passed
+// into a consuming container. NULL is a no-op.
+void rich_renderable_free(RichRenderable *renderable);
+
+// Create a `RichText` from plain text (no markup parsing).
+//
+// `text` must be valid NUL-terminated UTF-8. Returns NULL if `text` is NULL
+// or not valid UTF-8. Free with `rich_text_finish` or `rich_text_free`.
+RichText *rich_text_new(const char *text);
+
+// Create a `RichText` by parsing console markup (e.g. `[bold red]hi[/]`).
+//
+// Honors the console's markup/emoji/highlight settings via `Console::render_str`.
+// `markup` must be valid NUL-terminated UTF-8. Returns NULL if either pointer
+// is NULL or `markup` is not valid UTF-8. Free with `rich_text_finish` or
+// `rich_text_free`. The `console` handle is borrowed (not consumed).
+RichText *rich_text_new_markup(RichConsole *console, const char *markup);
+
+// Apply a base style (e.g. `"bold red on white"`) to a `RichText`.
+//
+// Parses `style` with `Style::parse` and sets it as the text's base style via
+// `Text::set_base_style`. A NULL/invalid/unparseable `style` is a no-op (the
+// text is left unchanged). Does not consume the handle.
+void rich_text_set_style(RichText *text, const char *style);
+
+// CONSUME a `RichText`, erasing it into the type-erased `RichRenderable`
+// composition currency. The `RichText*` is invalid afterward.
+//
+// Returns NULL if `text` is NULL or was already finished. The returned
+// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+// passed into a consuming container).
+RichRenderable *rich_text_finish(RichText *text);
+
+// Free a `RichText` that was created but never `rich_text_finish`ed.
+// NULL is a no-op.
+void rich_text_free(RichText *text);
+
+// Parse a style string (e.g. `"bold red on white"`) into a `RichStyle`.
+//
+// `style` must be valid NUL-terminated UTF-8. Returns NULL if `style` is NULL,
+// not valid UTF-8, or produces no actual style (empty/whitespace input, or
+// input whose tokens are all unrecognized — e.g. `"nonsense-xyz"`). A non-NULL
+// result MUST be freed with `rich_style_free`.
+RichStyle *rich_style_parse(const char *style);
+
+// Free a `RichStyle` created by `rich_style_parse`. NULL is a no-op.
+void rich_style_free(RichStyle *style);
 
 #ifdef __cplusplus
 }  // extern "C"

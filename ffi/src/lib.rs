@@ -31,7 +31,10 @@
 use std::ffi::{CStr, CString, c_char, c_int, c_uint};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use rich_rs::{ColorSystem, Console};
+use rich_rs::{ColorSystem, Console, Renderable, Style, Text};
+
+mod common;
+use common::{parse_style, render_to_cstring};
 
 /// Opaque console handle. C/C++ only ever sees a `RichConsole*`.
 ///
@@ -207,5 +210,211 @@ fn with_console(console: *mut RichConsole, f: impl FnOnce(&mut RichConsole)) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: non-NULL handle from `rich_console_new`.
         f(unsafe { &mut *console });
+    }));
+}
+
+// ===========================================================================
+// Phase 1 — RichRenderable: the type-erased composition currency
+// ===========================================================================
+
+/// Opaque, type-erased renderable — the universal composition currency.
+///
+/// Anything that can be rendered or nested inside a container (Panel, Table,
+/// Tree, Align, ...) is moved through one of these. A `RichRenderable*` is
+/// produced by a typed builder's `*_finish` function (e.g. `rich_text_finish`)
+/// and either rendered with `rich_console_render`, passed into a consuming
+/// container constructor, or freed with `rich_renderable_free`.
+pub struct RichRenderable(Box<dyn Renderable + Send + Sync>);
+
+/// Render a `RichRenderable` to an owned, NUL-terminated C string.
+///
+/// BORROWS `renderable`: the handle stays valid and the caller still owns it
+/// (free it later with `rich_renderable_free` unless it was consumed by a
+/// container). Honors the console's current force-terminal / color / width
+/// settings, so `set_force_terminal(false)` yields plain text with zero ANSI.
+/// No trailing newline is appended.
+///
+/// Returns NULL if `console`/`renderable` is NULL or rendering fails. A
+/// non-NULL result MUST be freed with `rich_string_free`.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_console_render(
+    console: *mut RichConsole,
+    renderable: *const RichRenderable,
+) -> *mut c_char {
+    if console.is_null() || renderable.is_null() {
+        return std::ptr::null_mut();
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: non-NULL handles from `rich_console_new` / a `*_finish` fn.
+        let con = unsafe { &mut *console };
+        let r = unsafe { &*renderable };
+        render_to_cstring(con, r.0.as_ref())
+    }));
+    result.unwrap_or(std::ptr::null_mut())
+}
+
+/// Free a `RichRenderable` created by a `*_finish` function but never passed
+/// into a consuming container. NULL is a no-op.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_renderable_free(renderable: *mut RichRenderable) {
+    if renderable.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: came from `Box::into_raw` in a `*_finish` function.
+        drop(unsafe { Box::from_raw(renderable) });
+    }));
+}
+
+// ===========================================================================
+// Phase 1 — RichText: styled-text builder
+// ===========================================================================
+
+/// Opaque `Text` builder handle. Build it, optionally style it, then either
+/// `rich_text_finish` it into a `RichRenderable` or `rich_text_free` it.
+///
+/// The inner `Option<Text>` lets `rich_text_finish` take the value by move.
+pub struct RichText(Option<Text>);
+
+/// Create a `RichText` from plain text (no markup parsing).
+///
+/// `text` must be valid NUL-terminated UTF-8. Returns NULL if `text` is NULL
+/// or not valid UTF-8. Free with `rich_text_finish` or `rich_text_free`.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_text_new(text: *const c_char) -> *mut RichText {
+    if text.is_null() {
+        return std::ptr::null_mut();
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: caller guarantees a valid NUL-terminated string.
+        let s = unsafe { CStr::from_ptr(text) }.to_str().ok()?;
+        Some(Box::into_raw(Box::new(RichText(Some(Text::plain(s))))))
+    }));
+    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+}
+
+/// Create a `RichText` by parsing console markup (e.g. `[bold red]hi[/]`).
+///
+/// Honors the console's markup/emoji/highlight settings via `Console::render_str`.
+/// `markup` must be valid NUL-terminated UTF-8. Returns NULL if either pointer
+/// is NULL or `markup` is not valid UTF-8. Free with `rich_text_finish` or
+/// `rich_text_free`. The `console` handle is borrowed (not consumed).
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_text_new_markup(
+    console: *mut RichConsole,
+    markup: *const c_char,
+) -> *mut RichText {
+    if console.is_null() || markup.is_null() {
+        return std::ptr::null_mut();
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
+        let con = unsafe { &mut *console };
+        let s = unsafe { CStr::from_ptr(markup) }.to_str().ok()?;
+        let text = con.inner.render_str(s, None, None, None, None);
+        Some(Box::into_raw(Box::new(RichText(Some(text)))))
+    }));
+    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+}
+
+/// Apply a base style (e.g. `"bold red on white"`) to a `RichText`.
+///
+/// Parses `style` with `Style::parse` and sets it as the text's base style via
+/// `Text::set_base_style`. A NULL/invalid/unparseable `style` is a no-op (the
+/// text is left unchanged). Does not consume the handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_text_set_style(text: *mut RichText, style: *const c_char) {
+    if text.is_null() || style.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
+        let t = unsafe { &mut *text };
+        let Some(s) = (unsafe { CStr::from_ptr(style) }).to_str().ok() else {
+            return;
+        };
+        if let Some(parsed) = parse_style(s)
+            && let Some(inner) = t.0.as_mut()
+        {
+            inner.set_base_style(Some(parsed));
+        }
+    }));
+}
+
+/// CONSUME a `RichText`, erasing it into the type-erased `RichRenderable`
+/// composition currency. The `RichText*` is invalid afterward.
+///
+/// Returns NULL if `text` is NULL or was already finished. The returned
+/// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
+/// passed into a consuming container).
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_text_finish(text: *mut RichText) -> *mut RichRenderable {
+    if text.is_null() {
+        return std::ptr::null_mut();
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: came from `Box::into_raw` in a `rich_text_new*` function.
+        let boxed = unsafe { Box::from_raw(text) };
+        let inner = boxed.0?;
+        Some(Box::into_raw(Box::new(RichRenderable(Box::new(inner)))))
+    }));
+    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+}
+
+/// Free a `RichText` that was created but never `rich_text_finish`ed.
+/// NULL is a no-op.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_text_free(text: *mut RichText) {
+    if text.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: came from `Box::into_raw` in a `rich_text_new*` function.
+        drop(unsafe { Box::from_raw(text) });
+    }));
+}
+
+// ===========================================================================
+// Phase 1 — RichStyle: parsed-style handle
+// ===========================================================================
+
+/// Opaque parsed-style handle wrapping a `rich_rs::Style`. Created by
+/// `rich_style_parse`, freed by `rich_style_free`. Held opaque for
+/// forward-compat even though `Style` is `Copy` underneath.
+// The inner Style is not yet read in Phase 1 (parse + free only). Wave-2
+// phases (e.g. style-taking setters) will consume it; landed now so the
+// handle type and its free fn are stable across the campaign.
+#[allow(dead_code)]
+pub struct RichStyle(Style);
+
+/// Parse a style string (e.g. `"bold red on white"`) into a `RichStyle`.
+///
+/// `style` must be valid NUL-terminated UTF-8. Returns NULL if `style` is NULL,
+/// not valid UTF-8, or produces no actual style (empty/whitespace input, or
+/// input whose tokens are all unrecognized — e.g. `"nonsense-xyz"`). A non-NULL
+/// result MUST be freed with `rich_style_free`.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_style_parse(style: *const c_char) -> *mut RichStyle {
+    if style.is_null() {
+        return std::ptr::null_mut();
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: caller guarantees a valid NUL-terminated string.
+        let s = unsafe { CStr::from_ptr(style) }.to_str().ok()?;
+        let parsed = parse_style(s)?;
+        Some(Box::into_raw(Box::new(RichStyle(parsed))))
+    }));
+    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+}
+
+/// Free a `RichStyle` created by `rich_style_parse`. NULL is a no-op.
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_style_free(style: *mut RichStyle) {
+    if style.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: came from `Box::into_raw` in `rich_style_parse`.
+        drop(unsafe { Box::from_raw(style) });
     }));
 }
