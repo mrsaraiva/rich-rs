@@ -36,6 +36,15 @@ use rich_rs::{ColorSystem, Console, Renderable, Style, Text};
 mod common;
 use common::{parse_style, render_to_cstring};
 
+// Wave-2 renderable modules. Declared here so each phase lane edits ONLY its own
+// module file (zero shared-file conflicts). Functions inside are `#[no_mangle]`
+// and export regardless of module privacy; cbindgen reads each file directly.
+mod content;
+mod layout;
+mod panel;
+mod table;
+mod tree;
+
 /// Opaque console handle. C/C++ only ever sees a `RichConsole*`.
 ///
 /// Backed by a capture console: rendering writes ANSI (or plain) text to an
