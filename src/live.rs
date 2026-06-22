@@ -8,6 +8,8 @@
 
 use std::io;
 use std::io::Stdout;
+// Only used by the `#[cfg(unix)]` stream-redirect locks below; unused on Windows.
+#[cfg(unix)]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
