@@ -86,7 +86,6 @@ rich-ffi-<version>-<target>.tar.gz
 |---------------|--------|----------|
 | `x86_64-unknown-linux-gnu`  | ubuntu-22.04     | `librich_ffi.a`, `librich_ffi.so` |
 | `aarch64-unknown-linux-gnu` | ubuntu-22.04-arm | `librich_ffi.a`, `librich_ffi.so` |
-| `x86_64-apple-darwin`       | macos-13         | `librich_ffi.a`, `librich_ffi.dylib` |
 | `aarch64-apple-darwin`      | macos-14         | `librich_ffi.a`, `librich_ffi.dylib` |
 | `x86_64-pc-windows-msvc`    | windows-2022     | `rich_ffi.lib`, `rich_ffi.dll`, `rich_ffi.dll.lib` |
 | `aarch64-pc-windows-msvc`   | windows-11-arm   | `rich_ffi.lib`, `rich_ffi.dll`, `rich_ffi.dll.lib` |

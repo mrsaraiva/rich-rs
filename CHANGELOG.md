@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Console + text:** create/configure a console, markup rendering, and a type-erased `RichRenderable` composition currency (`rich_console_render`), plus `RichText` and `RichStyle` handles.
   - **Renderables:** `RichTable`, `RichPanel`, `RichTree` (with borrowed `RichTreeNode` children), layout (`RichRule`, `RichColumns`, `RichAlign`, `RichPadding`), and content (`RichSyntax`, `RichMarkdown`, `RichJson`) — container constructors accept and consume `RichRenderable*` for arbitrary nesting.
   - **Live widgets** (frame-based, no threads across the FFI boundary): `RichProgress`, `RichStatus`, `RichSpinner`.
-  - **Prebuilt artifacts:** GitHub Releases now ship `librich_ffi` static/shared libraries + headers for Linux, macOS, and Windows (x86_64 + arm64), so C/C++ consumers need no Rust toolchain.
+  - **Prebuilt artifacts:** GitHub Releases now ship `librich_ffi` static/shared libraries + headers for Linux (x86_64 + arm64), macOS (arm64), and Windows (x86_64 + arm64), so C/C++ consumers need no Rust toolchain.
 
 ## [1.1.1] - 2026-06-14
 
