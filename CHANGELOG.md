@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-06-22
+
+### Fixed
+
+- `[link=url]` markup now carries OSC8 hyperlink metadata only — removed the
+  hardcoded underline + cyan (Standard 6) visual styling the markup parser was
+  applying. Matches Python Rich (markup emits the `link=`/OSC8 attribute, never a
+  visual colour) and Python Textual (markup sets `link=` meta only). Visual link
+  styling is the consumer's responsibility (Console/Theme `link_style`), not the
+  parser. The URL is preserved as `meta.link`, so OSC8 output is non-lossy.
+
 ## [1.2.0] - 2026-06-22
 
 ### Added

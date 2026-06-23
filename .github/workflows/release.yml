@@ -9,10 +9,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -27,10 +27,10 @@ jobs:
   parity:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install Python Rich
@@ -48,7 +48,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Package (dry run)
         env:
@@ -67,8 +67,10 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
-          # macOS is arm64-only: macos-13 was the last Intel runner and is being
-          # retired (github.blog 2025-09-19), so x86_64-apple-darwin is dropped.
+          # macOS arm64 only. macos-13 (the last native Intel runner) is retiring
+          # (github.blog 2025-09-19); x86_64-apple-darwin is still cross-compilable
+          # on the arm64 runners, but Intel Macs are a shrinking minority — dropped
+          # as not worth the extra leg (re-add an x86_64 cross-build if ever needed).
           - { target: aarch64-apple-darwin,      os: macos-14 }
           - { target: x86_64-pc-windows-msvc,    os: windows-2022 }
           - { target: aarch64-pc-windows-msvc,   os: windows-11-arm }
@@ -79,7 +81,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -104,7 +106,7 @@ jobs:
           echo "name=${name}" >> "$GITHUB_OUTPUT"
           echo "--- packaged ${name}.tar.gz ---"
           tar -tzf "${name}.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ffi-${{ matrix.target }}
           path: ${{ steps.pkg.outputs.name }}.tar.gz
@@ -120,7 +122,7 @@ jobs:
     # (no crates.io upload, no GitHub Release).
     needs: [test, parity, package, ffi-build]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Read crate version
         id: crate_version
@@ -161,9 +163,9 @@ jobs:
       contents: write
     needs: [test, parity, package, publish, ffi-build]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download FFI artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: ffi-*
           path: dist
