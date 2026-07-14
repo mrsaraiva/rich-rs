@@ -1135,6 +1135,46 @@ impl Syntax {
         result
     }
 
+    /// Compute the indent-guide foreground colour for a theme.
+    ///
+    /// Python Rich draws indent guides with the theme's `Comment` token colour
+    /// plus the `dim` attribute; Textual's `ANSIToTruecolor` filter then
+    /// pre-blends `dim` into a concrete colour (`bg + (fg - bg) * 0.66`) and
+    /// strips the attribute. Derive that final colour here so the guides match
+    /// the Python output exactly, instead of relying on terminal SGR dim.
+    ///
+    /// Returns `None` when the theme has no syntect backing or no usable
+    /// background colour (callers should fall back to a plain dim style).
+    fn indent_guide_color(
+        theme: &dyn SyntaxTheme,
+        background_override: Option<Color>,
+    ) -> Option<Color> {
+        const DIM_FACTOR: f64 = 0.66;
+
+        let syntect_theme = theme.syntect_theme()?;
+        let highlighter = syntect::highlighting::Highlighter::new(syntect_theme);
+        let comment_scope = syntect::parsing::Scope::new("comment").ok()?;
+        let fg = highlighter.style_for_stack(&[comment_scope]).foreground;
+
+        let (bg_r, bg_g, bg_b) = match background_override {
+            Some(Color::Rgb { r, g, b }) => (r, g, b),
+            Some(_) => return None,
+            None => {
+                let bg = syntect_theme.settings.background?;
+                (bg.r, bg.g, bg.b)
+            }
+        };
+
+        // Match Python's truncation (rich `Color.from_rgb` goes through `int()`).
+        let blend =
+            |bg: u8, fg: u8| (f64::from(bg) + (f64::from(fg) - f64::from(bg)) * DIM_FACTOR) as u8;
+        Some(Color::Rgb {
+            r: blend(bg_r, fg.r),
+            g: blend(bg_g, fg.g),
+            b: blend(bg_b, fg.b),
+        })
+    }
+
     /// Get the width of the line numbers column.
     fn numbers_column_width(&self) -> usize {
         if !self.line_numbers {
@@ -1218,16 +1258,14 @@ impl Renderable for Syntax {
         // Highlighted line number style - bold with same background
         let highlight_number_style = base_style.combine(&Style::new().with_bold(true));
 
-        // Indent guide style - dim grayish color matching Python Rich's Monokai
-        // RGB(149, 144, 119) with dim attribute
+        // Indent guide style - the theme's comment colour, dim pre-blended over
+        // the background (see `indent_guide_color`). Falls back to an SGR dim
+        // attribute when the colour can't be derived (e.g. ANSI themes).
+        let render_theme: &dyn SyntaxTheme = effective_theme.as_deref().unwrap_or(&*self.theme);
         let indent_guide_style = base_style.combine(
-            &Style::new()
-                .with_color(Color::Rgb {
-                    r: 149,
-                    g: 144,
-                    b: 119,
-                })
-                .with_dim(true),
+            &Self::indent_guide_color(render_theme, self.background_color)
+                .map(|color| Style::new().with_color(color))
+                .unwrap_or_else(|| Style::new().with_dim(true)),
         );
 
         // Add top padding
@@ -1658,6 +1696,103 @@ mod tests {
         assert!(
             has_italic_span,
             "Should have an italic span from with_highlight_range"
+        );
+    }
+
+    /// Resolve the highlighted colour of the first occurrence of `token` in
+    /// Python `code` under the default (monokai) theme.
+    fn python_token_color(code: &str, token: &str) -> Option<Color> {
+        let syntax = Syntax::new(code, "python");
+        let text = syntax.highlight();
+        let plain = text.plain_text();
+        // ASCII-only test inputs: byte offset == char offset.
+        let start = plain.find(token).expect("token present in highlighted text");
+        let mut found = None;
+        for span in text.spans() {
+            if span.start <= start && start < span.end {
+                if let Some(color) = span.style.color {
+                    found = Some(color);
+                }
+            }
+        }
+        found
+    }
+
+    const MONOKAI_PLAIN: Color = Color::Rgb {
+        r: 0xf8,
+        g: 0xf8,
+        b: 0xf2,
+    };
+    const MONOKAI_OPERATOR: Color = Color::Rgb {
+        r: 0xff,
+        g: 0x46,
+        b: 0x89,
+    };
+    const MONOKAI_STRING: Color = Color::Rgb {
+        r: 0xe6,
+        g: 0xdb,
+        b: 0x74,
+    };
+    const MONOKAI_COMMENT: Color = Color::Rgb {
+        r: 0x95,
+        g: 0x90,
+        b: 0x77,
+    };
+
+    /// Pygments parity: parameter-annotation `:` is plain Punctuation (white),
+    /// while the return arrow `->` is an Operator (pink).
+    #[test]
+    fn test_python_annotation_colon_is_plain_punctuation() {
+        let code = "def f(values: Iterable[T]) -> int:\n    pass\n";
+        // The first `:` in the code is the parameter annotation separator.
+        assert_eq!(python_token_color(code, ":"), Some(MONOKAI_PLAIN));
+        assert_eq!(python_token_color(code, "->"), Some(MONOKAI_OPERATOR));
+    }
+
+    /// Pygments parity: docstring triple-quote delimiters take the string
+    /// colour (the whole docstring is one String.Doc token in Pygments).
+    #[test]
+    fn test_python_docstring_quotes_are_string_colored() {
+        let code = "def f():\n    \"\"\"Doc.\"\"\"\n";
+        assert_eq!(python_token_color(code, "\"\"\""), Some(MONOKAI_STRING));
+    }
+
+    /// Pygments parity: the `in` of `for ... in` is an Operator.Word (pink),
+    /// not a plain keyword (cyan).
+    #[test]
+    fn test_python_for_in_is_operator_word() {
+        let code = "for value in values:\n    pass\n";
+        assert_eq!(python_token_color(code, "in"), Some(MONOKAI_OPERATOR));
+        assert_eq!(
+            python_token_color(code, "for"),
+            Some(Color::Rgb {
+                r: 0x66,
+                g: 0xd9,
+                b: 0xef
+            })
+        );
+    }
+
+    /// Pygments parity: the `#` delimiter is part of the comment token.
+    #[test]
+    fn test_python_comment_hash_is_comment_colored() {
+        let code = "# hello\n";
+        assert_eq!(python_token_color(code, "#"), Some(MONOKAI_COMMENT));
+    }
+
+    /// Indent guides use the theme comment colour dim-blended over the theme
+    /// background (`bg + (fg - bg) * 0.66`), matching Python Rich + Textual's
+    /// ANSIToTruecolor dim pre-blend: monokai #959077 over #272822 -> #6f6c5a.
+    #[test]
+    fn test_indent_guide_color_monokai_dim_preblend() {
+        let theme = Syntax::get_theme("monokai");
+        assert_eq!(
+            Syntax::indent_guide_color(&*theme, None),
+            Some(Color::Rgb {
+                r: 0x6f,
+                g: 0x6c,
+                b: 0x5a
+            })
         );
     }
 

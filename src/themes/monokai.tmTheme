@@ -36,12 +36,29 @@
 			</dict>
 		</dict>
 
-		<!-- Documentation strings (docstrings) - should be yellow like strings, not gray like comments -->
+		<!-- Comment delimiters (#, //, /* ... */) - Pygments folds them into the
+		     comment token (gray), so they must not fall through to the white
+		     general punctuation rule below -->
+		<dict>
+			<key>name</key>
+			<string>Comment punctuation</string>
+			<key>scope</key>
+			<string>comment punctuation.definition.comment</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#959077</string>
+			</dict>
+		</dict>
+
+		<!-- Documentation strings (docstrings) - should be yellow like strings, not gray like comments.
+		     The descendant selector covers the triple-quote delimiters, which syntect scopes as
+		     punctuation.definition.comment inside the docstring -->
 		<dict>
 			<key>name</key>
 			<string>Docstring</string>
 			<key>scope</key>
-			<string>comment.block.documentation, string.quoted.docstring, string.docstring</string>
+			<string>comment.block.documentation, string.quoted.docstring, string.docstring, comment.block.documentation punctuation.definition.comment</string>
 			<key>settings</key>
 			<dict>
 				<key>foreground</key>
@@ -248,12 +265,14 @@
 			</dict>
 		</dict>
 
-		<!-- Operator words (in, is, not, and, or) - matches Pygments Token.Operator.Word (pink) -->
+		<!-- Operator words (in, is, not, and, or) - matches Pygments Token.Operator.Word (pink).
+		     Includes the `in` of a `for ... in`, which syntect scopes as
+		     keyword.control.flow.for.in but Pygments tokenizes as Operator.Word -->
 		<dict>
 			<key>name</key>
 			<string>Operator Word</string>
 			<key>scope</key>
-			<string>keyword.operator.word, keyword.operator.logical, keyword.operator.comparison</string>
+			<string>keyword.operator.word, keyword.operator.logical, keyword.operator.comparison, keyword.control.flow.for.in</string>
 			<key>settings</key>
 			<dict>
 				<key>foreground</key>
@@ -261,12 +280,15 @@
 			</dict>
 		</dict>
 
-		<!-- Return type annotation arrow (->) - matches Pygments Token.Operator (pink) -->
+		<!-- Return type annotation arrow (->) - matches Pygments Token.Operator (pink).
+		     Only the return arrow: parameter/variable annotation colons are plain
+		     Punctuation (white) in Pygments, so the selector must not cover
+		     punctuation.separator.annotation at large -->
 		<dict>
 			<key>name</key>
 			<string>Annotation arrow</string>
 			<key>scope</key>
-			<string>punctuation.separator.annotation, punctuation.section.function.return-type, keyword.operator.arrow</string>
+			<string>punctuation.separator.annotation.return, punctuation.section.function.return-type, keyword.operator.arrow</string>
 			<key>settings</key>
 			<dict>
 				<key>foreground</key>
