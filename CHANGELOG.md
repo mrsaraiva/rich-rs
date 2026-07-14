@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-07-14
+
+### Fixed
+
+- **`Syntax` fenced-code token colours align with Pygments** (Python `rich`
+  parity): comment delimiters (`#`, `//`, `/*`) fold into the comment colour;
+  docstring triple-quote delimiters take the docstring (string) colour;
+  the `in` of a `for … in` is coloured as an operator word; and parameter/
+  variable annotation colons are plain punctuation (only the return-type `->`
+  arrow stays operator-pink). `monokai.tmTheme` scope mapping.
+- **`Syntax` indent-guide colour is theme-derived**, not hardcoded — resolved
+  from the effective theme's `comment` scope colour and dim-pre-blended over the
+  theme background (or a `background_color` override) at `DIM_FACTOR = 0.66` with
+  integer truncation, matching how a terminal renders a `dim` guide. `syntax.rs`.
+
 ## [1.2.1] - 2026-06-22
 
 ### Fixed
