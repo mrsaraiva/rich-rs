@@ -1706,7 +1706,9 @@ mod tests {
         let text = syntax.highlight();
         let plain = text.plain_text();
         // ASCII-only test inputs: byte offset == char offset.
-        let start = plain.find(token).expect("token present in highlighted text");
+        let start = plain
+            .find(token)
+            .expect("token present in highlighted text");
         let mut found = None;
         for span in text.spans() {
             if span.start <= start && start < span.end {

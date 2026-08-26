@@ -1,328 +1,322 @@
-//! Phase 4 — Tree C ABI.
-//!
-//! Implemented by the `ffi-phase4` lane. All functions here are
-//! `#[unsafe(no_mangle)] pub extern "C"` and reuse the Phase-1 plumbing in
-//! `crate::common` and the `crate::RichRenderable` composition currency.
-//! cbindgen picks them up from this module automatically.
-//!
-//! # Handles
-//!
-//! * [`RichTree`] — an owning builder handle wrapping `Option<rich_rs::Tree>`.
-//!   Build it, add nodes / set styles, then either `rich_tree_finish` it into a
-//!   `RichRenderable` or `rich_tree_free` it.
-//! * [`RichTreeNode`] — a **non-owning BORROW** into a child node living inside
-//!   an owning `RichTree`. It is a raw pointer to the child `rich_rs::Tree`
-//!   stored in its parent's `children` vector. See its doc for the lifetime
-//!   contract. There is intentionally NO `rich_tree_node_free`.
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use std::ffi::{CStr, c_char};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use rich_rs::{ConsoleOptions, Measurement, Renderable, Segments, Style, Text, Tree};
 
-use rich_rs::{Renderable, Text, Tree};
+use crate::common::{
+    SharedRenderable, destroy, ffi_call, finish, init_out, init_scalar_out, parse_style,
+    required_mut, required_ref, rich_str, strict_bool,
+};
+use crate::{RICH_ERROR_INVALID_STATE, RICH_TREE_ROOT_ID, RichRenderable, RichResult, RichStr};
 
-use crate::RichRenderable;
-use crate::common::parse_style;
-
-/// Opaque owning `Tree` builder handle.
-///
-/// Wraps `Option<rich_rs::Tree>` so the consuming `rich_tree_finish` can move
-/// the value out. Create with `rich_tree_new` / `rich_tree_new_renderable`,
-/// then either `rich_tree_finish` (consumes into a `RichRenderable`) or
-/// `rich_tree_free`.
-///
-/// While a `RichTree` is alive you may obtain `RichTreeNode*` borrows into it
-/// via `rich_tree_add` / `rich_tree_add_renderable`; those borrows are only
-/// valid until this handle is finished or freed.
-pub struct RichTree(Option<Tree>);
-
-/// Opaque, NON-OWNING handle to a child node inside an owning [`RichTree`].
-///
-/// A `RichTreeNode*` is, quite literally, a borrowed pointer to a child
-/// `rich_rs::Tree` living inside the `children` vector of an owning `RichTree`.
-/// The pointer value handed to C is that interior pointer reinterpreted as
-/// `RichTreeNode*` — no separate allocation is made, so there is nothing to
-/// free. It exists only so callers can attach grandchildren to a specific
-/// sub-node (`rich_tree_node_add` / `rich_tree_node_add_renderable`).
-///
-/// # Lifetime contract (read carefully)
-///
-/// * A `RichTreeNode*` is valid ONLY while its owning `RichTree` is alive
-///   (i.e. before `rich_tree_finish` or `rich_tree_free` is called on it).
-///   After the owning `RichTree` is finished/freed, every node handle derived
-///   from it is DANGLING — do not use it.
-/// * There is NO `rich_tree_node_free`. Node handles are not owned by the
-///   caller and must never be freed; their storage is owned by the `RichTree`.
-/// * Adding further children to a *parent* node may reallocate that parent's
-///   `children` vector, which can invalidate previously returned sibling
-///   `RichTreeNode*` handles that point into the same vector. To stay safe,
-///   finish building one sub-node's descendants (depth-first) before requesting
-///   another sibling handle from the same parent, or re-fetch handles as needed.
-pub struct RichTreeNode {
-    _private: [u8; 0],
+#[derive(Clone)]
+struct Node {
+    label: Arc<dyn Renderable + Send + Sync>,
+    children: Vec<Node>,
 }
 
-/// Reinterpret an interior `&mut Tree` as the opaque `RichTreeNode*` we hand to
-/// C. No allocation: the handle IS the borrowed pointer, so it never needs a
-/// matching free. See [`RichTreeNode`] for the lifetime contract.
-#[inline]
-fn node_handle(child: &mut Tree) -> *mut RichTreeNode {
-    (child as *mut Tree).cast::<RichTreeNode>()
+struct TreeBuilder {
+    root: Node,
+    paths: HashMap<u64, Vec<usize>>,
+    next_id: u64,
+    style: Option<Style>,
+    guide_style: Option<Style>,
+    hide_root: bool,
 }
 
-/// Reinterpret a `RichTreeNode*` back into the borrowed `*mut Tree`.
-///
-/// # Safety
-/// `node` must be a live handle previously produced by `node_handle` whose
-/// owning `RichTree` is still alive (see the [`RichTreeNode`] contract).
-#[inline]
-unsafe fn node_tree<'a>(node: *mut RichTreeNode) -> &'a mut Tree {
-    // SAFETY: caller upholds the RichTreeNode lifetime contract.
-    unsafe { &mut *node.cast::<Tree>() }
-}
-
-/// Create a `RichTree` from a plain-text label (no markup parsing).
-///
-/// Equivalent to `Tree::new(Box::new(Text::plain(label)))`. `label` must be
-/// valid NUL-terminated UTF-8. Returns NULL if `label` is NULL or not valid
-/// UTF-8. Free with `rich_tree_finish` or `rich_tree_free`.
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_new(label: *const c_char) -> *mut RichTree {
-    if label.is_null() {
-        return std::ptr::null_mut();
+impl TreeBuilder {
+    fn new(label: Arc<dyn Renderable + Send + Sync>) -> Self {
+        let mut paths = HashMap::new();
+        paths.insert(RICH_TREE_ROOT_ID, Vec::new());
+        Self {
+            root: Node {
+                label,
+                children: Vec::new(),
+            },
+            paths,
+            next_id: 1,
+            style: None,
+            guide_style: None,
+            hide_root: false,
+        }
     }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: caller guarantees a valid NUL-terminated string.
-        let s = unsafe { CStr::from_ptr(label) }.to_str().ok()?;
-        let tree = Tree::new(Box::new(Text::plain(s)));
-        Some(Box::into_raw(Box::new(RichTree(Some(tree)))))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
-}
 
-/// Create a `RichTree` whose root label is an arbitrary renderable.
-///
-/// CONSUMES `label`: the `RichRenderable*` is invalid afterward (do not free or
-/// reuse it). Returns NULL if `label` is NULL. Free the returned handle with
-/// `rich_tree_finish` or `rich_tree_free`.
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_new_renderable(label: *mut RichRenderable) -> *mut RichTree {
-    if label.is_null() {
-        return std::ptr::null_mut();
+    fn node_mut(&mut self, path: &[usize]) -> Option<&mut Node> {
+        let mut node = &mut self.root;
+        for &index in path {
+            node = node.children.get_mut(index)?;
+        }
+        Some(node)
     }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: `label` came from a `*_finish` fn (`Box::into_raw`).
-        let inner = unsafe { Box::from_raw(label) }.0;
-        let tree = Tree::new(inner);
-        Box::into_raw(Box::new(RichTree(Some(tree))))
-    }));
-    result.unwrap_or(std::ptr::null_mut())
-}
 
-/// Add a child node with a plain-text label to a `RichTree`.
-///
-/// Returns a `RichTreeNode*` BORROW into the new child (for attaching
-/// grandchildren via `rich_tree_node_add*`). The returned handle is valid only
-/// until `tree` is finished/freed and must NOT be freed (see [`RichTreeNode`]).
-///
-/// `label` must be valid NUL-terminated UTF-8. Returns NULL if `tree`/`label`
-/// is NULL, `label` is not valid UTF-8, or the tree was already finished.
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_add(tree: *mut RichTree, label: *const c_char) -> *mut RichTreeNode {
-    if tree.is_null() || label.is_null() {
-        return std::ptr::null_mut();
+    #[cfg(test)]
+    fn node(&self, path: &[usize]) -> Option<&Node> {
+        let mut node = &self.root;
+        for &index in path {
+            node = node.children.get(index)?;
+        }
+        Some(node)
     }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from a `rich_tree_new*` fn.
-        let t = unsafe { &mut *tree };
-        let s = unsafe { CStr::from_ptr(label) }.to_str().ok()?;
-        let inner = t.0.as_mut()?;
-        let child: &mut Tree = inner.add(Box::new(Text::plain(s)));
-        Some(node_handle(child))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+
+    fn add(
+        &mut self,
+        parent_id: u64,
+        label: Arc<dyn Renderable + Send + Sync>,
+    ) -> Result<u64, RichResult> {
+        let parent_path = self
+            .paths
+            .get(&parent_id)
+            .cloned()
+            .ok_or(RICH_ERROR_INVALID_STATE)?;
+        let id = self.next_id;
+        let next_id = id.checked_add(1).ok_or(RICH_ERROR_INVALID_STATE)?;
+        self.paths
+            .try_reserve(1)
+            .map_err(|_| RICH_ERROR_INVALID_STATE)?;
+        let child_index = {
+            let parent = self
+                .node_mut(&parent_path)
+                .ok_or(RICH_ERROR_INVALID_STATE)?;
+            parent
+                .children
+                .try_reserve(1)
+                .map_err(|_| RICH_ERROR_INVALID_STATE)?;
+            parent.children.len()
+        };
+        let mut child_path = parent_path.clone();
+        child_path
+            .try_reserve(1)
+            .map_err(|_| RICH_ERROR_INVALID_STATE)?;
+        child_path.push(child_index);
+        let parent = self
+            .node_mut(&parent_path)
+            .ok_or(RICH_ERROR_INVALID_STATE)?;
+        parent.children.push(Node {
+            label,
+            children: Vec::new(),
+        });
+        self.paths.insert(id, child_path);
+        self.next_id = next_id;
+        Ok(id)
+    }
+
+    fn materialize(&self) -> Tree {
+        fn add_children(parent: &mut Tree, children: &[Node]) {
+            for node in children {
+                let child = parent.add(Box::new(SharedRenderable(Arc::clone(&node.label))));
+                add_children(child, &node.children);
+            }
+        }
+
+        let mut tree = Tree::new(Box::new(SharedRenderable(Arc::clone(&self.root.label))));
+        if let Some(style) = self.style {
+            tree = tree.with_style(style);
+        }
+        if let Some(style) = self.guide_style {
+            tree = tree.with_guide_style(style);
+        }
+        tree = tree.with_hide_root(self.hide_root);
+        add_children(&mut tree, &self.root.children);
+        tree
+    }
 }
 
-/// Add a child node whose label is an arbitrary renderable to a `RichTree`.
-///
-/// CONSUMES `label`: the `RichRenderable*` is invalid afterward. Returns a
-/// `RichTreeNode*` BORROW into the new child (valid only until `tree` is
-/// finished/freed; must NOT be freed — see [`RichTreeNode`]).
-///
-/// Returns NULL if `tree`/`label` is NULL or the tree was already finished. If
-/// it returns NULL the `label` renderable has still been consumed only when a
-/// non-NULL `label` was passed and the tree was valid; on a NULL-pointer guard
-/// nothing is consumed.
+impl Renderable for TreeBuilder {
+    fn render(&self, console: &rich_rs::Console, options: &ConsoleOptions) -> Segments {
+        self.materialize().render(console, options)
+    }
+
+    fn measure(&self, console: &rich_rs::Console, options: &ConsoleOptions) -> Measurement {
+        self.materialize().measure(console, options)
+    }
+}
+
+/// Owning tree builder. Node IDs are stable values owned by this tree; ID zero
+/// addresses the root. Renderable labels are borrowed and retained internally.
+/// Successful finish consumes the tree and invalidates all of its node IDs.
+pub struct RichTree(Option<TreeBuilder>);
+
+fn builder_mut(tree: *mut RichTree) -> Result<&'static mut TreeBuilder, RichResult> {
+    unsafe { required_mut(tree)? }
+        .0
+        .as_mut()
+        .ok_or(RICH_ERROR_INVALID_STATE)
+}
+
+#[unsafe(no_mangle)]
+/// Create a tree with a plain UTF-8 root label.
+pub extern "C" fn rich_tree_new(label: RichStr, out_tree: *mut *mut RichTree) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_tree)? };
+        let label = unsafe { rich_str(label)? };
+        let builder = TreeBuilder::new(Arc::new(Text::plain(label)));
+        unsafe { *out_tree = Box::into_raw(Box::new(RichTree(Some(builder)))) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_tree_new_renderable(
+    label: *const RichRenderable,
+    out_tree: *mut *mut RichTree,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_tree)? };
+        let label = unsafe { required_ref(label)? };
+        let builder = TreeBuilder::new(Arc::clone(&label.0));
+        unsafe { *out_tree = Box::into_raw(Box::new(RichTree(Some(builder)))) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+/// Add a child under `parent_id` and write its stable ID. Unknown parents return
+/// `RICH_ERROR_INVALID_STATE` without mutating the tree.
+pub extern "C" fn rich_tree_add(
+    tree: *mut RichTree,
+    parent_id: u64,
+    label: RichStr,
+    out_node_id: *mut u64,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_scalar_out(out_node_id)? };
+        let label = unsafe { rich_str(label)? };
+        let id = builder_mut(tree)?.add(parent_id, Arc::new(Text::plain(label)))?;
+        unsafe { *out_node_id = id };
+        Ok(())
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_tree_add_renderable(
     tree: *mut RichTree,
-    label: *mut RichRenderable,
-) -> *mut RichTreeNode {
-    if tree.is_null() || label.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from a `rich_tree_new*` fn.
-        let t = unsafe { &mut *tree };
-        // SAFETY: `label` came from a `*_finish` fn (`Box::into_raw`).
-        let inner_label = unsafe { Box::from_raw(label) }.0;
-        let inner = t.0.as_mut()?;
-        let child: &mut Tree = inner.add(inner_label);
-        Some(node_handle(child))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+    parent_id: u64,
+    label: *const RichRenderable,
+    out_node_id: *mut u64,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_scalar_out(out_node_id)? };
+        let label = unsafe { required_ref(label)? };
+        let id = builder_mut(tree)?.add(parent_id, Arc::clone(&label.0))?;
+        unsafe { *out_node_id = id };
+        Ok(())
+    })
 }
 
-/// Add a plain-text child to a sub-node, returning a handle to the grandchild.
-///
-/// `node` must be a live `RichTreeNode*` whose owning `RichTree` has not been
-/// finished/freed. Returns a `RichTreeNode*` BORROW into the new grandchild
-/// (same lifetime/never-free contract — see [`RichTreeNode`]).
-///
-/// `label` must be valid NUL-terminated UTF-8. Returns NULL if `node`/`label`
-/// is NULL or `label` is not valid UTF-8.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_node_add(
-    node: *mut RichTreeNode,
-    label: *const c_char,
-) -> *mut RichTreeNode {
-    if node.is_null() || label.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let s = unsafe { CStr::from_ptr(label) }.to_str().ok()?;
-        // SAFETY: per the RichTreeNode contract the handle points to a live
-        // child Tree while the owning RichTree is alive; the caller upholds it.
-        let inner = unsafe { node_tree(node) };
-        let child: &mut Tree = inner.add(Box::new(Text::plain(s)));
-        Some(node_handle(child))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+pub extern "C" fn rich_tree_set_style(tree: *mut RichTree, style: RichStr) -> RichResult {
+    ffi_call(|| {
+        let style = parse_style(unsafe { rich_str(style)? })?;
+        builder_mut(tree)?.style = Some(style);
+        Ok(())
+    })
 }
 
-/// Add a renderable-labelled child to a sub-node, returning a grandchild handle.
-///
-/// CONSUMES `label`: the `RichRenderable*` is invalid afterward. `node` must be
-/// a live `RichTreeNode*` whose owning `RichTree` is still alive. Returns a
-/// `RichTreeNode*` BORROW into the new grandchild (never free it — see
-/// [`RichTreeNode`]).
-///
-/// Returns NULL if `node`/`label` is NULL.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_node_add_renderable(
-    node: *mut RichTreeNode,
-    label: *mut RichRenderable,
-) -> *mut RichTreeNode {
-    if node.is_null() || label.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: `label` came from a `*_finish` fn (`Box::into_raw`).
-        let inner_label = unsafe { Box::from_raw(label) }.0;
-        // SAFETY: per the RichTreeNode contract the handle points to a live
-        // child Tree while the owning RichTree is alive; the caller upholds it.
-        let inner = unsafe { node_tree(node) };
-        let child: &mut Tree = inner.add(inner_label);
-        node_handle(child)
-    }));
-    result.unwrap_or(std::ptr::null_mut())
+pub extern "C" fn rich_tree_set_guide_style(tree: *mut RichTree, style: RichStr) -> RichResult {
+    ffi_call(|| {
+        let style = parse_style(unsafe { rich_str(style)? })?;
+        builder_mut(tree)?.guide_style = Some(style);
+        Ok(())
+    })
 }
 
-/// Set the label style (e.g. `"bold cyan"`) on a `RichTree`.
-///
-/// Parses `style` with `Style::parse`; a NULL/invalid/unparseable style is a
-/// no-op (the tree is left unchanged). Maps to `Tree::with_style`. Does not
-/// consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_set_style(tree: *mut RichTree, style: *const c_char) {
-    if tree.is_null() || style.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from a `rich_tree_new*` fn.
-        let t = unsafe { &mut *tree };
-        let Some(s) = (unsafe { CStr::from_ptr(style) }).to_str().ok() else {
-            return;
-        };
-        if let Some(parsed) = parse_style(s)
-            && let Some(inner) = t.0.take()
-        {
-            t.0 = Some(inner.with_style(parsed));
-        }
-    }));
+pub extern "C" fn rich_tree_set_hide_root(tree: *mut RichTree, hide: u8) -> RichResult {
+    ffi_call(|| {
+        let hide = strict_bool(hide)?;
+        builder_mut(tree)?.hide_root = hide;
+        Ok(())
+    })
 }
 
-/// Set the guide-line style (e.g. `"dim"`) on a `RichTree`.
-///
-/// Parses `style` with `Style::parse`; a NULL/invalid/unparseable style is a
-/// no-op. Maps to `Tree::with_guide_style`. Does not consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_set_guide_style(tree: *mut RichTree, style: *const c_char) {
-    if tree.is_null() || style.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from a `rich_tree_new*` fn.
-        let t = unsafe { &mut *tree };
-        let Some(s) = (unsafe { CStr::from_ptr(style) }).to_str().ok() else {
-            return;
-        };
-        if let Some(parsed) = parse_style(s)
-            && let Some(inner) = t.0.take()
-        {
-            t.0 = Some(inner.with_guide_style(parsed));
-        }
-    }));
+/// Consume a live tree on success and write an owned renderable.
+pub extern "C" fn rich_tree_finish(
+    tree: *mut *mut RichTree,
+    out_renderable: *mut *mut RichRenderable,
+) -> RichResult {
+    unsafe { finish(tree, out_renderable, |v| v.0.is_some(), |v| v.0) }
 }
 
-/// Set whether the root node is hidden when rendering.
-///
-/// When `true`, only children render (no root label/guides). Maps to
-/// `Tree::with_hide_root`. NULL `tree` is a no-op. Does not consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_set_hide_root(tree: *mut RichTree, hide: bool) {
-    if tree.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from a `rich_tree_new*` fn.
-        let t = unsafe { &mut *tree };
-        if let Some(inner) = t.0.take() {
-            t.0 = Some(inner.with_hide_root(hide));
-        }
-    }));
-}
-
-/// CONSUME a `RichTree`, erasing it into the type-erased `RichRenderable`
-/// composition currency. The `RichTree*` is invalid afterward, and so is every
-/// `RichTreeNode*` previously derived from it.
-///
-/// Returns NULL if `tree` is NULL or was already finished. The returned
-/// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-/// passed into a consuming container).
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_tree_finish(tree: *mut RichTree) -> *mut RichRenderable {
-    if tree.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in a `rich_tree_new*` function.
-        let boxed = unsafe { Box::from_raw(tree) };
-        let inner = boxed.0?;
-        let erased: Box<dyn Renderable + Send + Sync> = Box::new(inner);
-        Some(Box::into_raw(Box::new(RichRenderable(erased))))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
-}
-
-/// Free a `RichTree` that was created but never `rich_tree_finish`ed. NULL is a
-/// no-op. This also invalidates every `RichTreeNode*` derived from this tree.
-#[unsafe(no_mangle)]
+/// Destroy an unfinished tree. NULL is accepted.
 pub extern "C" fn rich_tree_free(tree: *mut RichTree) {
-    if tree.is_null() {
-        return;
+    unsafe { destroy(tree) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    fn s(value: &str) -> RichStr {
+        RichStr {
+            data: value.as_ptr(),
+            len: value.len() as u64,
+        }
     }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in a `rich_tree_new*` function.
-        drop(unsafe { Box::from_raw(tree) });
-    }));
+
+    #[test]
+    fn ids_survive_breadth_and_depth_and_unknown_is_atomic() {
+        let mut tree = ptr::null_mut();
+        assert_eq!(rich_tree_new(s("root"), &mut tree), crate::RICH_OK);
+        let mut first = 0;
+        let mut sibling = 0;
+        let mut grandchild = 0;
+        assert_eq!(
+            rich_tree_add(tree, 0, s("first"), &mut first),
+            crate::RICH_OK
+        );
+        assert_eq!(
+            rich_tree_add(tree, 0, s("sibling"), &mut sibling),
+            crate::RICH_OK
+        );
+        assert_eq!(
+            rich_tree_add(tree, first, s("deep"), &mut grandchild),
+            crate::RICH_OK
+        );
+        assert_eq!((first, sibling, grandchild), (1, 2, 3));
+        let mut parent = grandchild;
+        for depth in 0..32 {
+            let mut child = 0;
+            assert_eq!(
+                rich_tree_add(tree, parent, s(&format!("depth-{depth}")), &mut child),
+                crate::RICH_OK
+            );
+            parent = child;
+        }
+        for breadth in 0..32 {
+            let mut child = 0;
+            assert_eq!(
+                rich_tree_add(
+                    tree,
+                    RICH_TREE_ROOT_ID,
+                    s(&format!("breadth-{breadth}")),
+                    &mut child
+                ),
+                crate::RICH_OK
+            );
+        }
+        let before = unsafe { (*tree).0.as_ref().unwrap().paths.len() };
+        let mut output = 99;
+        assert_eq!(
+            rich_tree_add(tree, 999, s("bad"), &mut output),
+            RICH_ERROR_INVALID_STATE
+        );
+        assert_eq!(output, 0);
+        assert_eq!(unsafe { (*tree).0.as_ref().unwrap().paths.len() }, before);
+        let builder = unsafe { (*tree).0.as_ref().unwrap() };
+        assert!(
+            builder
+                .paths
+                .values()
+                .all(|path| builder.node(path).is_some())
+        );
+        let mut renderable = ptr::null_mut();
+        assert_eq!(rich_tree_finish(&mut tree, &mut renderable), crate::RICH_OK);
+        assert!(tree.is_null());
+        crate::rich_renderable_free(renderable);
+        rich_tree_free(tree);
+    }
 }

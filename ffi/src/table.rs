@@ -1,334 +1,280 @@
-//! Phase 2 — Table C ABI.
-//!
-//! Implemented by the `ffi-phase2` lane. All functions here are
-//! `#[unsafe(no_mangle)] pub extern "C"` and reuse the Phase-1 plumbing in
-//! `crate::common` and the `crate::RichRenderable` composition currency.
-//! cbindgen picks them up from this module automatically.
-
-use std::ffi::{CStr, c_char, c_int, c_uint};
-use std::panic::{AssertUnwindSafe, catch_unwind};
-
 use rich_rs::{Table, Text};
 
-use crate::RichRenderable;
-use crate::common::{box_ids, parse_style};
+use crate::common::{
+    box_from_id, count, destroy, ffi_call, finish, init_out, parse_style, required_mut,
+    required_ref, rich_str, shared_box, strict_bool,
+};
+use crate::{
+    RICH_ERROR_INVALID_ARGUMENT, RICH_ERROR_INVALID_STATE, RichConsole, RichRenderable, RichResult,
+    RichStr,
+};
 
-/// Opaque `Table` builder handle. Build it with setters / `add_column*` /
-/// `add_row*`, then either `rich_table_finish` it into a `RichRenderable` or
-/// `rich_table_free` it.
-///
-/// The inner `Option<Table>` lets `rich_table_finish` take the value by move
-/// and lets the consuming `with_*` builders take/replace it in place.
-pub struct RichTable(Option<Table>);
+/// Owning table builder. String/renderable rows are validated completely before
+/// mutation; renderable cells are borrowed and retained through shared ownership.
+/// Successful `rich_table_finish` consumes and NULLs the builder.
+pub struct RichTable(pub(crate) Option<Table>);
 
-/// Create an empty `Table`. Returns NULL on allocation failure.
-///
-/// Free with `rich_table_finish` (which consumes it into a `RichRenderable`)
-/// or `rich_table_free`.
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_table_new() -> *mut RichTable {
-    catch_unwind(|| Box::into_raw(Box::new(RichTable(Some(Table::new())))))
-        .unwrap_or(std::ptr::null_mut())
+fn table_mut(table: *mut RichTable) -> Result<&'static mut Table, RichResult> {
+    unsafe { required_mut(table)? }
+        .0
+        .as_mut()
+        .ok_or(RICH_ERROR_INVALID_STATE)
 }
 
-/// CONSUME a `RichTable`, erasing it into the type-erased `RichRenderable`
-/// composition currency. The `RichTable*` is invalid afterward.
-///
-/// Returns NULL if `table` is NULL or was already finished. The returned
-/// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-/// passed into a consuming container).
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_table_finish(table: *mut RichTable) -> *mut RichRenderable {
-    if table.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in `rich_table_new`.
-        let boxed = unsafe { Box::from_raw(table) };
-        let inner = boxed.0?;
-        Some(Box::into_raw(Box::new(RichRenderable(Box::new(inner)))))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+fn map_table(table: *mut RichTable, f: impl FnOnce(Table) -> Table) -> Result<(), RichResult> {
+    let table = unsafe { required_mut(table)? };
+    let value = table.0.take().ok_or(RICH_ERROR_INVALID_STATE)?;
+    table.0 = Some(f(value));
+    Ok(())
 }
 
-/// Free a `RichTable` that was created but never `rich_table_finish`ed.
-/// NULL is a no-op.
 #[unsafe(no_mangle)]
+/// Create an empty table builder through `out_table`.
+pub extern "C" fn rich_table_new(out_table: *mut *mut RichTable) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_table)? };
+        unsafe { *out_table = Box::into_raw(Box::new(RichTable(Some(Table::new())))) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+/// Consume a live table on success, NULLing `*table`, and return an owned renderable.
+pub extern "C" fn rich_table_finish(
+    table: *mut *mut RichTable,
+    out_renderable: *mut *mut RichRenderable,
+) -> RichResult {
+    unsafe { finish(table, out_renderable, |v| v.0.is_some(), |v| v.0) }
+}
+
+#[unsafe(no_mangle)]
+/// Destroy an unfinished table. NULL is accepted.
 pub extern "C" fn rich_table_free(table: *mut RichTable) {
-    if table.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in `rich_table_new`.
-        drop(unsafe { Box::from_raw(table) });
-    }));
+    unsafe { destroy(table) }
 }
 
-/// Shared helper: NULL-check + panic-guard a `&mut Table` mutation.
-///
-/// Skips silently if `table` is NULL or has already been finished (the inner
-/// `Option<Table>` is empty).
-fn with_table(table: *mut RichTable, f: impl FnOnce(&mut Table)) {
-    if table.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from `rich_table_new`.
-        let t = unsafe { &mut *table };
-        if let Some(inner) = t.0.as_mut() {
-            f(inner);
-        }
-    }));
-}
-
-/// Shared helper for the consuming `with_*` builders: take the inner `Table`,
-/// run a consuming transform, and replace it. No-op if NULL / already finished.
-fn map_table(table: *mut RichTable, f: impl FnOnce(Table) -> Table) {
-    if table.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from `rich_table_new`.
-        let t = unsafe { &mut *table };
-        if let Some(inner) = t.0.take() {
-            t.0.replace(f(inner));
-        }
-    }));
-}
-
-/// Set the table title (parsed as plain text). NULL/non-UTF-8 is a no-op.
-/// Does not consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_title(table: *mut RichTable, title: *const c_char) {
-    if title.is_null() {
-        return;
-    }
-    with_table(table, |t| {
-        // SAFETY: caller guarantees a valid NUL-terminated string.
-        if let Ok(s) = unsafe { CStr::from_ptr(title) }.to_str() {
-            t.set_title(Some(Text::plain(s)));
-        }
-    });
+pub extern "C" fn rich_table_set_title(table: *mut RichTable, title: RichStr) -> RichResult {
+    ffi_call(|| {
+        let title = unsafe { rich_str(title)? };
+        table_mut(table)?.set_title(Some(Text::plain(title)));
+        Ok(())
+    })
 }
 
-/// Set the table caption (parsed as plain text). NULL/non-UTF-8 is a no-op.
-/// Does not consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_caption(table: *mut RichTable, caption: *const c_char) {
-    if caption.is_null() {
-        return;
-    }
-    with_table(table, |t| {
-        // SAFETY: caller guarantees a valid NUL-terminated string.
-        if let Ok(s) = unsafe { CStr::from_ptr(caption) }.to_str() {
-            t.set_caption(Some(Text::plain(s)));
-        }
-    });
+pub extern "C" fn rich_table_set_caption(table: *mut RichTable, caption: RichStr) -> RichResult {
+    ffi_call(|| {
+        let caption = unsafe { rich_str(caption)? };
+        table_mut(table)?.set_caption(Some(Text::plain(caption)));
+        Ok(())
+    })
 }
 
-/// Set the table title by parsing console markup (e.g. `[bold]Peers[/]`).
-///
-/// Honors the console's markup/emoji/highlight settings via
-/// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
-/// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
-/// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
-/// the table handle.
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_table_set_title_markup(
     table: *mut RichTable,
-    console: *mut crate::RichConsole,
-    markup: *const c_char,
-) {
-    if console.is_null() || markup.is_null() {
-        return;
-    }
-    with_table(table, |t| {
-        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
-        let con = unsafe { &mut *console };
-        if let Ok(s) = unsafe { CStr::from_ptr(markup) }.to_str() {
-            let text = con.inner.render_str(s, None, None, None, None);
-            t.set_title(Some(text));
-        }
-    });
+    console: *mut RichConsole,
+    markup: RichStr,
+) -> RichResult {
+    ffi_call(|| {
+        let markup = unsafe { rich_str(markup)? };
+        let console = unsafe { required_mut(console)? };
+        let value = console.inner.render_str(markup, None, None, None, None);
+        table_mut(table)?.set_title(Some(value));
+        Ok(())
+    })
 }
 
-/// Set the table caption by parsing console markup (e.g. `[dim]src[/]`).
-///
-/// Honors the console's markup/emoji/highlight settings via
-/// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
-/// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
-/// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
-/// the table handle.
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_table_set_caption_markup(
     table: *mut RichTable,
-    console: *mut crate::RichConsole,
-    markup: *const c_char,
-) {
-    if console.is_null() || markup.is_null() {
-        return;
-    }
-    with_table(table, |t| {
-        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
-        let con = unsafe { &mut *console };
-        if let Ok(s) = unsafe { CStr::from_ptr(markup) }.to_str() {
-            let text = con.inner.render_str(s, None, None, None, None);
-            t.set_caption(Some(text));
-        }
-    });
+    console: *mut RichConsole,
+    markup: RichStr,
+) -> RichResult {
+    ffi_call(|| {
+        let markup = unsafe { rich_str(markup)? };
+        let console = unsafe { required_mut(console)? };
+        let value = console.inner.render_str(markup, None, None, None, None);
+        table_mut(table)?.set_caption(Some(value));
+        Ok(())
+    })
 }
 
-/// Set the box-drawing style by stable int id (see `box_ids::from_int`).
-/// An out-of-range id is a no-op (the box is left unchanged).
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_box(table: *mut RichTable, box_id: c_int) {
-    with_table(table, |t| {
-        if let Some(b) = box_ids::from_int(box_id) {
-            t.set_box(Some(b));
-        }
-    });
+pub extern "C" fn rich_table_set_box(table: *mut RichTable, box_id: u32) -> RichResult {
+    ffi_call(|| {
+        let drawing = box_from_id(box_id)?;
+        table_mut(table)?.set_box(Some(drawing));
+        Ok(())
+    })
 }
 
-/// Show or hide the header row.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_show_header(table: *mut RichTable, show: bool) {
-    map_table(table, |t| t.with_show_header(show));
+pub extern "C" fn rich_table_set_show_header(table: *mut RichTable, show: u8) -> RichResult {
+    ffi_call(|| {
+        let show = strict_bool(show)?;
+        map_table(table, |table| table.with_show_header(show))
+    })
 }
 
-/// Show or hide horizontal lines between rows.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_show_lines(table: *mut RichTable, show: bool) {
-    map_table(table, |t| t.with_show_lines(show));
+pub extern "C" fn rich_table_set_show_lines(table: *mut RichTable, show: u8) -> RichResult {
+    ffi_call(|| {
+        let show = strict_bool(show)?;
+        map_table(table, |table| table.with_show_lines(show))
+    })
 }
 
-/// Show or hide the outer edge/border.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_show_edge(table: *mut RichTable, show: bool) {
-    map_table(table, |t| t.with_show_edge(show));
+pub extern "C" fn rich_table_set_show_edge(table: *mut RichTable, show: u8) -> RichResult {
+    ffi_call(|| {
+        let show = strict_bool(show)?;
+        map_table(table, |table| table.with_show_edge(show))
+    })
 }
 
-/// Expand the table to the full available width.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_expand(table: *mut RichTable, expand: bool) {
-    map_table(table, |t| t.with_expand(expand));
+pub extern "C" fn rich_table_set_expand(table: *mut RichTable, expand: u8) -> RichResult {
+    ffi_call(|| {
+        let expand = strict_bool(expand)?;
+        map_table(table, |table| table.with_expand(expand))
+    })
 }
 
-/// Set left/right cell padding (top/bottom stay 0).
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_padding(table: *mut RichTable, left: c_uint, right: c_uint) {
-    map_table(table, |t| t.with_padding(left as usize, right as usize));
+pub extern "C" fn rich_table_set_padding(
+    table: *mut RichTable,
+    left: u32,
+    right: u32,
+) -> RichResult {
+    ffi_call(|| {
+        let left = usize::try_from(left).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)?;
+        let right = usize::try_from(right).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)?;
+        map_table(table, |table| table.with_padding(left, right))
+    })
 }
 
-/// Set the base table style from a style string (e.g. `"on grey23"`).
-/// NULL/non-UTF-8/unparseable input is a no-op. Does not consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_set_style(table: *mut RichTable, style: *const c_char) {
-    if style.is_null() {
-        return;
-    }
-    // SAFETY: caller guarantees a valid NUL-terminated string.
-    let Ok(s) = (unsafe { CStr::from_ptr(style) }).to_str() else {
-        return;
-    };
-    let Some(parsed) = parse_style(s) else {
-        return;
-    };
-    map_table(table, |t| t.with_style(parsed));
+pub extern "C" fn rich_table_set_style(table: *mut RichTable, style: RichStr) -> RichResult {
+    ffi_call(|| {
+        let style = parse_style(unsafe { rich_str(style)? })?;
+        map_table(table, |table| table.with_style(style))
+    })
 }
 
-/// Add a column with a plain-text header. NULL/non-UTF-8 header is a no-op.
-/// Does not consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_table_add_column(table: *mut RichTable, header: *const c_char) {
-    if header.is_null() {
-        return;
-    }
-    with_table(table, |t| {
-        // SAFETY: caller guarantees a valid NUL-terminated string.
-        if let Ok(s) = unsafe { CStr::from_ptr(header) }.to_str() {
-            t.add_column_str(s);
-        }
-    });
+pub extern "C" fn rich_table_add_column(table: *mut RichTable, header: RichStr) -> RichResult {
+    ffi_call(|| {
+        let header = unsafe { rich_str(header)? };
+        table_mut(table)?.add_column_str(header);
+        Ok(())
+    })
 }
 
-/// Add a column whose header is a `RichRenderable`. CONSUMES `header`: the
-/// pointer is invalid afterward (do NOT free it). A NULL `header` is a no-op.
-///
-/// If `table` is NULL or already finished, the `header` is still consumed and
-/// dropped (it cannot be returned to the caller).
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_table_add_column_renderable(
     table: *mut RichTable,
-    header: *mut RichRenderable,
-) {
-    if header.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: `header` came from `Box::into_raw` in a `*_finish` function.
-        let boxed = unsafe { Box::from_raw(header) };
-        with_table(table, |t| t.add_column_renderable(boxed.0));
-    }));
+    header: *const RichRenderable,
+) -> RichResult {
+    ffi_call(|| {
+        let header = unsafe { required_ref(header)? };
+        table_mut(table)?.add_column_renderable(shared_box(header));
+        Ok(())
+    })
 }
 
-/// Add a row of plain-text cells. `cells` is an array of `count` NUL-terminated
-/// UTF-8 strings. NULL `cells`, a NULL/non-UTF-8 element, or `count == 0` is a
-/// no-op. Does not consume the handle.
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_table_add_row_strs(
     table: *mut RichTable,
-    cells: *const *const c_char,
-    count: c_uint,
-) {
-    if cells.is_null() || count == 0 {
-        return;
-    }
-    with_table(table, |t| {
-        // SAFETY: caller guarantees `cells` points to `count` valid pointers.
-        let slice = unsafe { std::slice::from_raw_parts(cells, count as usize) };
-        let mut owned: Vec<&str> = Vec::with_capacity(slice.len());
-        for &ptr in slice {
-            if ptr.is_null() {
-                return;
-            }
-            // SAFETY: each element is a valid NUL-terminated string.
-            match unsafe { CStr::from_ptr(ptr) }.to_str() {
-                Ok(s) => owned.push(s),
-                Err(_) => return,
-            }
+    cells: *const RichStr,
+    cell_count: u32,
+) -> RichResult {
+    ffi_call(|| {
+        let count = count(cell_count)?;
+        if count == 0 || cells.is_null() {
+            return Err(if cells.is_null() {
+                crate::RICH_ERROR_NULL_ARGUMENT
+            } else {
+                RICH_ERROR_INVALID_ARGUMENT
+            });
         }
-        t.add_row_strs(&owned);
-    });
+        let cells = unsafe { std::slice::from_raw_parts(cells, count) };
+        let values: Vec<&str> = cells
+            .iter()
+            .copied()
+            .map(|cell| unsafe { rich_str(cell) })
+            .collect::<Result<_, _>>()?;
+        table_mut(table)?.add_row_strs(&values);
+        Ok(())
+    })
 }
 
-/// Add a row of `RichRenderable` cells. `cells` is an array of `count`
-/// `RichRenderable*`. CONSUMES every cell pointer (do NOT free them). A NULL
-/// `cells` or `count == 0` is a no-op; any NULL element is skipped.
-///
-/// All non-NULL cells are consumed regardless of whether `table` is valid; if
-/// `table` is NULL or already finished, the cells are dropped.
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_table_add_row_renderables(
     table: *mut RichTable,
-    cells: *const *mut RichRenderable,
-    count: c_uint,
-) {
-    if cells.is_null() || count == 0 {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: caller guarantees `cells` points to `count` valid pointers.
-        let slice = unsafe { std::slice::from_raw_parts(cells, count as usize) };
-        let mut owned: Vec<Box<dyn rich_rs::Renderable + Send + Sync>> =
-            Vec::with_capacity(slice.len());
-        for &ptr in slice {
-            if ptr.is_null() {
-                continue;
-            }
-            // SAFETY: each element came from `Box::into_raw` in a `*_finish` fn.
-            let boxed = unsafe { Box::from_raw(ptr) };
-            owned.push(boxed.0);
+    cells: *const *const RichRenderable,
+    cell_count: u32,
+) -> RichResult {
+    ffi_call(|| {
+        let count = count(cell_count)?;
+        if count == 0 || cells.is_null() {
+            return Err(if cells.is_null() {
+                crate::RICH_ERROR_NULL_ARGUMENT
+            } else {
+                RICH_ERROR_INVALID_ARGUMENT
+            });
         }
-        with_table(table, |t| t.add_row_renderables(owned));
-    }));
+        let cells = unsafe { std::slice::from_raw_parts(cells, count) };
+        let values: Vec<Box<dyn rich_rs::Renderable + Send + Sync>> = cells
+            .iter()
+            .copied()
+            .map(|cell| unsafe { required_ref(cell) }.map(shared_box))
+            .collect::<Result<_, _>>()?;
+        table_mut(table)?.add_row_renderables(values);
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    #[test]
+    fn renderable_array_validation_is_atomic() {
+        let mut table = ptr::null_mut();
+        assert_eq!(rich_table_new(&mut table), crate::RICH_OK);
+        let cells = [ptr::null()];
+        assert_eq!(
+            rich_table_add_row_renderables(table, cells.as_ptr(), 1),
+            crate::RICH_ERROR_NULL_ARGUMENT
+        );
+        unsafe { assert_eq!((*table).0.as_ref().unwrap().row_count(), 0) };
+        rich_table_free(table);
+    }
+
+    #[test]
+    fn string_array_validation_is_atomic() {
+        let mut table = ptr::null_mut();
+        assert_eq!(rich_table_new(&mut table), crate::RICH_OK);
+        let valid = b"valid";
+        let invalid = [0xff_u8];
+        let cells = [
+            RichStr {
+                data: valid.as_ptr(),
+                len: valid.len() as u64,
+            },
+            RichStr {
+                data: invalid.as_ptr(),
+                len: invalid.len() as u64,
+            },
+        ];
+        assert_eq!(
+            rich_table_add_row_strs(table, cells.as_ptr(), cells.len() as u32),
+            crate::RICH_ERROR_INVALID_UTF8
+        );
+        unsafe { assert_eq!((*table).0.as_ref().unwrap().row_count(), 0) };
+        rich_table_free(table);
+    }
 }

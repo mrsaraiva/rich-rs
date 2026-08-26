@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Redesigned the experimental native ABI as the shared Zig, C#, Go, and Node
+  binding foundation.** All calls now use fixed-width wire types, checked
+  `RichResult` error categories, length-delimited `RichStr` UTF-8 input, and
+  allocator-safe `RichBuffer` output. Builders use failure-safe
+  pointer-to-pointer `finish` calls; containers borrow reusable Arc-backed
+  renderables; trees use stable `uint64_t` node IDs instead of interior
+  pointers; and ABI/package metadata allows bindings to reject mismatched
+  native libraries. Header generation is deterministic and fatal, with C11,
+  C++ RAII, ASan, and UBSan smoke coverage.
+
 ## [1.2.2] - 2026-07-14
 
 ### Fixed

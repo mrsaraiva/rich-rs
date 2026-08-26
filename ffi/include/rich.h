@@ -1,3 +1,32 @@
+/*
+ * rich-ffi ABI ownership and safety contract
+ *
+ * Every fallible operation returns RichResult. RICH_OK is the only success
+ * value; output arguments are initialized to NULL, zero, or {NULL, 0} before
+ * other validation. Destructors return void, accept NULL, and contain panics.
+ *
+ * RichStr is borrowed UTF-8 for the duration of one call. It need not be
+ * NUL-terminated and may contain embedded NUL bytes. {NULL, 0} is empty;
+ * {NULL, nonzero} is an error.
+ *
+ * RichBuffer owns bytes allocated by rich-ffi. Copy them before calling
+ * rich_buffer_free(&buffer). The destructor clears the struct and may safely
+ * be called again. Never release these bytes with another allocator.
+ *
+ * Each *_new writes an owning opaque handle through Handle **out. Each
+ * matching *_free destroys a live handle. Typed *_finish functions take
+ * Handle **: success consumes and NULLs the builder; failure before ownership
+ * is taken leaves it live. RichRenderable inputs to containers are borrowed;
+ * containers retain shared Rust ownership and the caller keeps its handle.
+ * Tree nodes are stable uint64_t IDs owned by RichTree; ID 0 addresses root.
+ *
+ * Verify rich_ffi_abi_version() == RICH_FFI_ABI_VERSION before ordinary calls.
+ * Handles are not thread-safe unless separately documented. NULL checks and
+ * panic guards do not make forged, stale, freed, or concurrently misused
+ * non-NULL pointers valid.
+ */
+
+
 #ifndef RICH_FFI_H
 #define RICH_FFI_H
 
@@ -8,855 +37,477 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-// Opaque `Align` builder handle. Wraps a child renderable with horizontal
-// (and optional vertical) alignment. Build it, configure it, then either
-// `rich_align_finish` it into a `RichRenderable` or `rich_align_free` it.
+#define RICH_FFI_ABI_VERSION 1
+
+#define RICH_COLOR_NONE 0
+
+#define RICH_COLOR_STANDARD 1
+
+#define RICH_COLOR_EIGHT_BIT 2
+
+#define RICH_COLOR_TRUECOLOR 3
+
+#define RICH_COLOR_WINDOWS 4
+
+#define RICH_ALIGN_LEFT 0
+
+#define RICH_ALIGN_CENTER 1
+
+#define RICH_ALIGN_RIGHT 2
+
+#define RICH_VERTICAL_TOP 0
+
+#define RICH_VERTICAL_MIDDLE 1
+
+#define RICH_VERTICAL_BOTTOM 2
+
+#define RICH_JUSTIFY_DEFAULT 0
+
+#define RICH_JUSTIFY_LEFT 1
+
+#define RICH_JUSTIFY_CENTER 2
+
+#define RICH_JUSTIFY_RIGHT 3
+
+#define RICH_JUSTIFY_FULL 4
+
+#define RICH_BOX_ROUNDED 0
+
+#define RICH_BOX_HEAVY 1
+
+#define RICH_BOX_DOUBLE 2
+
+#define RICH_BOX_ASCII 3
+
+#define RICH_BOX_MINIMAL 4
+
+#define RICH_BOX_SQUARE 5
+
+#define RICH_BOX_SIMPLE 6
+
+#define RICH_BOX_HEAVY_HEAD 7
+
+#define RICH_BOX_HEAVY_EDGE 8
+
+#define RICH_BOX_DOUBLE_EDGE 9
+
+#define RICH_BOX_HORIZONTALS 10
+
+#define RICH_BOX_MINIMAL_HEAVY_HEAD 11
+
+#define RICH_BOX_SIMPLE_HEAVY 12
+
+#define RICH_BOX_MARKDOWN 13
+
+#define RICH_TREE_ROOT_ID 0
+
+// Owning alignment builder around borrowed, internally retained content.
 typedef struct RichAlign RichAlign;
 
-// Opaque `Columns` (flow-layout) builder handle. Build it, add children and
-// configure it, then either `rich_columns_finish` it into a `RichRenderable`
-// or `rich_columns_free` it.
+// Owning columns builder. Added renderables are borrowed and retained, so the
+// caller's renderable handles remain reusable after composition.
 typedef struct RichColumns RichColumns;
 
-// Opaque console handle. C/C++ only ever sees a `RichConsole*`.
-//
-// Backed by a capture console: rendering writes ANSI (or plain) text to an
-// in-memory buffer that `rich_console_render_markup` hands back as an owned
-// string. The caller decides where it goes (stdout, a log line, etc.).
+// Owning capture-console handle. Setters return a result and rendering writes
+// owned UTF-8 to `RichBuffer` without appending a newline.
 typedef struct RichConsole RichConsole;
 
-// Opaque `Json` builder handle. Build it, then either `rich_json_finish` it
-// into a `RichRenderable` or `rich_json_free` it.
-//
-// The inner `Option<Json>` lets `rich_json_finish` move the value out.
+// Owning validated-JSON builder. Malformed JSON and invalid booleans are
+// argument errors. Successful finish consumes and NULLs the builder.
 typedef struct RichJson RichJson;
 
-// Opaque `Markdown` builder handle. Build it, optionally configure it, then
-// either `rich_markdown_finish` it into a `RichRenderable` or
-// `rich_markdown_free` it.
-//
-// The inner `Option<Markdown>` lets the consuming builder setters take/replace
-// the value and lets `rich_markdown_finish` move it out.
+// Owning Markdown builder over borrowed UTF-8 input copied by Rust. Successful
+// finish consumes and NULLs the builder; free destroys unfinished builders.
 typedef struct RichMarkdown RichMarkdown;
 
-// Opaque `Padding` builder handle. Wraps a child renderable with cell padding
-// on each side. Build it, configure it, then either `rich_padding_finish` it
-// into a `RichRenderable` or `rich_padding_free` it.
+// Owning padding builder around borrowed, internally retained content.
 typedef struct RichPadding RichPadding;
 
-// Opaque `Panel` builder handle. Wraps a content `Renderable` in a styled
-// border box.
-//
-// Build it from a `RichRenderable` content handle (which is CONSUMED), apply
-// any setters, then either `rich_panel_finish` it into a `RichRenderable` or
-// `rich_panel_free` it.
-//
-// The inner `Option<Panel>` lets `rich_panel_finish` and the consuming
-// `with_*` builders take the value by move.
+// Owning panel builder. Content is borrowed at construction and retained
+// internally; successful finish consumes and NULLs only the panel builder.
 typedef struct RichPanel RichPanel;
 
-// Opaque `Progress` handle — a multi-task progress display.
-//
-// Built with `rich_progress_new` (default columns: description, bar,
-// percentage, time remaining). Tasks are added with `rich_progress_add_task`
-// and advanced with `rich_progress_update`. Each `rich_progress_render_frame`
-// renders the CURRENT state of all tasks to one owned string; the C/C++ caller
-// owns the animation loop and the terminal cursor (see the module contract —
-// no background thread crosses the FFI). Free with `rich_progress_free`.
-//
-// `Progress` uses interior mutability (a `Mutex` over its task state), so the
-// task-mutating functions take a shared handle and never need exclusive access.
+// Owning caller-driven progress state. No ABI call starts a refresh thread;
+// frame output is owned by the caller and released with `rich_buffer_free`.
 typedef struct RichProgress RichProgress;
 
-// Opaque, type-erased renderable — the universal composition currency.
-//
-// Anything that can be rendered or nested inside a container (Panel, Table,
-// Tree, Align, ...) is moved through one of these. A `RichRenderable*` is
-// produced by a typed builder's `*_finish` function (e.g. `rich_text_finish`)
-// and either rendered with `rich_console_render`, passed into a consuming
-// container constructor, or freed with `rich_renderable_free`.
+// Owning handle to an Arc-backed renderable. Container inputs borrow this
+// handle and retain their own shared reference; free releases one reference.
 typedef struct RichRenderable RichRenderable;
 
-// Opaque `Rule` (horizontal divider) builder handle. Build it, optionally
-// configure it, then either `rich_rule_finish` it into a `RichRenderable` or
-// `rich_rule_free` it.
-//
-// The inner `Option<Rule>` lets consuming builder setters take/replace the
-// value and lets `rich_rule_finish` move it out.
+// Owning horizontal-rule builder. Setters reject invalid styles/enums;
+// successful finish consumes and NULLs the builder.
 typedef struct RichRule RichRule;
 
-// Opaque `Spinner` handle — a single terminal spinner animation.
-//
-// Built with `rich_spinner_new` (NULL if the spinner name is unknown). Each
-// `rich_spinner_render_frame` renders the glyph for an explicit elapsed time
-// supplied by the caller, so the caller controls the animation phase exactly
-// (no internal clock crosses the FFI). Free with `rich_spinner_free`.
-//
-// The inner `Option<Spinner>` mirrors the other live-widget handles' move idiom.
+// Owning caller-driven spinner selected by name. Unknown names and non-finite
+// frame times are invalid arguments.
 typedef struct RichSpinner RichSpinner;
 
-// Opaque `Status` handle — a spinner animation with a status message.
-//
-// Built with `rich_status_new`. Each `rich_status_render_frame` renders one
-// frame (spinner glyph + message) to an owned string; the spinner advances
-// according to wall-clock time elapsed since creation, so successive frames
-// animate. The C/C++ caller owns the loop and cursor (no thread crosses the
-// FFI). Free with `rich_status_free`.
-//
-// The inner `Option<Status>` lets the handle hold the value by move for a
-// uniform new/free idiom (the option is always `Some` while live).
+// Owning caller-driven status widget. Rendering produces one owned frame and
+// never starts a foreign callback or background refresh.
 typedef struct RichStatus RichStatus;
 
-// Opaque parsed-style handle wrapping a `rich_rs::Style`. Created by
-// `rich_style_parse`, freed by `rich_style_free`. Held opaque for
-// forward-compat even though `Style` is `Copy` underneath.
+// Owning parsed-style handle used to validate style syntax.
 typedef struct RichStyle RichStyle;
 
-// Opaque `Syntax` builder handle. Build it, optionally configure it, then
-// either `rich_syntax_finish` it into a `RichRenderable` or `rich_syntax_free`
-// it.
-//
-// The inner `Option<Syntax>` lets the consuming builder setters take/replace
-// the value and lets `rich_syntax_finish` move it out.
+// Owning syntax-highlighting builder. File construction distinguishes invalid
+// UTF-8/path arguments from filesystem I/O failures. Finish consumes on success.
 typedef struct RichSyntax RichSyntax;
 
-// Opaque `Table` builder handle. Build it with setters / `add_column*` /
-// `add_row*`, then either `rich_table_finish` it into a `RichRenderable` or
-// `rich_table_free` it.
-//
-// The inner `Option<Table>` lets `rich_table_finish` take the value by move
-// and lets the consuming `with_*` builders take/replace it in place.
+// Owning table builder. String/renderable rows are validated completely before
+// mutation; renderable cells are borrowed and retained through shared ownership.
+// Successful `rich_table_finish` consumes and NULLs the builder.
 typedef struct RichTable RichTable;
 
-// Opaque `Text` builder handle. Build it, optionally style it, then either
-// `rich_text_finish` it into a `RichRenderable` or `rich_text_free` it.
-//
-// The inner `Option<Text>` lets `rich_text_finish` take the value by move.
+// Owning text builder consumed only by successful `rich_text_finish`.
 typedef struct RichText RichText;
 
-// Opaque owning `Tree` builder handle.
-//
-// Wraps `Option<rich_rs::Tree>` so the consuming `rich_tree_finish` can move
-// the value out. Create with `rich_tree_new` / `rich_tree_new_renderable`,
-// then either `rich_tree_finish` (consumes into a `RichRenderable`) or
-// `rich_tree_free`.
-//
-// While a `RichTree` is alive you may obtain `RichTreeNode*` borrows into it
-// via `rich_tree_add` / `rich_tree_add_renderable`; those borrows are only
-// valid until this handle is finished or freed.
+// Owning tree builder. Node IDs are stable values owned by this tree; ID zero
+// addresses the root. Renderable labels are borrowed and retained internally.
+// Successful finish consumes the tree and invalidates all of its node IDs.
 typedef struct RichTree RichTree;
 
-// Opaque, NON-OWNING handle to a child node inside an owning [`RichTree`].
-//
-// A `RichTreeNode*` is, quite literally, a borrowed pointer to a child
-// `rich_rs::Tree` living inside the `children` vector of an owning `RichTree`.
-// The pointer value handed to C is that interior pointer reinterpreted as
-// `RichTreeNode*` — no separate allocation is made, so there is nothing to
-// free. It exists only so callers can attach grandchildren to a specific
-// sub-node (`rich_tree_node_add` / `rich_tree_node_add_renderable`).
-//
-// # Lifetime contract (read carefully)
-//
-// * A `RichTreeNode*` is valid ONLY while its owning `RichTree` is alive
-//   (i.e. before `rich_tree_finish` or `rich_tree_free` is called on it).
-//   After the owning `RichTree` is finished/freed, every node handle derived
-//   from it is DANGLING — do not use it.
-// * There is NO `rich_tree_node_free`. Node handles are not owned by the
-//   caller and must never be freed; their storage is owned by the `RichTree`.
-// * Adding further children to a *parent* node may reallocate that parent's
-//   `children` vector, which can invalidate previously returned sibling
-//   `RichTreeNode*` handles that point into the same vector. To stay safe,
-//   finish building one sub-node's descendants (depth-first) before requesting
-//   another sibling handle from the same parent, or re-fetch handles as needed.
-typedef struct RichTreeNode RichTreeNode;
+// Stable result category returned by every fallible ABI operation.
+typedef uint32_t RichResult;
+
+// Rust-allocated output bytes released and cleared by `rich_buffer_free`.
+typedef struct {
+  uint8_t *data;
+  uint64_t len;
+} RichBuffer;
+
+// Borrowed UTF-8 bytes. The library never stores `data` beyond the call.
+typedef struct {
+  const uint8_t *data;
+  uint64_t len;
+} RichStr;
+
+#define RICH_OK 0
+
+#define RICH_ERROR_NULL_ARGUMENT 1
+
+#define RICH_ERROR_INVALID_UTF8 2
+
+#define RICH_ERROR_INVALID_ARGUMENT 3
+
+#define RICH_ERROR_INVALID_STATE 4
+
+#define RICH_ERROR_IO 5
+
+#define RICH_ERROR_RENDER 6
+
+#define RICH_ERROR_PANIC 7
 
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
 
-// Create a new console. Returns NULL on allocation/init failure.
-//
-// Defaults: markup + emoji enabled, truecolor, and `force_terminal = true` so
-// ANSI is emitted into the captured string. A consumer that may be piped should
-// immediately call `rich_console_set_force_terminal` with its `isatty` result.
-RichConsole *rich_console_new(void);
+// Return the native ABI version. This infallible value must equal
+// `RICH_FFI_ABI_VERSION` before ordinary calls are made.
+uint32_t rich_ffi_abi_version(void);
 
-// Free a console created by `rich_console_new`. NULL is a no-op.
+// Write the synchronized Cargo package version as an owned UTF-8 buffer.
+RichResult rich_ffi_version(RichBuffer *out_version);
+
+// Free a produced buffer and reset it to `{NULL, 0}`. NULL is accepted.
+void rich_buffer_free(RichBuffer *buffer);
+
+// Create an owning console handle through `out_console`.
+RichResult rich_console_new(RichConsole **out_console);
+
+// Destroy a console handle. NULL is a no-op.
 void rich_console_free(RichConsole *console);
 
-// Force (or unforce) terminal/ANSI output.
-//
-// Pass the result of `isatty()` here: `true` emits ANSI styling, `false` emits
-// plain text. This is the switch for SafeTunnel's daemon — styled under
-// `--foreground` on a TTY, plain when writing to journald/syslog.
-void rich_console_set_force_terminal(RichConsole *console, bool force);
+RichResult rich_console_set_force_terminal(RichConsole *console, uint8_t force);
 
-// Set the render width and height in cells (controls wrapping).
-void rich_console_set_size(RichConsole *console, unsigned int width, unsigned int height);
+RichResult rich_console_set_size(RichConsole *console, uint32_t width, uint32_t height);
 
-// Set the color system: 0 = none/monochrome, 1 = standard (16),
-// 2 = 8-bit (256), 3 = truecolor (24-bit), 4 = Windows legacy.
-// Out-of-range values are ignored.
-void rich_console_set_color_system(RichConsole *console, int system);
+RichResult rich_console_set_color_system(RichConsole *console, uint32_t system);
 
-// Enable or disable BBCode-style markup parsing (e.g. `[bold]...[/]`).
-void rich_console_set_markup_enabled(RichConsole *console, bool enabled);
+RichResult rich_console_set_markup_enabled(RichConsole *console, uint8_t enabled);
 
-// Enable or disable `:emoji_name:` substitution.
-void rich_console_set_emoji_enabled(RichConsole *console, bool enabled);
+RichResult rich_console_set_emoji_enabled(RichConsole *console, uint8_t enabled);
 
-// Current render width in cells. Returns 0 if `console` is NULL.
-unsigned int rich_console_width(RichConsole *console);
+RichResult rich_console_width(const RichConsole *console, uint32_t *out_width);
 
-// Render a markup string to an owned, NUL-terminated C string.
-//
-// Honors the console's current markup/emoji/color/width settings. No trailing
-// newline is appended — the caller controls line endings. Returns NULL if
-// `console`/`markup` is NULL, `markup` is not valid UTF-8, or rendering fails.
-//
-// The returned pointer MUST be freed with `rich_string_free`.
-char *rich_console_render_markup(RichConsole *console, const char *markup);
+// Render length-delimited markup to an owned output buffer. Rendering errors
+// are `RICH_ERROR_RENDER`; a caught panic is `RICH_ERROR_PANIC`.
+RichResult rich_console_render_markup(RichConsole *console,
+                                      RichStr markup,
+                                      RichBuffer *out_rendered);
 
-// Free a string returned by `rich_console_render_markup`. NULL is a no-op.
-void rich_string_free(char *s);
+// Borrow and render a reusable renderable to an owned output buffer.
+RichResult rich_console_render(RichConsole *console,
+                               const RichRenderable *renderable,
+                               RichBuffer *out_rendered);
 
-// Render a `RichRenderable` to an owned, NUL-terminated C string.
-//
-// BORROWS `renderable`: the handle stays valid and the caller still owns it
-// (free it later with `rich_renderable_free` unless it was consumed by a
-// container). Honors the console's current force-terminal / color / width
-// settings, so `set_force_terminal(false)` yields plain text with zero ANSI.
-// No trailing newline is appended.
-//
-// Returns NULL if `console`/`renderable` is NULL or rendering fails. A
-// non-NULL result MUST be freed with `rich_string_free`.
-char *rich_console_render(RichConsole *console, const RichRenderable *renderable);
-
-// Free a `RichRenderable` created by a `*_finish` function but never passed
-// into a consuming container. NULL is a no-op.
+// Release one renderable handle/reference. NULL is a no-op.
 void rich_renderable_free(RichRenderable *renderable);
 
-// Create a `RichText` from plain text (no markup parsing).
-//
-// `text` must be valid NUL-terminated UTF-8. Returns NULL if `text` is NULL
-// or not valid UTF-8. Free with `rich_text_finish` or `rich_text_free`.
-RichText *rich_text_new(const char *text);
+RichResult rich_text_new(RichStr text, RichText **out_text);
 
-// Create a `RichText` by parsing console markup (e.g. `[bold red]hi[/]`).
-//
-// Honors the console's markup/emoji/highlight settings via `Console::render_str`.
-// `markup` must be valid NUL-terminated UTF-8. Returns NULL if either pointer
-// is NULL or `markup` is not valid UTF-8. Free with `rich_text_finish` or
-// `rich_text_free`. The `console` handle is borrowed (not consumed).
-RichText *rich_text_new_markup(RichConsole *console, const char *markup);
+RichResult rich_text_new_markup(RichConsole *console, RichStr markup, RichText **out_text);
 
-// Apply a base style (e.g. `"bold red on white"`) to a `RichText`.
-//
-// Parses `style` with `Style::parse` and sets it as the text's base style via
-// `Text::set_base_style`. A NULL/invalid/unparseable `style` is a no-op (the
-// text is left unchanged). Does not consume the handle.
-void rich_text_set_style(RichText *text, const char *style);
+RichResult rich_text_set_style(RichText *text, RichStr style);
 
-// CONSUME a `RichText`, erasing it into the type-erased `RichRenderable`
-// composition currency. The `RichText*` is invalid afterward.
-//
-// Returns NULL if `text` is NULL or was already finished. The returned
-// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-// passed into a consuming container).
-RichRenderable *rich_text_finish(RichText *text);
+// Consume a live text builder on success and NULL `*text`; failures before
+// ownership is taken leave the builder live.
+RichResult rich_text_finish(RichText **text, RichRenderable **out_renderable);
 
-// Free a `RichText` that was created but never `rich_text_finish`ed.
-// NULL is a no-op.
 void rich_text_free(RichText *text);
 
-// Parse a style string (e.g. `"bold red on white"`) into a `RichStyle`.
-//
-// `style` must be valid NUL-terminated UTF-8. Returns NULL if `style` is NULL,
-// not valid UTF-8, or produces no actual style (empty/whitespace input, or
-// input whose tokens are all unrecognized — e.g. `"nonsense-xyz"`). A non-NULL
-// result MUST be freed with `rich_style_free`.
-RichStyle *rich_style_parse(const char *style);
+RichResult rich_style_parse(RichStr style, RichStyle **out_style);
 
-// Free a `RichStyle` created by `rich_style_parse`. NULL is a no-op.
 void rich_style_free(RichStyle *style);
 
-// Create a `RichSyntax` from a code string and an explicit lexer name.
-//
-// `code` and `lexer` must be valid NUL-terminated UTF-8 (e.g. `lexer = "rust"`,
-// `"python"`, `"json"`). Returns NULL if either pointer is NULL or not valid
-// UTF-8. Free with `rich_syntax_finish` or `rich_syntax_free`.
-RichSyntax *rich_syntax_new(const char *code, const char *lexer);
+// Create syntax content from borrowed code and lexer strings.
+RichResult rich_syntax_new(RichStr code, RichStr lexer, RichSyntax **out_syntax);
 
-// Create a `RichSyntax` by reading a source file from disk; the lexer is
-// auto-detected from the file extension.
-//
-// `path` must be valid NUL-terminated UTF-8. Returns NULL if `path` is NULL,
-// not valid UTF-8, or the file cannot be read (any IO error). Free with
-// `rich_syntax_finish` or `rich_syntax_free`.
-RichSyntax *rich_syntax_from_path(const char *path);
+// Read syntax content from a UTF-8 path. Embedded NUL is invalid; filesystem
+// failures return `RICH_ERROR_IO`.
+RichResult rich_syntax_from_path(RichStr path, RichSyntax **out_syntax);
 
-// Set the syntax-highlighting theme by name (e.g. `"monokai"`, `"ansi_dark"`).
-//
-// `theme` must be valid NUL-terminated UTF-8. A NULL/invalid `theme` is a
-// no-op. Does not consume the handle.
-void rich_syntax_set_theme(RichSyntax *syntax, const char *theme);
+RichResult rich_syntax_set_theme(RichSyntax *syntax, RichStr theme);
 
-// Enable or disable line-number gutter display. No-op if `syntax` is NULL.
-// Does not consume the handle.
-void rich_syntax_set_line_numbers(RichSyntax *syntax, bool enabled);
+RichResult rich_syntax_set_line_numbers(RichSyntax *syntax, uint8_t enabled);
 
-// Enable or disable word wrapping of long lines. No-op if `syntax` is NULL.
-// Does not consume the handle.
-void rich_syntax_set_word_wrap(RichSyntax *syntax, bool enabled);
+RichResult rich_syntax_set_word_wrap(RichSyntax *syntax, uint8_t enabled);
 
-// Restrict rendering to a line range (1-based, inclusive).
-//
-// Pass `-1` for either `start` or `end` to leave that bound unset (`None`).
-// Negative values other than `-1` are treated as unset too. No-op if `syntax`
-// is NULL. Does not consume the handle.
-void rich_syntax_set_line_range(RichSyntax *syntax, int start, int end);
+RichResult rich_syntax_set_line_range(RichSyntax *syntax,
+                                      uint8_t has_start,
+                                      uint32_t start,
+                                      uint8_t has_end,
+                                      uint32_t end);
 
-// CONSUME a `RichSyntax`, erasing it into the type-erased `RichRenderable`
-// composition currency. The `RichSyntax*` is invalid afterward.
-//
-// Returns NULL if `syntax` is NULL or was already finished. The returned
-// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-// passed into a consuming container).
-RichRenderable *rich_syntax_finish(RichSyntax *syntax);
+// Consume live syntax content on success and write an owned renderable.
+RichResult rich_syntax_finish(RichSyntax **syntax, RichRenderable **out);
 
-// Free a `RichSyntax` that was created but never `rich_syntax_finish`ed.
-// NULL is a no-op.
 void rich_syntax_free(RichSyntax *syntax);
 
-// Create a `RichMarkdown` from a Markdown source string.
-//
-// `source` must be valid NUL-terminated UTF-8. Returns NULL if `source` is
-// NULL or not valid UTF-8. Free with `rich_markdown_finish` or
-// `rich_markdown_free`.
-RichMarkdown *rich_markdown_new(const char *source);
+// Create Markdown content through `out_markdown`.
+RichResult rich_markdown_new(RichStr source, RichMarkdown **out_markdown);
 
-// Set the theme used for fenced code blocks (e.g. `"monokai"`).
-//
-// `theme` must be valid NUL-terminated UTF-8. A NULL/invalid `theme` is a
-// no-op. Does not consume the handle.
-void rich_markdown_set_code_theme(RichMarkdown *markdown, const char *theme);
+RichResult rich_markdown_set_code_theme(RichMarkdown *markdown, RichStr theme);
 
-// Enable or disable rendering of links as terminal hyperlinks. No-op if
-// `markdown` is NULL. Does not consume the handle.
-void rich_markdown_set_hyperlinks(RichMarkdown *markdown, bool enabled);
+RichResult rich_markdown_set_hyperlinks(RichMarkdown *markdown, uint8_t enabled);
 
-// Set the justification for Markdown text blocks.
-//
-// `justify` codes: `0` = Default, `1` = Left, `2` = Center, `3` = Right,
-// `4` = Full. Any other value is a no-op (justification left unchanged). No-op
-// if `markdown` is NULL. Does not consume the handle.
-void rich_markdown_set_justify(RichMarkdown *markdown, int justify);
+RichResult rich_markdown_set_justify(RichMarkdown *markdown, uint32_t justify);
 
-// CONSUME a `RichMarkdown`, erasing it into the type-erased `RichRenderable`
-// composition currency. The `RichMarkdown*` is invalid afterward.
-//
-// Returns NULL if `markdown` is NULL or was already finished. The returned
-// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-// passed into a consuming container).
-RichRenderable *rich_markdown_finish(RichMarkdown *markdown);
+// Consume live Markdown on success and write an owned renderable.
+RichResult rich_markdown_finish(RichMarkdown **markdown, RichRenderable **out);
 
-// Free a `RichMarkdown` that was created but never `rich_markdown_finish`ed.
-// NULL is a no-op.
 void rich_markdown_free(RichMarkdown *markdown);
 
-// Create a `RichJson` from a JSON string.
-//
-// Re-formats `data` with `indent` spaces per level, optionally applies JSON
-// syntax `highlight`ing, and optionally `sort_keys` on objects.
-//
-// `data` must be valid NUL-terminated UTF-8 AND well-formed JSON. Returns NULL
-// if `data` is NULL, not valid UTF-8, or not well-formed JSON.
-//
-// The input is validated with `serde_json` (parse-and-discard) before
-// construction so this function honors the spec contract of rejecting
-// malformed JSON, rather than passing it through unformatted. Free with
-// `rich_json_finish` or `rich_json_free`.
-RichJson *rich_json_new(const char *data, unsigned int indent, bool highlight, bool sort_keys);
+// Validate and create JSON content through `out_json`.
+RichResult rich_json_new(RichStr data,
+                         uint32_t indent,
+                         uint8_t highlight,
+                         uint8_t sort_keys,
+                         RichJson **out_json);
 
-// CONSUME a `RichJson`, erasing it into the type-erased `RichRenderable`
-// composition currency. The `RichJson*` is invalid afterward.
-//
-// Returns NULL if `json` is NULL or was already finished. The returned
-// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-// passed into a consuming container).
-RichRenderable *rich_json_finish(RichJson *json);
+// Consume live JSON content on success and write an owned renderable.
+RichResult rich_json_finish(RichJson **json, RichRenderable **out);
 
-// Free a `RichJson` that was created but never `rich_json_finish`ed.
-// NULL is a no-op.
 void rich_json_free(RichJson *json);
 
-// Create a new `Rule` with default settings (no title, "─" line, centered).
-//
-// Returns NULL on allocation failure. Free with `rich_rule_finish` or
-// `rich_rule_free`.
-RichRule *rich_rule_new(void);
+// Create a rule builder through `out_rule`.
+RichResult rich_rule_new(RichRule **out_rule);
 
-// Set the rule's title (supports BBCode-style markup). `title` must be valid
-// NUL-terminated UTF-8. A NULL/invalid `title` is a no-op. Does not consume
-// the handle.
-void rich_rule_set_title(RichRule *rule, const char *title);
+RichResult rich_rule_set_title(RichRule *rule, RichStr title);
 
-// Set the characters used to draw the rule line (e.g. "═" or "-="). `characters`
-// must be valid NUL-terminated UTF-8. A NULL/invalid value is a no-op. Does not
-// consume the handle.
-void rich_rule_set_characters(RichRule *rule, const char *characters);
+RichResult rich_rule_set_characters(RichRule *rule, RichStr characters);
 
-// Set the rule's line style (e.g. `"bold red"`). Parsed with `Style::parse`;
-// a NULL/invalid/unparseable `style` is a no-op. Does not consume the handle.
-void rich_rule_set_style(RichRule *rule, const char *style);
+RichResult rich_rule_set_style(RichRule *rule, RichStr style);
 
-// Set the title alignment: 0 = Left, 1 = Center, 2 = Right. Out-of-range
-// values are a no-op. Does not consume the handle.
-void rich_rule_set_align(RichRule *rule, int align);
+RichResult rich_rule_set_align(RichRule *rule, uint32_t align);
 
-// CONSUME a `RichRule`, erasing it into a `RichRenderable`. The `RichRule*` is
-// invalid afterward. Returns NULL if `rule` is NULL or was already finished.
-// The returned `RichRenderable*` must be freed with `rich_renderable_free`
-// (unless passed into a consuming container).
-RichRenderable *rich_rule_finish(RichRule *rule);
+// Consume a live rule on success and write an owned renderable.
+RichResult rich_rule_finish(RichRule **rule, RichRenderable **out);
 
-// Free a `RichRule` that was created but never `rich_rule_finish`ed.
-// NULL is a no-op.
 void rich_rule_free(RichRule *rule);
 
-// Create a new empty `Columns`. Returns NULL on allocation failure. Free with
-// `rich_columns_finish` or `rich_columns_free`.
-RichColumns *rich_columns_new(void);
+// Create an empty columns builder through `out_columns`.
+RichResult rich_columns_new(RichColumns **out_columns);
 
-// CONSUME a `RichRenderable` and append it as a column child. The
-// `RichRenderable*` is invalid afterward (it is freed even if `columns` is
-// NULL, so no leak). A NULL `renderable` is a no-op. Does not consume the
-// `columns` handle.
-void rich_columns_add(RichColumns *columns, RichRenderable *renderable);
+RichResult rich_columns_add(RichColumns *columns, const RichRenderable *renderable);
 
-// Append a plain-text column child. `text` must be valid NUL-terminated UTF-8.
-// A NULL/invalid `text` is a no-op. Does not consume the handle.
-void rich_columns_add_str(RichColumns *columns, const char *text);
+RichResult rich_columns_add_str(RichColumns *columns, RichStr text);
 
-// Set whether all columns share equal width. A NULL handle is a no-op. Does
-// not consume the handle.
-void rich_columns_set_equal(RichColumns *columns, bool equal);
+RichResult rich_columns_set_equal(RichColumns *columns, uint8_t equal);
 
-// Set whether columns expand to fill the available width. A NULL handle is a
-// no-op. Does not consume the handle.
-void rich_columns_set_expand(RichColumns *columns, bool expand);
+RichResult rich_columns_set_expand(RichColumns *columns, uint8_t expand);
 
-// Set the inter-column padding as `(vertical, horizontal)` cell counts. A NULL
-// handle is a no-op. Does not consume the handle.
-void rich_columns_set_padding(RichColumns *columns, unsigned int vertical, unsigned int horizontal);
+RichResult rich_columns_set_padding(RichColumns *columns, uint32_t vertical, uint32_t horizontal);
 
-// CONSUME a `RichColumns`, erasing it into a `RichRenderable`. The
-// `RichColumns*` is invalid afterward. Returns NULL if `columns` is NULL or
-// was already finished. The returned `RichRenderable*` must be freed with
-// `rich_renderable_free` (unless passed into a consuming container).
-RichRenderable *rich_columns_finish(RichColumns *columns);
+// Consume live columns on success and write an owned renderable.
+RichResult rich_columns_finish(RichColumns **columns, RichRenderable **out);
 
-// Free a `RichColumns` that was created but never `rich_columns_finish`ed.
-// NULL is a no-op.
 void rich_columns_free(RichColumns *columns);
 
-// Create an `Align` wrapping `content` with horizontal alignment `h_align`
-// (0 = Left, 1 = Center, 2 = Right; any other value defaults to Left).
-//
-// CONSUMES `content`: the `RichRenderable*` is invalid afterward. Returns NULL
-// if `content` is NULL. Free the result with `rich_align_finish` or
-// `rich_align_free`.
-RichAlign *rich_align_new(RichRenderable *content, int h_align);
+// Create an alignment builder; invalid alignment codes are argument errors.
+RichResult rich_align_new(const RichRenderable *content,
+                          uint32_t horizontal,
+                          RichAlign **out_align);
 
-// Create an `Align` that centers `content` horizontally.
-//
-// CONSUMES `content`: the `RichRenderable*` is invalid afterward. Returns NULL
-// if `content` is NULL. Free the result with `rich_align_finish` or
-// `rich_align_free`.
-RichAlign *rich_align_center(RichRenderable *content);
+RichResult rich_align_center(const RichRenderable *content, RichAlign **out_align);
 
-// Set vertical alignment: 0 = Top, 1 = Middle, 2 = Bottom. Out-of-range values
-// are a no-op. A NULL handle is a no-op. Does not consume the handle.
-void rich_align_set_vertical(RichAlign *align, int vertical);
+RichResult rich_align_set_vertical(RichAlign *align, uint32_t vertical);
 
-// Set the fixed alignment width in cells. A NULL handle is a no-op. Does not
-// consume the handle.
-void rich_align_set_width(RichAlign *align, unsigned int width);
+RichResult rich_align_set_width(RichAlign *align, uint32_t width);
 
-// CONSUME a `RichAlign`, erasing it into a `RichRenderable`. The `RichAlign*`
-// is invalid afterward. Returns NULL if `align` is NULL or was already
-// finished. The returned `RichRenderable*` must be freed with
-// `rich_renderable_free` (unless passed into a consuming container).
-RichRenderable *rich_align_finish(RichAlign *align);
+// Consume a live alignment builder on success and write an owned renderable.
+RichResult rich_align_finish(RichAlign **align, RichRenderable **out);
 
-// Free a `RichAlign` that was created but never `rich_align_finish`ed.
-// NULL is a no-op.
 void rich_align_free(RichAlign *align);
 
-// Create a `Padding` wrapping `content` with `top`/`right`/`bottom`/`left`
-// cell padding.
-//
-// CONSUMES `content`: the `RichRenderable*` is invalid afterward. Returns NULL
-// if `content` is NULL. Free the result with `rich_padding_finish` or
-// `rich_padding_free`.
-RichPadding *rich_padding_new(RichRenderable *content,
-                              unsigned int top,
-                              unsigned int right,
-                              unsigned int bottom,
-                              unsigned int left);
+// Create a padding builder with fixed-width cell dimensions.
+RichResult rich_padding_new(const RichRenderable *content,
+                            uint32_t top,
+                            uint32_t right,
+                            uint32_t bottom,
+                            uint32_t left,
+                            RichPadding **out_padding);
 
-// Set the padding background style (e.g. `"on blue"`). Parsed with
-// `Style::parse`; a NULL/invalid/unparseable `style` is a no-op. Does not
-// consume the handle.
-void rich_padding_set_style(RichPadding *padding, const char *style);
+RichResult rich_padding_set_style(RichPadding *padding, RichStr style);
 
-// Set whether the padding expands to fill the available width. A NULL handle
-// is a no-op. Does not consume the handle.
-void rich_padding_set_expand(RichPadding *padding, bool expand);
+RichResult rich_padding_set_expand(RichPadding *padding, uint8_t expand);
 
-// CONSUME a `RichPadding`, erasing it into a `RichRenderable`. The
-// `RichPadding*` is invalid afterward. Returns NULL if `padding` is NULL or
-// was already finished. The returned `RichRenderable*` must be freed with
-// `rich_renderable_free` (unless passed into a consuming container).
-RichRenderable *rich_padding_finish(RichPadding *padding);
+// Consume a live padding builder on success and write an owned renderable.
+RichResult rich_padding_finish(RichPadding **padding, RichRenderable **out);
 
-// Free a `RichPadding` that was created but never `rich_padding_finish`ed.
-// NULL is a no-op.
 void rich_padding_free(RichPadding *padding);
 
-// Create a `Progress` with Rich's default columns (description, bar,
-// percentage, time remaining). Returns NULL on allocation/init failure.
-//
-// The returned handle MUST be freed with `rich_progress_free`. Auto-refresh is
-// disabled: this ABI never starts a background thread — the caller renders each
-// frame explicitly via `rich_progress_render_frame`.
-RichProgress *rich_progress_new(void);
+// Create progress state with auto-refresh disabled.
+RichResult rich_progress_new(RichProgress **out_progress);
 
-// Add a task to the progress display, returning its task id.
-//
-// `description` must be valid NUL-terminated UTF-8. `total` is the total amount
-// of work (e.g. `100.0`); pass a non-positive/`0` value to still create a task
-// (it is forwarded as-is). The task is started immediately and made visible.
-//
-// Returns the new task id as an `unsigned long long` (maps to rich-rs
-// `TaskID(usize)`). Returns `0` if `progress`/`description` is NULL or
-// `description` is not valid UTF-8 — note `0` is also the FIRST legitimately
-// assigned task id, so this sentinel is only meaningful for distinguishing a
-// NULL-argument early-out, not for in-band error detection.
-uint64_t rich_progress_add_task(RichProgress *progress, const char *description, double total);
+// Add a task and write its ID; task ID zero is a valid successful output.
+RichResult rich_progress_add_task(const RichProgress *progress,
+                                  RichStr description,
+                                  double total,
+                                  uint64_t *out_task_id);
 
-// Set a task's completed amount to `completed`.
-//
-// `task_id` is a value previously returned by `rich_progress_add_task`. An
-// unknown id is a silent no-op (matching rich-rs `Progress::update`). Does not
-// trigger a refresh (the caller renders frames explicitly). NULL `progress`
-// is a no-op.
-void rich_progress_update(RichProgress *progress, uint64_t task_id, double completed);
+RichResult rich_progress_update(const RichProgress *progress, uint64_t task_id, double completed);
 
-// Render the CURRENT progress state to an owned, NUL-terminated C string.
-//
-// Renders every visible task's row (the tasks table) through `console`,
-// honoring its force-terminal / color / width settings: with
-// `set_force_terminal(true)` the frame contains ANSI escapes; with `false` it
-// is plain text with zero escapes. No trailing newline is appended — the caller
-// owns line endings and cursor positioning.
-//
-// BORROWS both handles (neither is consumed). Returns NULL if
-// `progress`/`console` is NULL or rendering fails. A non-NULL result MUST be
-// freed with `rich_string_free`.
-char *rich_progress_render_frame(RichProgress *progress, RichConsole *console);
+// Render one caller-driven progress frame to an owned UTF-8 buffer.
+RichResult rich_progress_render_frame(const RichProgress *progress,
+                                      RichConsole *console,
+                                      RichBuffer *out_frame);
 
-// Free a `Progress` created by `rich_progress_new`. NULL is a no-op.
 void rich_progress_free(RichProgress *progress);
 
-// Create a `Status` with the given message (uses the default "dots" spinner).
-//
-// `message` may contain console markup (e.g. `"[bold green]Working..."`). It
-// must be valid NUL-terminated UTF-8. Returns NULL if `message` is NULL or not
-// valid UTF-8. The returned handle MUST be freed with `rich_status_free`.
-RichStatus *rich_status_new(const char *message);
+// Create status state from borrowed UTF-8 copied by Rust.
+RichResult rich_status_new(RichStr message, RichStatus **out_status);
 
-// Render the CURRENT status frame (spinner glyph + message) to an owned C
-// string through `console`.
-//
-// Honors the console's force-terminal / color / width settings: styled (with
-// ANSI escapes) when forced, plain (zero escapes) otherwise. No trailing
-// newline is appended. BORROWS both handles (neither consumed).
-//
-// Returns NULL if `status`/`console` is NULL, the status was somehow empty, or
-// rendering fails. A non-NULL result MUST be freed with `rich_string_free`.
-char *rich_status_render_frame(RichStatus *status, RichConsole *console);
+RichResult rich_status_render_frame(const RichStatus *status,
+                                    RichConsole *console,
+                                    RichBuffer *out_frame);
 
-// Free a `Status` created by `rich_status_new`. NULL is a no-op.
 void rich_status_free(RichStatus *status);
 
-// Create a `Spinner` by name (e.g. `"dots"`, `"line"`, `"earth"`).
-//
-// `name` must be valid NUL-terminated UTF-8. Returns NULL if `name` is NULL,
-// not valid UTF-8, or NOT a known spinner (rich-rs `Spinner::new` returns an
-// error for unknown names). The returned handle MUST be freed with
-// `rich_spinner_free`.
-RichSpinner *rich_spinner_new(const char *name);
+// Create a spinner through `out_spinner`.
+RichResult rich_spinner_new(RichStr name, RichSpinner **out_spinner);
 
-// Render the spinner glyph for `time_seconds` of elapsed time to an owned C
-// string through `console`.
-//
-// `time_seconds` is the elapsed time (from the caller's chosen epoch) used to
-// pick the animation frame; advancing it across calls animates the spinner.
-// Honors the console's force-terminal / color / width settings: styled (ANSI)
-// when forced, plain (zero escapes) otherwise. No trailing newline is appended.
-// BORROWS both handles (neither consumed).
-//
-// Returns NULL if `spinner`/`console` is NULL or rendering fails. A non-NULL
-// result MUST be freed with `rich_string_free`.
-char *rich_spinner_render_frame(RichSpinner *spinner, RichConsole *console, double time_seconds);
+RichResult rich_spinner_render_frame(const RichSpinner *spinner,
+                                     RichConsole *console,
+                                     double time_seconds,
+                                     RichBuffer *out_frame);
 
-// Free a `Spinner` created by `rich_spinner_new`. NULL is a no-op.
 void rich_spinner_free(RichSpinner *spinner);
 
-// Create a `Panel` wrapping the given content renderable.
-//
-// CONSUMES `content`: the `RichRenderable*` is moved into the panel and is
-// invalid afterward (do NOT free it). Returns NULL if `content` is NULL.
-// Free the result with `rich_panel_finish` or `rich_panel_free`.
-RichPanel *rich_panel_new(RichRenderable *content);
+// Create a panel that borrows reusable `content` and writes an owning builder.
+RichResult rich_panel_new(const RichRenderable *content, RichPanel **out_panel);
 
-// Set the panel's title (rendered into the top border). `title` is parsed as
-// plain text. A NULL/invalid-UTF-8 `title` is a no-op. Does not consume the
-// handle.
-void rich_panel_set_title(RichPanel *panel, const char *title);
+RichResult rich_panel_set_title(RichPanel *panel, RichStr title);
 
-// Set the panel's subtitle (rendered into the bottom border). `subtitle` is
-// parsed as plain text. A NULL/invalid-UTF-8 `subtitle` is a no-op. Does not
-// consume the handle.
-void rich_panel_set_subtitle(RichPanel *panel, const char *subtitle);
+RichResult rich_panel_set_subtitle(RichPanel *panel, RichStr subtitle);
 
-// Set the panel's box-drawing style by integer id (see `box_ids` in the
-// generated header: 0 = ROUNDED, 1 = HEAVY, 2 = DOUBLE, 3 = ASCII, ...).
-// An out-of-range id is a no-op (leaves the box unchanged). Does not consume
-// the handle.
-void rich_panel_set_box(RichPanel *panel, int box_id);
+RichResult rich_panel_set_box(RichPanel *panel, uint32_t box_id);
 
-// Set whether the panel expands to the full available width (`true`) or fits
-// its content (`false`). Does not consume the handle. NULL handle is a no-op.
-void rich_panel_set_expand(RichPanel *panel, bool expand);
+RichResult rich_panel_set_expand(RichPanel *panel, uint8_t expand);
 
-// Set a fixed panel width in cells. Does not consume the handle. NULL handle
-// is a no-op.
-void rich_panel_set_width(RichPanel *panel, unsigned int width);
+RichResult rich_panel_set_width(RichPanel *panel, uint32_t width);
 
-// Set the panel's interior padding in cells, in CSS order
-// (top, right, bottom, left). Does not consume the handle. NULL handle is a
-// no-op.
-void rich_panel_set_padding(RichPanel *panel,
-                            unsigned int top,
-                            unsigned int right,
-                            unsigned int bottom,
-                            unsigned int left);
+RichResult rich_panel_set_padding(RichPanel *panel,
+                                  uint32_t top,
+                                  uint32_t right,
+                                  uint32_t bottom,
+                                  uint32_t left);
 
-// Set the panel's content/background style (e.g. `"on grey15"`).
-//
-// Parses `style` with `Style::parse`. A NULL/invalid/unparseable `style` is a
-// no-op (the panel is left unchanged). Does not consume the handle.
-void rich_panel_set_style(RichPanel *panel, const char *style);
+RichResult rich_panel_set_style(RichPanel *panel, RichStr style);
 
-// Set the panel's border style (e.g. `"bold cyan"`).
-//
-// Parses `style` with `Style::parse`. A NULL/invalid/unparseable `style` is a
-// no-op (the panel is left unchanged). Does not consume the handle.
-void rich_panel_set_border_style(RichPanel *panel, const char *style);
+RichResult rich_panel_set_border_style(RichPanel *panel, RichStr style);
 
-// CONSUME a `RichPanel`, erasing it into the type-erased `RichRenderable`
-// composition currency. The `RichPanel*` is invalid afterward.
-//
-// Returns NULL if `panel` is NULL or was already finished. The returned
-// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-// passed into a consuming container).
-RichRenderable *rich_panel_finish(RichPanel *panel);
+// Consume a live panel on success and write an owned renderable.
+RichResult rich_panel_finish(RichPanel **panel, RichRenderable **out_renderable);
 
-// Free a `RichPanel` that was created but never `rich_panel_finish`ed.
-// NULL is a no-op.
+// Destroy an unfinished panel. NULL is accepted.
 void rich_panel_free(RichPanel *panel);
 
-// Create an empty `Table`. Returns NULL on allocation failure.
-//
-// Free with `rich_table_finish` (which consumes it into a `RichRenderable`)
-// or `rich_table_free`.
-RichTable *rich_table_new(void);
+// Create an empty table builder through `out_table`.
+RichResult rich_table_new(RichTable **out_table);
 
-// CONSUME a `RichTable`, erasing it into the type-erased `RichRenderable`
-// composition currency. The `RichTable*` is invalid afterward.
-//
-// Returns NULL if `table` is NULL or was already finished. The returned
-// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-// passed into a consuming container).
-RichRenderable *rich_table_finish(RichTable *table);
+// Consume a live table on success, NULLing `*table`, and return an owned renderable.
+RichResult rich_table_finish(RichTable **table, RichRenderable **out_renderable);
 
-// Free a `RichTable` that was created but never `rich_table_finish`ed.
-// NULL is a no-op.
+// Destroy an unfinished table. NULL is accepted.
 void rich_table_free(RichTable *table);
 
-// Set the table title (parsed as plain text). NULL/non-UTF-8 is a no-op.
-// Does not consume the handle.
-void rich_table_set_title(RichTable *table, const char *title);
+RichResult rich_table_set_title(RichTable *table, RichStr title);
 
-// Set the table caption (parsed as plain text). NULL/non-UTF-8 is a no-op.
-// Does not consume the handle.
-void rich_table_set_caption(RichTable *table, const char *caption);
+RichResult rich_table_set_caption(RichTable *table, RichStr caption);
 
-// Set the table title by parsing console markup (e.g. `[bold]Peers[/]`).
-//
-// Honors the console's markup/emoji/highlight settings via
-// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
-// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
-// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
-// the table handle.
-void rich_table_set_title_markup(RichTable *table, RichConsole *console, const char *markup);
+RichResult rich_table_set_title_markup(RichTable *table, RichConsole *console, RichStr markup);
 
-// Set the table caption by parsing console markup (e.g. `[dim]src[/]`).
-//
-// Honors the console's markup/emoji/highlight settings via
-// `Console::render_str` (exactly like `rich_text_new_markup`). The `console`
-// handle is BORROWED, not consumed. NULL `table`/`console`/`markup`, an
-// already-finished table, or non-UTF-8 `markup` is a no-op. Does not consume
-// the table handle.
-void rich_table_set_caption_markup(RichTable *table, RichConsole *console, const char *markup);
+RichResult rich_table_set_caption_markup(RichTable *table, RichConsole *console, RichStr markup);
 
-// Set the box-drawing style by stable int id (see `box_ids::from_int`).
-// An out-of-range id is a no-op (the box is left unchanged).
-void rich_table_set_box(RichTable *table, int box_id);
+RichResult rich_table_set_box(RichTable *table, uint32_t box_id);
 
-// Show or hide the header row.
-void rich_table_set_show_header(RichTable *table, bool show);
+RichResult rich_table_set_show_header(RichTable *table, uint8_t show);
 
-// Show or hide horizontal lines between rows.
-void rich_table_set_show_lines(RichTable *table, bool show);
+RichResult rich_table_set_show_lines(RichTable *table, uint8_t show);
 
-// Show or hide the outer edge/border.
-void rich_table_set_show_edge(RichTable *table, bool show);
+RichResult rich_table_set_show_edge(RichTable *table, uint8_t show);
 
-// Expand the table to the full available width.
-void rich_table_set_expand(RichTable *table, bool expand);
+RichResult rich_table_set_expand(RichTable *table, uint8_t expand);
 
-// Set left/right cell padding (top/bottom stay 0).
-void rich_table_set_padding(RichTable *table, unsigned int left, unsigned int right);
+RichResult rich_table_set_padding(RichTable *table, uint32_t left, uint32_t right);
 
-// Set the base table style from a style string (e.g. `"on grey23"`).
-// NULL/non-UTF-8/unparseable input is a no-op. Does not consume the handle.
-void rich_table_set_style(RichTable *table, const char *style);
+RichResult rich_table_set_style(RichTable *table, RichStr style);
 
-// Add a column with a plain-text header. NULL/non-UTF-8 header is a no-op.
-// Does not consume the handle.
-void rich_table_add_column(RichTable *table, const char *header);
+RichResult rich_table_add_column(RichTable *table, RichStr header);
 
-// Add a column whose header is a `RichRenderable`. CONSUMES `header`: the
-// pointer is invalid afterward (do NOT free it). A NULL `header` is a no-op.
-//
-// If `table` is NULL or already finished, the `header` is still consumed and
-// dropped (it cannot be returned to the caller).
-void rich_table_add_column_renderable(RichTable *table, RichRenderable *header);
+RichResult rich_table_add_column_renderable(RichTable *table, const RichRenderable *header);
 
-// Add a row of plain-text cells. `cells` is an array of `count` NUL-terminated
-// UTF-8 strings. NULL `cells`, a NULL/non-UTF-8 element, or `count == 0` is a
-// no-op. Does not consume the handle.
-void rich_table_add_row_strs(RichTable *table, const char *const *cells, unsigned int count);
+RichResult rich_table_add_row_strs(RichTable *table, const RichStr *cells, uint32_t cell_count);
 
-// Add a row of `RichRenderable` cells. `cells` is an array of `count`
-// `RichRenderable*`. CONSUMES every cell pointer (do NOT free them). A NULL
-// `cells` or `count == 0` is a no-op; any NULL element is skipped.
-//
-// All non-NULL cells are consumed regardless of whether `table` is valid; if
-// `table` is NULL or already finished, the cells are dropped.
-void rich_table_add_row_renderables(RichTable *table,
-                                    RichRenderable *const *cells,
-                                    unsigned int count);
+RichResult rich_table_add_row_renderables(RichTable *table,
+                                          const RichRenderable *const *cells,
+                                          uint32_t cell_count);
 
-// Create a `RichTree` from a plain-text label (no markup parsing).
-//
-// Equivalent to `Tree::new(Box::new(Text::plain(label)))`. `label` must be
-// valid NUL-terminated UTF-8. Returns NULL if `label` is NULL or not valid
-// UTF-8. Free with `rich_tree_finish` or `rich_tree_free`.
-RichTree *rich_tree_new(const char *label);
+// Create a tree with a plain UTF-8 root label.
+RichResult rich_tree_new(RichStr label, RichTree **out_tree);
 
-// Create a `RichTree` whose root label is an arbitrary renderable.
-//
-// CONSUMES `label`: the `RichRenderable*` is invalid afterward (do not free or
-// reuse it). Returns NULL if `label` is NULL. Free the returned handle with
-// `rich_tree_finish` or `rich_tree_free`.
-RichTree *rich_tree_new_renderable(RichRenderable *label);
+RichResult rich_tree_new_renderable(const RichRenderable *label, RichTree **out_tree);
 
-// Add a child node with a plain-text label to a `RichTree`.
-//
-// Returns a `RichTreeNode*` BORROW into the new child (for attaching
-// grandchildren via `rich_tree_node_add*`). The returned handle is valid only
-// until `tree` is finished/freed and must NOT be freed (see [`RichTreeNode`]).
-//
-// `label` must be valid NUL-terminated UTF-8. Returns NULL if `tree`/`label`
-// is NULL, `label` is not valid UTF-8, or the tree was already finished.
-RichTreeNode *rich_tree_add(RichTree *tree, const char *label);
+// Add a child under `parent_id` and write its stable ID. Unknown parents return
+// `RICH_ERROR_INVALID_STATE` without mutating the tree.
+RichResult rich_tree_add(RichTree *tree, uint64_t parent_id, RichStr label, uint64_t *out_node_id);
 
-// Add a child node whose label is an arbitrary renderable to a `RichTree`.
-//
-// CONSUMES `label`: the `RichRenderable*` is invalid afterward. Returns a
-// `RichTreeNode*` BORROW into the new child (valid only until `tree` is
-// finished/freed; must NOT be freed — see [`RichTreeNode`]).
-//
-// Returns NULL if `tree`/`label` is NULL or the tree was already finished. If
-// it returns NULL the `label` renderable has still been consumed only when a
-// non-NULL `label` was passed and the tree was valid; on a NULL-pointer guard
-// nothing is consumed.
-RichTreeNode *rich_tree_add_renderable(RichTree *tree, RichRenderable *label);
+RichResult rich_tree_add_renderable(RichTree *tree,
+                                    uint64_t parent_id,
+                                    const RichRenderable *label,
+                                    uint64_t *out_node_id);
 
-// Add a plain-text child to a sub-node, returning a handle to the grandchild.
-//
-// `node` must be a live `RichTreeNode*` whose owning `RichTree` has not been
-// finished/freed. Returns a `RichTreeNode*` BORROW into the new grandchild
-// (same lifetime/never-free contract — see [`RichTreeNode`]).
-//
-// `label` must be valid NUL-terminated UTF-8. Returns NULL if `node`/`label`
-// is NULL or `label` is not valid UTF-8.
-RichTreeNode *rich_tree_node_add(RichTreeNode *node, const char *label);
+RichResult rich_tree_set_style(RichTree *tree, RichStr style);
 
-// Add a renderable-labelled child to a sub-node, returning a grandchild handle.
-//
-// CONSUMES `label`: the `RichRenderable*` is invalid afterward. `node` must be
-// a live `RichTreeNode*` whose owning `RichTree` is still alive. Returns a
-// `RichTreeNode*` BORROW into the new grandchild (never free it — see
-// [`RichTreeNode`]).
-//
-// Returns NULL if `node`/`label` is NULL.
-RichTreeNode *rich_tree_node_add_renderable(RichTreeNode *node, RichRenderable *label);
+RichResult rich_tree_set_guide_style(RichTree *tree, RichStr style);
 
-// Set the label style (e.g. `"bold cyan"`) on a `RichTree`.
-//
-// Parses `style` with `Style::parse`; a NULL/invalid/unparseable style is a
-// no-op (the tree is left unchanged). Maps to `Tree::with_style`. Does not
-// consume the handle.
-void rich_tree_set_style(RichTree *tree, const char *style);
+RichResult rich_tree_set_hide_root(RichTree *tree, uint8_t hide);
 
-// Set the guide-line style (e.g. `"dim"`) on a `RichTree`.
-//
-// Parses `style` with `Style::parse`; a NULL/invalid/unparseable style is a
-// no-op. Maps to `Tree::with_guide_style`. Does not consume the handle.
-void rich_tree_set_guide_style(RichTree *tree, const char *style);
+// Consume a live tree on success and write an owned renderable.
+RichResult rich_tree_finish(RichTree **tree, RichRenderable **out_renderable);
 
-// Set whether the root node is hidden when rendering.
-//
-// When `true`, only children render (no root label/guides). Maps to
-// `Tree::with_hide_root`. NULL `tree` is a no-op. Does not consume the handle.
-void rich_tree_set_hide_root(RichTree *tree, bool hide);
-
-// CONSUME a `RichTree`, erasing it into the type-erased `RichRenderable`
-// composition currency. The `RichTree*` is invalid afterward, and so is every
-// `RichTreeNode*` previously derived from it.
-//
-// Returns NULL if `tree` is NULL or was already finished. The returned
-// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-// passed into a consuming container).
-RichRenderable *rich_tree_finish(RichTree *tree);
-
-// Free a `RichTree` that was created but never `rich_tree_finish`ed. NULL is a
-// no-op. This also invalidates every `RichTreeNode*` derived from this tree.
+// Destroy an unfinished tree. NULL is accepted.
 void rich_tree_free(RichTree *tree);
 
 #ifdef __cplusplus

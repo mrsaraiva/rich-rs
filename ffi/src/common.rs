@@ -1,149 +1,334 @@
-//! Shared FFI plumbing reused across every renderable phase.
-//!
-//! This module holds the pieces that are *not* tied to a single widget:
-//! the universal render helper ([`render_to_cstring`]) and the stable
-//! `int` -> enum / `int` -> box maps that container ABIs (Table, Panel,
-//! Rule, Align, ...) all share. They live here so Wave-2 phases can plug
-//! into them without conflicting edits.
-
-use std::ffi::{CString, c_char, c_int};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::ptr;
+use std::sync::Arc;
 
 use rich_rs::r#box::{self, Box as RichBox};
-use rich_rs::{AlignMethod, JustifyMethod, Renderable, Style, VerticalAlignMethod};
+use rich_rs::{
+    AlignMethod, ConsoleOptions, JustifyMethod, Measurement, Renderable, Segments, Style,
+    VerticalAlignMethod,
+};
 
-use crate::RichConsole;
+use crate::{
+    RICH_ERROR_INVALID_ARGUMENT, RICH_ERROR_INVALID_STATE, RICH_ERROR_INVALID_UTF8,
+    RICH_ERROR_NULL_ARGUMENT, RICH_ERROR_PANIC, RICH_ERROR_RENDER, RICH_OK, RichBuffer,
+    RichRenderable, RichResult, RichStr,
+};
 
-/// Parse a style string, rejecting input that produces no actual style.
-///
-/// `rich_rs::Style::parse` is intentionally lenient — it never returns `None`
-/// and silently ignores tokens that are neither known attributes/named-styles
-/// nor valid colors (so `"nonsense-xyz"` parses to an empty/null style). The
-/// FFI contract is stricter: a style string is "parseable" only if it yields a
-/// non-null style. This helper enforces that, so `rich_style_parse` and
-/// `rich_text_set_style` agree on what counts as a valid style.
-///
-/// Returns `None` for empty/whitespace-only input and for input whose tokens
-/// were all unrecognized (the resulting style is null).
-pub(crate) fn parse_style(s: &str) -> Option<Style> {
-    let parsed = Style::parse(s)?;
-    if parsed.is_null() {
-        return None;
-    }
-    Some(parsed)
-}
-
-/// Render any `&dyn Renderable` through a console into an owned C string.
-///
-/// Clears the console's capture buffer, prints the renderable with no
-/// trailing newline (`end = ""`), and returns the captured bytes as a
-/// heap-allocated NUL-terminated string. Returns NULL if printing fails
-/// or the output contains an interior NUL byte.
-///
-/// The returned pointer is owned by the caller and MUST be freed with
-/// `rich_string_free`.
-pub(crate) fn render_to_cstring(
-    con: &mut RichConsole,
-    r: &(dyn Renderable + Send + Sync),
-) -> *mut c_char {
-    con.inner.clear_captured();
-    // end = "" so we never impose a trailing newline on the C caller.
-    if con.inner.print(r, None, None, None, false, "").is_err() {
-        return std::ptr::null_mut();
-    }
-    match CString::new(con.inner.get_captured()) {
-        Ok(c) => c.into_raw(),
-        Err(_) => std::ptr::null_mut(),
+pub(crate) fn ffi_call(f: impl FnOnce() -> Result<(), RichResult>) -> RichResult {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(Ok(())) => RICH_OK,
+        Ok(Err(error)) => error,
+        Err(_) => RICH_ERROR_PANIC,
     }
 }
 
-/// Map a stable `int` code to a [`rich_rs::box::Box`].
-///
-/// Wave-2 box-using ABIs (`rich_table_set_box`, `rich_panel_set_box`, ...)
-/// all share this table so the integer contract is identical everywhere.
-///
-/// Codes (documented in the generated header):
-/// * `0` = ROUNDED
-/// * `1` = HEAVY
-/// * `2` = DOUBLE
-/// * `3` = ASCII
-/// * `4` = MINIMAL
-/// * `5` = SQUARE
-/// * `6` = SIMPLE
-/// * `7` = HEAVY_HEAD
-/// * `8` = HEAVY_EDGE
-/// * `9` = DOUBLE_EDGE
-/// * `10` = HORIZONTALS
-/// * `11` = MINIMAL_HEAVY_HEAD
-/// * `12` = SIMPLE_HEAVY
-/// * `13` = MARKDOWN
-///
-/// Any other value yields `None` (callers should treat that as "leave the
-/// box unchanged").
-pub(crate) mod box_ids {
-    use super::{RichBox, r#box};
+pub(crate) unsafe fn init_out<T>(out: *mut *mut T) -> Result<(), RichResult> {
+    if out.is_null() {
+        return Err(RICH_ERROR_NULL_ARGUMENT);
+    }
+    unsafe { *out = ptr::null_mut() };
+    Ok(())
+}
 
-    /// Resolve an `int` box id to a concrete `Box`, or `None` if out of range.
-    #[allow(dead_code)] // Consumed by Wave-2 (Table, Panel); landed now to avoid conflicts.
-    pub(crate) fn from_int(id: i32) -> Option<RichBox> {
-        let b = match id {
-            0 => r#box::ROUNDED,
-            1 => r#box::HEAVY,
-            2 => r#box::DOUBLE,
-            3 => r#box::ASCII,
-            4 => r#box::MINIMAL,
-            5 => r#box::SQUARE,
-            6 => r#box::SIMPLE,
-            7 => r#box::HEAVY_HEAD,
-            8 => r#box::HEAVY_EDGE,
-            9 => r#box::DOUBLE_EDGE,
-            10 => r#box::HORIZONTALS,
-            11 => r#box::MINIMAL_HEAVY_HEAD,
-            12 => r#box::SIMPLE_HEAVY,
-            13 => r#box::MARKDOWN,
-            _ => return None,
+pub(crate) unsafe fn init_scalar_out<T: Default>(out: *mut T) -> Result<(), RichResult> {
+    if out.is_null() {
+        return Err(RICH_ERROR_NULL_ARGUMENT);
+    }
+    unsafe { *out = T::default() };
+    Ok(())
+}
+
+pub(crate) unsafe fn required_ref<'a, T>(ptr: *const T) -> Result<&'a T, RichResult> {
+    if ptr.is_null() {
+        Err(RICH_ERROR_NULL_ARGUMENT)
+    } else {
+        Ok(unsafe { &*ptr })
+    }
+}
+
+pub(crate) unsafe fn required_mut<'a, T>(ptr: *mut T) -> Result<&'a mut T, RichResult> {
+    if ptr.is_null() {
+        Err(RICH_ERROR_NULL_ARGUMENT)
+    } else {
+        Ok(unsafe { &mut *ptr })
+    }
+}
+
+pub(crate) unsafe fn rich_str<'a>(value: RichStr) -> Result<&'a str, RichResult> {
+    if value.data.is_null() {
+        return if value.len == 0 {
+            Ok("")
+        } else {
+            Err(RICH_ERROR_NULL_ARGUMENT)
         };
-        Some(b)
+    }
+    if value.len > isize::MAX as u64 {
+        return Err(RICH_ERROR_INVALID_ARGUMENT);
+    }
+    let len = usize::try_from(value.len).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)?;
+    let bytes = unsafe { std::slice::from_raw_parts(value.data, len) };
+    std::str::from_utf8(bytes).map_err(|_| RICH_ERROR_INVALID_UTF8)
+}
+
+pub(crate) fn strict_bool(value: u8) -> Result<bool, RichResult> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(RICH_ERROR_INVALID_ARGUMENT),
     }
 }
 
-/// Map a stable `int` code to an [`AlignMethod`] (horizontal alignment).
-///
-/// Codes: `0` = Left, `1` = Center, `2` = Right. Any other value -> `None`.
-#[allow(dead_code)] // Consumed by Wave-2 (Rule, Align); landed now to avoid conflicts.
-pub(crate) fn align_method_from_int(id: c_int) -> Option<AlignMethod> {
-    match id {
-        0 => Some(AlignMethod::Left),
-        1 => Some(AlignMethod::Center),
-        2 => Some(AlignMethod::Right),
-        _ => None,
+#[cfg(test)]
+thread_local! {
+    static FORCE_BOUNDARY_PANIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn force_next_boundary_panic() {
+    FORCE_BOUNDARY_PANIC.with(|value| value.set(true));
+}
+
+pub(crate) fn maybe_test_boundary_panic() {
+    #[cfg(test)]
+    FORCE_BOUNDARY_PANIC.with(|value| {
+        if value.replace(false) {
+            panic!("forced FFI boundary panic");
+        }
+    });
+}
+
+pub(crate) fn count(value: u32) -> Result<usize, RichResult> {
+    usize::try_from(value).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)
+}
+
+pub(crate) unsafe fn init_buffer(out: *mut RichBuffer) -> Result<(), RichResult> {
+    if out.is_null() {
+        return Err(RICH_ERROR_NULL_ARGUMENT);
+    }
+    unsafe { *out = RichBuffer::default() };
+    Ok(())
+}
+
+pub(crate) unsafe fn write_buffer(out: *mut RichBuffer, bytes: Vec<u8>) -> Result<(), RichResult> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    let len = u64::try_from(bytes.len()).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)?;
+    let boxed = bytes.into_boxed_slice();
+    let data = Box::into_raw(boxed) as *mut u8;
+    unsafe { *out = RichBuffer { data, len } };
+    Ok(())
+}
+
+pub(crate) fn parse_style(value: &str) -> Result<Style, RichResult> {
+    let parsed = Style::parse(value).ok_or(RICH_ERROR_INVALID_ARGUMENT)?;
+    if parsed.is_null() {
+        Err(RICH_ERROR_INVALID_ARGUMENT)
+    } else {
+        Ok(parsed)
     }
 }
 
-/// Map a stable `int` code to a [`VerticalAlignMethod`].
-///
-/// Codes: `0` = Top, `1` = Middle, `2` = Bottom. Any other value -> `None`.
-#[allow(dead_code)] // Consumed by Wave-2 (Align); landed now to avoid conflicts.
-pub(crate) fn vertical_align_method_from_int(id: c_int) -> Option<VerticalAlignMethod> {
-    match id {
-        0 => Some(VerticalAlignMethod::Top),
-        1 => Some(VerticalAlignMethod::Middle),
-        2 => Some(VerticalAlignMethod::Bottom),
-        _ => None,
+pub(crate) fn render_to_bytes(
+    console: &mut crate::RichConsole,
+    renderable: &(dyn Renderable + Send + Sync),
+) -> Result<Vec<u8>, RichResult> {
+    console.inner.clear_captured();
+    console
+        .inner
+        .print(renderable, None, None, None, false, "")
+        .map_err(|_| RICH_ERROR_RENDER)?;
+    Ok(console.inner.get_captured().into_bytes())
+}
+
+pub(crate) struct SharedRenderable(pub(crate) Arc<dyn Renderable + Send + Sync>);
+
+impl Renderable for SharedRenderable {
+    fn render(&self, console: &rich_rs::Console, options: &ConsoleOptions) -> Segments {
+        self.0.render(console, options)
+    }
+
+    fn measure(&self, console: &rich_rs::Console, options: &ConsoleOptions) -> Measurement {
+        self.0.measure(console, options)
     }
 }
 
-/// Map a stable `int` code to a [`JustifyMethod`].
-///
-/// Codes: `0` = Default, `1` = Left, `2` = Center, `3` = Right, `4` = Full.
-/// Any other value -> `None`.
-#[allow(dead_code)] // Consumed by Wave-2 (Columns, Markdown); landed now to avoid conflicts.
-pub(crate) fn justify_method_from_int(id: c_int) -> Option<JustifyMethod> {
+pub(crate) fn shared_box(renderable: &RichRenderable) -> Box<dyn Renderable + Send + Sync> {
+    Box::new(SharedRenderable(Arc::clone(&renderable.0)))
+}
+
+pub(crate) fn new_renderable(value: impl Renderable + 'static) -> *mut RichRenderable {
+    Box::into_raw(Box::new(RichRenderable(Arc::new(value))))
+}
+
+pub(crate) unsafe fn finish<B, T: Renderable + 'static>(
+    builder: *mut *mut B,
+    out: *mut *mut RichRenderable,
+    is_live: impl FnOnce(&B) -> bool,
+    take: impl FnOnce(B) -> Option<T>,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out)? };
+        if builder.is_null() {
+            return Err(RICH_ERROR_NULL_ARGUMENT);
+        }
+        let raw = unsafe { *builder };
+        if raw.is_null() || !is_live(unsafe { &*raw }) {
+            return Err(RICH_ERROR_INVALID_STATE);
+        }
+        let boxed = unsafe { Box::from_raw(raw) };
+        unsafe { *builder = ptr::null_mut() };
+        let value = take(*boxed).ok_or(RICH_ERROR_INVALID_STATE)?;
+        unsafe { *out = new_renderable(value) };
+        Ok(())
+    })
+}
+
+pub(crate) unsafe fn destroy<T>(ptr: *mut T) {
+    if ptr.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        drop(unsafe { Box::from_raw(ptr) });
+    }));
+}
+
+pub(crate) fn box_from_id(id: u32) -> Result<RichBox, RichResult> {
     match id {
-        0 => Some(JustifyMethod::Default),
-        1 => Some(JustifyMethod::Left),
-        2 => Some(JustifyMethod::Center),
-        3 => Some(JustifyMethod::Right),
-        4 => Some(JustifyMethod::Full),
-        _ => None,
+        0 => Ok(r#box::ROUNDED),
+        1 => Ok(r#box::HEAVY),
+        2 => Ok(r#box::DOUBLE),
+        3 => Ok(r#box::ASCII),
+        4 => Ok(r#box::MINIMAL),
+        5 => Ok(r#box::SQUARE),
+        6 => Ok(r#box::SIMPLE),
+        7 => Ok(r#box::HEAVY_HEAD),
+        8 => Ok(r#box::HEAVY_EDGE),
+        9 => Ok(r#box::DOUBLE_EDGE),
+        10 => Ok(r#box::HORIZONTALS),
+        11 => Ok(r#box::MINIMAL_HEAVY_HEAD),
+        12 => Ok(r#box::SIMPLE_HEAVY),
+        13 => Ok(r#box::MARKDOWN),
+        _ => Err(RICH_ERROR_INVALID_ARGUMENT),
+    }
+}
+
+pub(crate) fn align_from_id(id: u32) -> Result<AlignMethod, RichResult> {
+    match id {
+        0 => Ok(AlignMethod::Left),
+        1 => Ok(AlignMethod::Center),
+        2 => Ok(AlignMethod::Right),
+        _ => Err(RICH_ERROR_INVALID_ARGUMENT),
+    }
+}
+
+pub(crate) fn vertical_from_id(id: u32) -> Result<VerticalAlignMethod, RichResult> {
+    match id {
+        0 => Ok(VerticalAlignMethod::Top),
+        1 => Ok(VerticalAlignMethod::Middle),
+        2 => Ok(VerticalAlignMethod::Bottom),
+        _ => Err(RICH_ERROR_INVALID_ARGUMENT),
+    }
+}
+
+pub(crate) fn justify_from_id(id: u32) -> Result<JustifyMethod, RichResult> {
+    match id {
+        0 => Ok(JustifyMethod::Default),
+        1 => Ok(JustifyMethod::Left),
+        2 => Ok(JustifyMethod::Center),
+        3 => Ok(JustifyMethod::Right),
+        4 => Ok(JustifyMethod::Full),
+        _ => Err(RICH_ERROR_INVALID_ARGUMENT),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strict_boolean_validation() {
+        assert_eq!(strict_bool(0), Ok(false));
+        assert_eq!(strict_bool(1), Ok(true));
+        assert_eq!(strict_bool(2), Err(RICH_ERROR_INVALID_ARGUMENT));
+    }
+
+    #[test]
+    fn borrowed_string_validation() {
+        unsafe {
+            assert_eq!(
+                rich_str(RichStr {
+                    data: ptr::null(),
+                    len: 0
+                }),
+                Ok("")
+            );
+            assert_eq!(
+                rich_str(RichStr {
+                    data: ptr::null(),
+                    len: 1
+                }),
+                Err(RICH_ERROR_NULL_ARGUMENT)
+            );
+            let valid = b"a\0b";
+            assert_eq!(
+                rich_str(RichStr {
+                    data: valid.as_ptr(),
+                    len: 3
+                }),
+                Ok("a\0b")
+            );
+            let invalid = [0xff];
+            assert_eq!(
+                rich_str(RichStr {
+                    data: invalid.as_ptr(),
+                    len: 1
+                }),
+                Err(RICH_ERROR_INVALID_UTF8)
+            );
+        }
+    }
+
+    #[test]
+    fn outputs_are_initialized_on_error_and_panic() {
+        let mut value = 99_u32;
+        let error = ffi_call(|| {
+            unsafe { init_scalar_out(&mut value)? };
+            Err(RICH_ERROR_INVALID_ARGUMENT)
+        });
+        assert_eq!(error, RICH_ERROR_INVALID_ARGUMENT);
+        assert_eq!(value, 0);
+
+        value = 99;
+        let panic = ffi_call(|| {
+            unsafe { init_scalar_out(&mut value)? };
+            panic!("boundary test");
+        });
+        assert_eq!(panic, RICH_ERROR_PANIC);
+        assert_eq!(value, 0);
+    }
+
+    #[test]
+    fn empty_buffer_stays_canonical() {
+        let mut buffer = RichBuffer {
+            data: ptr::dangling_mut(),
+            len: 99,
+        };
+        unsafe {
+            init_buffer(&mut buffer).unwrap();
+            write_buffer(&mut buffer, Vec::new()).unwrap();
+        }
+        assert!(buffer.data.is_null());
+        assert_eq!(buffer.len, 0);
+    }
+
+    #[test]
+    fn oversized_string_length_is_rejected() {
+        let byte = b'x';
+        let value = RichStr {
+            data: &byte,
+            len: isize::MAX as u64 + 1,
+        };
+        assert_eq!(unsafe { rich_str(value) }, Err(RICH_ERROR_INVALID_ARGUMENT));
     }
 }

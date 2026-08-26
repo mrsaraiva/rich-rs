@@ -8,6 +8,35 @@ cpp_compat = true
 style = "type"
 documentation = true
 documentation_style = "c99"
+header = """
+/*
+ * rich-ffi ABI ownership and safety contract
+ *
+ * Every fallible operation returns RichResult. RICH_OK is the only success
+ * value; output arguments are initialized to NULL, zero, or {NULL, 0} before
+ * other validation. Destructors return void, accept NULL, and contain panics.
+ *
+ * RichStr is borrowed UTF-8 for the duration of one call. It need not be
+ * NUL-terminated and may contain embedded NUL bytes. {NULL, 0} is empty;
+ * {NULL, nonzero} is an error.
+ *
+ * RichBuffer owns bytes allocated by rich-ffi. Copy them before calling
+ * rich_buffer_free(&buffer). The destructor clears the struct and may safely
+ * be called again. Never release these bytes with another allocator.
+ *
+ * Each *_new writes an owning opaque handle through Handle **out. Each
+ * matching *_free destroys a live handle. Typed *_finish functions take
+ * Handle **: success consumes and NULLs the builder; failure before ownership
+ * is taken leaves it live. RichRenderable inputs to containers are borrowed;
+ * containers retain shared Rust ownership and the caller keeps its handle.
+ * Tree nodes are stable uint64_t IDs owned by RichTree; ID 0 addresses root.
+ *
+ * Verify rich_ffi_abi_version() == RICH_FFI_ABI_VERSION before ordinary calls.
+ * Handles are not thread-safe unless separately documented. NULL checks and
+ * panic guards do not make forged, stale, freed, or concurrently misused
+ * non-NULL pointers valid.
+ */
+"""
 
 [parse]
 parse_deps = false

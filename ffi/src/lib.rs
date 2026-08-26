@@ -1,44 +1,19 @@
-//! C ABI bindings for rich-rs.
+//! Stable C ABI foundation for rich-rs language bindings.
 //!
-//! Designed for C/C++ consumers (e.g. the SafeTunnel CLI and the `--foreground`
-//! daemon). The model is an **opaque handle** + explicit lifetime functions:
-//!
-//! ```c
-//! RichConsole *con = rich_console_new();
-//! rich_console_set_force_terminal(con, isatty(fileno(stdout))); // plain when piped
-//! char *out = rich_console_render_markup(con, "[bold green]✓[/] tunnel up");
-//! if (out) { fputs(out, stdout); rich_string_free(out); }
-//! rich_console_free(con);
-//! ```
-//!
-//! ## Invariants the caller must uphold
-//! * Every `*_new` handle is freed exactly once with `rich_console_free`.
-//! * Every non-NULL `char*` returned is freed exactly once with `rich_string_free`.
-//! * String inputs are valid NUL-terminated UTF-8.
-//!
-//! ## Safety design
-//! Every entry point is NULL-checked and wrapped in `catch_unwind`, so a panic
-//! inside rich-rs surfaces as a NULL / no-op return instead of unwinding across
-//! the FFI boundary (which would abort the host process).
+//! All handles are opaque and must be freed with their matching destructor.
+//! Non-destructor operations return a [`RichResult`]. Raw non-NULL handles must
+//! still be live values created by this library; validation cannot make forged,
+//! stale, or concurrently misused pointers safe.
 
-// Every function here is a C ABI boundary: its only callers are C/C++, the
-// pointer-validity contract is documented per-function and in include/rich.h,
-// and each entry point NULL-checks + panic-guards before any deref. Marking
-// individual fns `unsafe` would be inconsistent (the trivial setters deref via a
-// helper) and gives the C/C++ consumers nothing, since cbindgen ignores it.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-use std::ffi::{CStr, CString, c_char, c_int, c_uint};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::ptr;
+use std::sync::Arc;
 
 use rich_rs::{ColorSystem, Console, Renderable, Style, Text};
 
 mod common;
-use common::{parse_style, render_to_cstring};
-
-// Wave-2 renderable modules. Declared here so each phase lane edits ONLY its own
-// module file (zero shared-file conflicts). Functions inside are `#[no_mangle]`
-// and export regardless of module privacy; cbindgen reads each file directly.
 mod content;
 mod layout;
 mod live;
@@ -46,385 +21,788 @@ mod panel;
 mod table;
 mod tree;
 
-/// Opaque console handle. C/C++ only ever sees a `RichConsole*`.
-///
-/// Backed by a capture console: rendering writes ANSI (or plain) text to an
-/// in-memory buffer that `rich_console_render_markup` hands back as an owned
-/// string. The caller decides where it goes (stdout, a log line, etc.).
+use common::{
+    destroy, ffi_call, finish, init_buffer, init_out, init_scalar_out, maybe_test_boundary_panic,
+    parse_style, render_to_bytes, required_mut, required_ref, rich_str, strict_bool, write_buffer,
+};
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Stable result category returned by every fallible ABI operation.
+pub struct RichResult(pub u32);
+
+pub const RICH_OK: RichResult = RichResult(0);
+pub const RICH_ERROR_NULL_ARGUMENT: RichResult = RichResult(1);
+pub const RICH_ERROR_INVALID_UTF8: RichResult = RichResult(2);
+pub const RICH_ERROR_INVALID_ARGUMENT: RichResult = RichResult(3);
+pub const RICH_ERROR_INVALID_STATE: RichResult = RichResult(4);
+pub const RICH_ERROR_IO: RichResult = RichResult(5);
+pub const RICH_ERROR_RENDER: RichResult = RichResult(6);
+pub const RICH_ERROR_PANIC: RichResult = RichResult(7);
+pub const RICH_FFI_ABI_VERSION: u32 = 1;
+
+pub const RICH_COLOR_NONE: u32 = 0;
+pub const RICH_COLOR_STANDARD: u32 = 1;
+pub const RICH_COLOR_EIGHT_BIT: u32 = 2;
+pub const RICH_COLOR_TRUECOLOR: u32 = 3;
+pub const RICH_COLOR_WINDOWS: u32 = 4;
+
+pub const RICH_ALIGN_LEFT: u32 = 0;
+pub const RICH_ALIGN_CENTER: u32 = 1;
+pub const RICH_ALIGN_RIGHT: u32 = 2;
+pub const RICH_VERTICAL_TOP: u32 = 0;
+pub const RICH_VERTICAL_MIDDLE: u32 = 1;
+pub const RICH_VERTICAL_BOTTOM: u32 = 2;
+pub const RICH_JUSTIFY_DEFAULT: u32 = 0;
+pub const RICH_JUSTIFY_LEFT: u32 = 1;
+pub const RICH_JUSTIFY_CENTER: u32 = 2;
+pub const RICH_JUSTIFY_RIGHT: u32 = 3;
+pub const RICH_JUSTIFY_FULL: u32 = 4;
+pub const RICH_BOX_ROUNDED: u32 = 0;
+pub const RICH_BOX_HEAVY: u32 = 1;
+pub const RICH_BOX_DOUBLE: u32 = 2;
+pub const RICH_BOX_ASCII: u32 = 3;
+pub const RICH_BOX_MINIMAL: u32 = 4;
+pub const RICH_BOX_SQUARE: u32 = 5;
+pub const RICH_BOX_SIMPLE: u32 = 6;
+pub const RICH_BOX_HEAVY_HEAD: u32 = 7;
+pub const RICH_BOX_HEAVY_EDGE: u32 = 8;
+pub const RICH_BOX_DOUBLE_EDGE: u32 = 9;
+pub const RICH_BOX_HORIZONTALS: u32 = 10;
+pub const RICH_BOX_MINIMAL_HEAVY_HEAD: u32 = 11;
+pub const RICH_BOX_SIMPLE_HEAVY: u32 = 12;
+pub const RICH_BOX_MARKDOWN: u32 = 13;
+pub const RICH_TREE_ROOT_ID: u64 = 0;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+/// Borrowed UTF-8 bytes. The library never stores `data` beyond the call.
+pub struct RichStr {
+    pub data: *const u8,
+    pub len: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+/// Rust-allocated output bytes released and cleared by `rich_buffer_free`.
+pub struct RichBuffer {
+    pub data: *mut u8,
+    pub len: u64,
+}
+
+/// Owning capture-console handle. Setters return a result and rendering writes
+/// owned UTF-8 to `RichBuffer` without appending a newline.
 pub struct RichConsole {
-    inner: Console<Vec<u8>>,
-    /// Palette to use *when styling is on*. rich-rs emits ANSI whenever
-    /// `color_system` is `Some`, regardless of terminal state, so we hold the
-    /// desired palette here and only push it onto the console while
-    /// `force_terminal` is true. That makes `set_force_terminal(false)` produce
-    /// genuinely plain text (the daemon-vs-`--foreground` contract).
+    pub(crate) inner: Console<Vec<u8>>,
     desired_color: Option<ColorSystem>,
 }
 
-/// Create a new console. Returns NULL on allocation/init failure.
-///
-/// Defaults: markup + emoji enabled, truecolor, and `force_terminal = true` so
-/// ANSI is emitted into the captured string. A consumer that may be piped should
-/// immediately call `rich_console_set_force_terminal` with its `isatty` result.
+/// Owning handle to an Arc-backed renderable. Container inputs borrow this
+/// handle and retain their own shared reference; free releases one reference.
+pub struct RichRenderable(pub(crate) Arc<dyn Renderable + Send + Sync>);
+/// Owning text builder consumed only by successful `rich_text_finish`.
+pub struct RichText(pub(crate) Option<Text>);
+/// Owning parsed-style handle used to validate style syntax.
+pub struct RichStyle {
+    _value: Style,
+}
+
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_console_new() -> *mut RichConsole {
-    catch_unwind(|| {
+/// Return the native ABI version. This infallible value must equal
+/// `RICH_FFI_ABI_VERSION` before ordinary calls are made.
+pub extern "C" fn rich_ffi_abi_version() -> u32 {
+    RICH_FFI_ABI_VERSION
+}
+
+#[unsafe(no_mangle)]
+/// Write the synchronized Cargo package version as an owned UTF-8 buffer.
+pub extern "C" fn rich_ffi_version(out_version: *mut RichBuffer) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_buffer(out_version)? };
+        unsafe { write_buffer(out_version, env!("CARGO_PKG_VERSION").as_bytes().to_vec()) }
+    })
+}
+
+#[unsafe(no_mangle)]
+/// Free a produced buffer and reset it to `{NULL, 0}`. NULL is accepted.
+pub extern "C" fn rich_buffer_free(buffer: *mut RichBuffer) {
+    if buffer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        let value = &mut *buffer;
+        if !value.data.is_null()
+            && let Ok(len) = usize::try_from(value.len)
+        {
+            let slice = ptr::slice_from_raw_parts_mut(value.data, len);
+            drop(Box::<[u8]>::from_raw(slice));
+        }
+        *value = RichBuffer::default();
+    }));
+}
+
+#[unsafe(no_mangle)]
+/// Create an owning console handle through `out_console`.
+pub extern "C" fn rich_console_new(out_console: *mut *mut RichConsole) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_console)? };
         let mut inner = Console::capture();
         let desired_color = Some(ColorSystem::TrueColor);
         inner.set_force_terminal(Some(true));
         inner.set_color_system(desired_color);
         inner.set_markup_enabled(true);
         inner.set_emoji_enabled(true);
-        Box::into_raw(Box::new(RichConsole {
-            inner,
-            desired_color,
-        }))
-    })
-    .unwrap_or(std::ptr::null_mut())
-}
-
-/// Free a console created by `rich_console_new`. NULL is a no-op.
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_console_free(console: *mut RichConsole) {
-    if console.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: `console` came from `Box::into_raw` in `rich_console_new`.
-        drop(unsafe { Box::from_raw(console) });
-    }));
-}
-
-/// Force (or unforce) terminal/ANSI output.
-///
-/// Pass the result of `isatty()` here: `true` emits ANSI styling, `false` emits
-/// plain text. This is the switch for SafeTunnel's daemon — styled under
-/// `--foreground` on a TTY, plain when writing to journald/syslog.
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_console_set_force_terminal(console: *mut RichConsole, force: bool) {
-    with_console(console, |c| {
-        c.inner.set_force_terminal(Some(force));
-        // Gate the palette on the terminal flag so `false` => plain text.
-        c.inner
-            .set_color_system(if force { c.desired_color } else { None });
-    });
-}
-
-/// Set the render width and height in cells (controls wrapping).
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_console_set_size(console: *mut RichConsole, width: c_uint, height: c_uint) {
-    with_console(console, |c| {
-        c.inner.set_size(width as usize, height as usize)
-    });
-}
-
-/// Set the color system: 0 = none/monochrome, 1 = standard (16),
-/// 2 = 8-bit (256), 3 = truecolor (24-bit), 4 = Windows legacy.
-/// Out-of-range values are ignored.
-#[unsafe(no_mangle)]
-pub extern "C" fn rich_console_set_color_system(console: *mut RichConsole, system: c_int) {
-    with_console(console, |c| {
-        let cs = match system {
-            0 => None,
-            1 => Some(ColorSystem::Standard),
-            2 => Some(ColorSystem::EightBit),
-            3 => Some(ColorSystem::TrueColor),
-            4 => Some(ColorSystem::Windows),
-            _ => return,
-        };
-        c.desired_color = cs;
-        // Only take effect now if styling is currently on; otherwise it applies
-        // the next time `set_force_terminal(true)` is called.
-        if c.inner.is_terminal() {
-            c.inner.set_color_system(cs);
+        unsafe {
+            *out_console = Box::into_raw(Box::new(RichConsole {
+                inner,
+                desired_color,
+            }));
         }
-    });
+        Ok(())
+    })
 }
 
-/// Enable or disable BBCode-style markup parsing (e.g. `[bold]...[/]`).
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_console_set_markup_enabled(console: *mut RichConsole, enabled: bool) {
-    with_console(console, |c| c.inner.set_markup_enabled(enabled));
+/// Destroy a console handle. NULL is a no-op.
+pub extern "C" fn rich_console_free(console: *mut RichConsole) {
+    unsafe { destroy(console) }
 }
 
-/// Enable or disable `:emoji_name:` substitution.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_console_set_emoji_enabled(console: *mut RichConsole, enabled: bool) {
-    with_console(console, |c| c.inner.set_emoji_enabled(enabled));
+pub extern "C" fn rich_console_set_force_terminal(
+    console: *mut RichConsole,
+    force: u8,
+) -> RichResult {
+    ffi_call(|| {
+        let force = strict_bool(force)?;
+        let console = unsafe { required_mut(console)? };
+        console.inner.set_force_terminal(Some(force));
+        console
+            .inner
+            .set_color_system(if force { console.desired_color } else { None });
+        Ok(())
+    })
 }
 
-/// Current render width in cells. Returns 0 if `console` is NULL.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_console_width(console: *mut RichConsole) -> c_uint {
-    if console.is_null() {
-        return 0;
-    }
-    catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from `rich_console_new`.
-        (unsafe { &*console }).inner.width() as c_uint
-    }))
-    .unwrap_or(0)
+pub extern "C" fn rich_console_set_size(
+    console: *mut RichConsole,
+    width: u32,
+    height: u32,
+) -> RichResult {
+    ffi_call(|| {
+        let width = usize::try_from(width).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)?;
+        let height = usize::try_from(height).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)?;
+        unsafe { required_mut(console)? }
+            .inner
+            .set_size(width, height);
+        Ok(())
+    })
 }
 
-/// Render a markup string to an owned, NUL-terminated C string.
-///
-/// Honors the console's current markup/emoji/color/width settings. No trailing
-/// newline is appended — the caller controls line endings. Returns NULL if
-/// `console`/`markup` is NULL, `markup` is not valid UTF-8, or rendering fails.
-///
-/// The returned pointer MUST be freed with `rich_string_free`.
 #[unsafe(no_mangle)]
+pub extern "C" fn rich_console_set_color_system(
+    console: *mut RichConsole,
+    system: u32,
+) -> RichResult {
+    ffi_call(|| {
+        let color = match system {
+            RICH_COLOR_NONE => None,
+            RICH_COLOR_STANDARD => Some(ColorSystem::Standard),
+            RICH_COLOR_EIGHT_BIT => Some(ColorSystem::EightBit),
+            RICH_COLOR_TRUECOLOR => Some(ColorSystem::TrueColor),
+            RICH_COLOR_WINDOWS => Some(ColorSystem::Windows),
+            _ => return Err(RICH_ERROR_INVALID_ARGUMENT),
+        };
+        let console = unsafe { required_mut(console)? };
+        console.desired_color = color;
+        if console.inner.is_terminal() {
+            console.inner.set_color_system(color);
+        }
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_console_set_markup_enabled(
+    console: *mut RichConsole,
+    enabled: u8,
+) -> RichResult {
+    ffi_call(|| {
+        let enabled = strict_bool(enabled)?;
+        unsafe { required_mut(console)? }
+            .inner
+            .set_markup_enabled(enabled);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_console_set_emoji_enabled(
+    console: *mut RichConsole,
+    enabled: u8,
+) -> RichResult {
+    ffi_call(|| {
+        let enabled = strict_bool(enabled)?;
+        unsafe { required_mut(console)? }
+            .inner
+            .set_emoji_enabled(enabled);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rich_console_width(
+    console: *const RichConsole,
+    out_width: *mut u32,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_scalar_out(out_width)? };
+        maybe_test_boundary_panic();
+        let width = unsafe { required_ref(console)? }.inner.width();
+        unsafe { *out_width = u32::try_from(width).map_err(|_| RICH_ERROR_RENDER)? };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+/// Render length-delimited markup to an owned output buffer. Rendering errors
+/// are `RICH_ERROR_RENDER`; a caught panic is `RICH_ERROR_PANIC`.
 pub extern "C" fn rich_console_render_markup(
     console: *mut RichConsole,
-    markup: *const c_char,
-) -> *mut c_char {
-    if console.is_null() || markup.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
-        let rc = unsafe { &mut *console };
-        let input = unsafe { CStr::from_ptr(markup) }.to_str().ok()?;
-
-        // render_str respects the console's markup/emoji/highlight defaults.
-        let text = rc.inner.render_str(input, None, None, None, None);
-        rc.inner.clear_captured();
-        // end = "" so we don't impose a trailing newline on the caller.
-        rc.inner.print(&text, None, None, None, false, "").ok()?;
-        let out = rc.inner.get_captured();
-        CString::new(out).ok().map(CString::into_raw)
-    }));
-    match result {
-        Ok(Some(ptr)) => ptr,
-        _ => std::ptr::null_mut(),
-    }
+    markup: RichStr,
+    out_rendered: *mut RichBuffer,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_buffer(out_rendered)? };
+        maybe_test_boundary_panic();
+        let markup = unsafe { rich_str(markup)? };
+        let console = unsafe { required_mut(console)? };
+        let text = console.inner.render_str(markup, None, None, None, None);
+        let bytes = render_to_bytes(console, &text)?;
+        unsafe { write_buffer(out_rendered, bytes) }
+    })
 }
 
-/// Free a string returned by `rich_console_render_markup`. NULL is a no-op.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_string_free(s: *mut c_char) {
-    if s.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: `s` came from `CString::into_raw` in `rich_console_render_markup`.
-        drop(unsafe { CString::from_raw(s) });
-    }));
-}
-
-/// Shared helper: NULL-check + panic-guard a `&mut RichConsole` mutation.
-fn with_console(console: *mut RichConsole, f: impl FnOnce(&mut RichConsole)) {
-    if console.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle from `rich_console_new`.
-        f(unsafe { &mut *console });
-    }));
-}
-
-// ===========================================================================
-// Phase 1 — RichRenderable: the type-erased composition currency
-// ===========================================================================
-
-/// Opaque, type-erased renderable — the universal composition currency.
-///
-/// Anything that can be rendered or nested inside a container (Panel, Table,
-/// Tree, Align, ...) is moved through one of these. A `RichRenderable*` is
-/// produced by a typed builder's `*_finish` function (e.g. `rich_text_finish`)
-/// and either rendered with `rich_console_render`, passed into a consuming
-/// container constructor, or freed with `rich_renderable_free`.
-pub struct RichRenderable(Box<dyn Renderable + Send + Sync>);
-
-/// Render a `RichRenderable` to an owned, NUL-terminated C string.
-///
-/// BORROWS `renderable`: the handle stays valid and the caller still owns it
-/// (free it later with `rich_renderable_free` unless it was consumed by a
-/// container). Honors the console's current force-terminal / color / width
-/// settings, so `set_force_terminal(false)` yields plain text with zero ANSI.
-/// No trailing newline is appended.
-///
-/// Returns NULL if `console`/`renderable` is NULL or rendering fails. A
-/// non-NULL result MUST be freed with `rich_string_free`.
-#[unsafe(no_mangle)]
+/// Borrow and render a reusable renderable to an owned output buffer.
 pub extern "C" fn rich_console_render(
     console: *mut RichConsole,
     renderable: *const RichRenderable,
-) -> *mut c_char {
-    if console.is_null() || renderable.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handles from `rich_console_new` / a `*_finish` fn.
-        let con = unsafe { &mut *console };
-        let r = unsafe { &*renderable };
-        render_to_cstring(con, r.0.as_ref())
-    }));
-    result.unwrap_or(std::ptr::null_mut())
+    out_rendered: *mut RichBuffer,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_buffer(out_rendered)? };
+        let renderable = unsafe { required_ref(renderable)? };
+        let console = unsafe { required_mut(console)? };
+        let bytes = render_to_bytes(console, renderable.0.as_ref())?;
+        unsafe { write_buffer(out_rendered, bytes) }
+    })
 }
 
-/// Free a `RichRenderable` created by a `*_finish` function but never passed
-/// into a consuming container. NULL is a no-op.
 #[unsafe(no_mangle)]
+/// Release one renderable handle/reference. NULL is a no-op.
 pub extern "C" fn rich_renderable_free(renderable: *mut RichRenderable) {
-    if renderable.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in a `*_finish` function.
-        drop(unsafe { Box::from_raw(renderable) });
-    }));
+    unsafe { destroy(renderable) }
 }
 
-// ===========================================================================
-// Phase 1 — RichText: styled-text builder
-// ===========================================================================
-
-/// Opaque `Text` builder handle. Build it, optionally style it, then either
-/// `rich_text_finish` it into a `RichRenderable` or `rich_text_free` it.
-///
-/// The inner `Option<Text>` lets `rich_text_finish` take the value by move.
-pub struct RichText(Option<Text>);
-
-/// Create a `RichText` from plain text (no markup parsing).
-///
-/// `text` must be valid NUL-terminated UTF-8. Returns NULL if `text` is NULL
-/// or not valid UTF-8. Free with `rich_text_finish` or `rich_text_free`.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_text_new(text: *const c_char) -> *mut RichText {
-    if text.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: caller guarantees a valid NUL-terminated string.
-        let s = unsafe { CStr::from_ptr(text) }.to_str().ok()?;
-        Some(Box::into_raw(Box::new(RichText(Some(Text::plain(s))))))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+pub extern "C" fn rich_text_new(text: RichStr, out_text: *mut *mut RichText) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_text)? };
+        let text = unsafe { rich_str(text)? };
+        unsafe { *out_text = Box::into_raw(Box::new(RichText(Some(Text::plain(text))))) };
+        Ok(())
+    })
 }
 
-/// Create a `RichText` by parsing console markup (e.g. `[bold red]hi[/]`).
-///
-/// Honors the console's markup/emoji/highlight settings via `Console::render_str`.
-/// `markup` must be valid NUL-terminated UTF-8. Returns NULL if either pointer
-/// is NULL or `markup` is not valid UTF-8. Free with `rich_text_finish` or
-/// `rich_text_free`. The `console` handle is borrowed (not consumed).
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_text_new_markup(
     console: *mut RichConsole,
-    markup: *const c_char,
-) -> *mut RichText {
-    if console.is_null() || markup.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
-        let con = unsafe { &mut *console };
-        let s = unsafe { CStr::from_ptr(markup) }.to_str().ok()?;
-        let text = con.inner.render_str(s, None, None, None, None);
-        Some(Box::into_raw(Box::new(RichText(Some(text)))))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+    markup: RichStr,
+    out_text: *mut *mut RichText,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_text)? };
+        let markup = unsafe { rich_str(markup)? };
+        let console = unsafe { required_mut(console)? };
+        let text = console.inner.render_str(markup, None, None, None, None);
+        unsafe { *out_text = Box::into_raw(Box::new(RichText(Some(text)))) };
+        Ok(())
+    })
 }
 
-/// Apply a base style (e.g. `"bold red on white"`) to a `RichText`.
-///
-/// Parses `style` with `Style::parse` and sets it as the text's base style via
-/// `Text::set_base_style`. A NULL/invalid/unparseable `style` is a no-op (the
-/// text is left unchanged). Does not consume the handle.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_text_set_style(text: *mut RichText, style: *const c_char) {
-    if text.is_null() || style.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: non-NULL handle; caller guarantees a valid NUL-terminated string.
-        let t = unsafe { &mut *text };
-        let Some(s) = (unsafe { CStr::from_ptr(style) }).to_str().ok() else {
-            return;
-        };
-        if let Some(parsed) = parse_style(s)
-            && let Some(inner) = t.0.as_mut()
-        {
-            inner.set_base_style(Some(parsed));
-        }
-    }));
+pub extern "C" fn rich_text_set_style(text: *mut RichText, style: RichStr) -> RichResult {
+    ffi_call(|| {
+        let style = parse_style(unsafe { rich_str(style)? })?;
+        let text = unsafe { required_mut(text)? };
+        let value = text.0.as_mut().ok_or(RICH_ERROR_INVALID_STATE)?;
+        value.set_base_style(Some(style));
+        Ok(())
+    })
 }
 
-/// CONSUME a `RichText`, erasing it into the type-erased `RichRenderable`
-/// composition currency. The `RichText*` is invalid afterward.
-///
-/// Returns NULL if `text` is NULL or was already finished. The returned
-/// `RichRenderable*` must be freed with `rich_renderable_free` (unless it is
-/// passed into a consuming container).
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_text_finish(text: *mut RichText) -> *mut RichRenderable {
-    if text.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in a `rich_text_new*` function.
-        let boxed = unsafe { Box::from_raw(text) };
-        let inner = boxed.0?;
-        Some(Box::into_raw(Box::new(RichRenderable(Box::new(inner)))))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+/// Consume a live text builder on success and NULL `*text`; failures before
+/// ownership is taken leave the builder live.
+pub extern "C" fn rich_text_finish(
+    text: *mut *mut RichText,
+    out_renderable: *mut *mut RichRenderable,
+) -> RichResult {
+    unsafe { finish(text, out_renderable, |v| v.0.is_some(), |v| v.0) }
 }
 
-/// Free a `RichText` that was created but never `rich_text_finish`ed.
-/// NULL is a no-op.
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_text_free(text: *mut RichText) {
-    if text.is_null() {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in a `rich_text_new*` function.
-        drop(unsafe { Box::from_raw(text) });
-    }));
+    unsafe { destroy(text) }
 }
 
-// ===========================================================================
-// Phase 1 — RichStyle: parsed-style handle
-// ===========================================================================
-
-/// Opaque parsed-style handle wrapping a `rich_rs::Style`. Created by
-/// `rich_style_parse`, freed by `rich_style_free`. Held opaque for
-/// forward-compat even though `Style` is `Copy` underneath.
-// The inner Style is not yet read in Phase 1 (parse + free only). Wave-2
-// phases (e.g. style-taking setters) will consume it; landed now so the
-// handle type and its free fn are stable across the campaign.
-#[allow(dead_code)]
-pub struct RichStyle(Style);
-
-/// Parse a style string (e.g. `"bold red on white"`) into a `RichStyle`.
-///
-/// `style` must be valid NUL-terminated UTF-8. Returns NULL if `style` is NULL,
-/// not valid UTF-8, or produces no actual style (empty/whitespace input, or
-/// input whose tokens are all unrecognized — e.g. `"nonsense-xyz"`). A non-NULL
-/// result MUST be freed with `rich_style_free`.
 #[unsafe(no_mangle)]
-pub extern "C" fn rich_style_parse(style: *const c_char) -> *mut RichStyle {
-    if style.is_null() {
-        return std::ptr::null_mut();
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: caller guarantees a valid NUL-terminated string.
-        let s = unsafe { CStr::from_ptr(style) }.to_str().ok()?;
-        let parsed = parse_style(s)?;
-        Some(Box::into_raw(Box::new(RichStyle(parsed))))
-    }));
-    result.ok().flatten().unwrap_or(std::ptr::null_mut())
+pub extern "C" fn rich_style_parse(style: RichStr, out_style: *mut *mut RichStyle) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_style)? };
+        let style = parse_style(unsafe { rich_str(style)? })?;
+        unsafe { *out_style = Box::into_raw(Box::new(RichStyle { _value: style })) };
+        Ok(())
+    })
 }
 
-/// Free a `RichStyle` created by `rich_style_parse`. NULL is a no-op.
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_style_free(style: *mut RichStyle) {
-    if style.is_null() {
-        return;
+    unsafe { destroy(style) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(value: &str) -> RichStr {
+        RichStr {
+            data: value.as_ptr(),
+            len: value.len() as u64,
+        }
     }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: came from `Box::into_raw` in `rich_style_parse`.
-        drop(unsafe { Box::from_raw(style) });
-    }));
+
+    fn take_buffer(mut buffer: RichBuffer) -> String {
+        let bytes = if buffer.len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(buffer.data, buffer.len as usize) }.to_vec()
+        };
+        rich_buffer_free(&mut buffer);
+        String::from_utf8(bytes).expect("FFI output must be UTF-8")
+    }
+
+    fn render(console: *mut RichConsole, renderable: *const RichRenderable) -> String {
+        let mut buffer = RichBuffer::default();
+        assert_eq!(
+            rich_console_render(console, renderable, &mut buffer),
+            RICH_OK
+        );
+        take_buffer(buffer)
+    }
+
+    #[test]
+    fn result_values_and_metadata_are_stable() {
+        assert_eq!(RICH_OK.0, 0);
+        assert_eq!(RICH_ERROR_NULL_ARGUMENT.0, 1);
+        assert_eq!(RICH_ERROR_INVALID_UTF8.0, 2);
+        assert_eq!(RICH_ERROR_INVALID_ARGUMENT.0, 3);
+        assert_eq!(RICH_ERROR_INVALID_STATE.0, 4);
+        assert_eq!(RICH_ERROR_IO.0, 5);
+        assert_eq!(RICH_ERROR_RENDER.0, 6);
+        assert_eq!(RICH_ERROR_PANIC.0, 7);
+        assert_eq!(rich_ffi_abi_version(), 1);
+        let root_manifest = include_str!("../../Cargo.toml");
+        let root_version = root_manifest
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("version = \"")
+                    .and_then(|v| v.strip_suffix('"'))
+            })
+            .unwrap();
+        assert_eq!(env!("CARGO_PKG_VERSION"), root_version);
+    }
+
+    #[test]
+    fn buffer_round_trip_and_double_free() {
+        let mut buffer = RichBuffer::default();
+        assert_eq!(rich_ffi_version(&mut buffer), RICH_OK);
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(buffer.data, buffer.len as usize) },
+            env!("CARGO_PKG_VERSION").as_bytes()
+        );
+        rich_buffer_free(&mut buffer);
+        assert!(buffer.data.is_null());
+        rich_buffer_free(&mut buffer);
+    }
+
+    #[test]
+    fn successful_finish_nulls_builder_and_renderable_is_reusable() {
+        let mut text = ptr::null_mut();
+        assert_eq!(rich_text_new(s("hello"), &mut text), RICH_OK);
+        let mut renderable = ptr::null_mut();
+        assert_eq!(rich_text_finish(&mut text, &mut renderable), RICH_OK);
+        assert!(text.is_null());
+        let mut console = ptr::null_mut();
+        assert_eq!(rich_console_new(&mut console), RICH_OK);
+        let mut first = RichBuffer::default();
+        let mut second = RichBuffer::default();
+        assert_eq!(
+            rich_console_render(console, renderable, &mut first),
+            RICH_OK
+        );
+        assert_eq!(
+            rich_console_render(console, renderable, &mut second),
+            RICH_OK
+        );
+        rich_buffer_free(&mut first);
+        rich_buffer_free(&mut second);
+        rich_renderable_free(renderable);
+        rich_console_free(console);
+    }
+
+    #[test]
+    fn containers_borrow_and_retain_renderables() {
+        let mut text = ptr::null_mut();
+        assert_eq!(rich_text_new(s("shared"), &mut text), RICH_OK);
+        let mut renderable = ptr::null_mut();
+        assert_eq!(rich_text_finish(&mut text, &mut renderable), RICH_OK);
+
+        let mut panel = ptr::null_mut();
+        assert_eq!(
+            crate::panel::rich_panel_new(renderable, &mut panel),
+            RICH_OK
+        );
+        let mut columns = ptr::null_mut();
+        assert_eq!(crate::layout::rich_columns_new(&mut columns), RICH_OK);
+        assert_eq!(
+            crate::layout::rich_columns_add(columns, renderable),
+            RICH_OK
+        );
+        assert_eq!(
+            crate::layout::rich_columns_add(columns, renderable),
+            RICH_OK
+        );
+
+        let mut console = ptr::null_mut();
+        assert_eq!(rich_console_new(&mut console), RICH_OK);
+        assert_eq!(rich_console_set_force_terminal(console, 0), RICH_OK);
+        let mut output = RichBuffer::default();
+        assert_eq!(
+            rich_console_render(console, renderable, &mut output),
+            RICH_OK
+        );
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(output.data, output.len as usize) },
+            b"shared"
+        );
+        rich_buffer_free(&mut output);
+
+        crate::panel::rich_panel_free(panel);
+        crate::layout::rich_columns_free(columns);
+        rich_renderable_free(renderable);
+        rich_console_free(console);
+    }
+
+    #[test]
+    fn every_family_emits_utf8_and_shared_composition_remains_reusable() {
+        let mut console = ptr::null_mut();
+        assert_eq!(rich_console_new(&mut console), RICH_OK);
+        assert_eq!(rich_console_set_force_terminal(console, 0), RICH_OK);
+        assert_eq!(rich_console_set_size(console, 80, 24), RICH_OK);
+
+        let mut text = ptr::null_mut();
+        assert_eq!(rich_text_new(s("héllo ✓"), &mut text), RICH_OK);
+        let mut shared = ptr::null_mut();
+        assert_eq!(rich_text_finish(&mut text, &mut shared), RICH_OK);
+        assert_eq!(render(console, shared), "héllo ✓");
+
+        let mut renderables = Vec::new();
+
+        let mut table = ptr::null_mut();
+        assert_eq!(crate::table::rich_table_new(&mut table), RICH_OK);
+        assert_eq!(
+            crate::table::rich_table_add_column(table, s("col")),
+            RICH_OK
+        );
+        let cells = [shared as *const RichRenderable];
+        assert_eq!(
+            crate::table::rich_table_add_row_renderables(table, cells.as_ptr(), 1),
+            RICH_OK
+        );
+        let mut value = ptr::null_mut();
+        assert_eq!(
+            crate::table::rich_table_finish(&mut table, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut panel = ptr::null_mut();
+        assert_eq!(crate::panel::rich_panel_new(shared, &mut panel), RICH_OK);
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::panel::rich_panel_finish(&mut panel, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut tree = ptr::null_mut();
+        assert_eq!(
+            crate::tree::rich_tree_new_renderable(shared, &mut tree),
+            RICH_OK
+        );
+        let mut node_id = 0;
+        assert_eq!(
+            crate::tree::rich_tree_add_renderable(tree, RICH_TREE_ROOT_ID, shared, &mut node_id),
+            RICH_OK
+        );
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::tree::rich_tree_finish(&mut tree, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut rule = ptr::null_mut();
+        assert_eq!(crate::layout::rich_rule_new(&mut rule), RICH_OK);
+        assert_eq!(
+            crate::layout::rich_rule_set_title(rule, s("séction")),
+            RICH_OK
+        );
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::layout::rich_rule_finish(&mut rule, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut columns = ptr::null_mut();
+        assert_eq!(crate::layout::rich_columns_new(&mut columns), RICH_OK);
+        assert_eq!(crate::layout::rich_columns_add(columns, shared), RICH_OK);
+        assert_eq!(crate::layout::rich_columns_add(columns, shared), RICH_OK);
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::layout::rich_columns_finish(&mut columns, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut align = ptr::null_mut();
+        assert_eq!(
+            crate::layout::rich_align_new(shared, RICH_ALIGN_CENTER, &mut align),
+            RICH_OK
+        );
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::layout::rich_align_finish(&mut align, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut padding = ptr::null_mut();
+        assert_eq!(
+            crate::layout::rich_padding_new(shared, 0, 1, 0, 1, &mut padding),
+            RICH_OK
+        );
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::layout::rich_padding_finish(&mut padding, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut syntax = ptr::null_mut();
+        assert_eq!(
+            crate::content::rich_syntax_new(s("let café = \"✓\";"), s("rust"), &mut syntax),
+            RICH_OK
+        );
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::content::rich_syntax_finish(&mut syntax, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut markdown = ptr::null_mut();
+        assert_eq!(
+            crate::content::rich_markdown_new(s("# Héllo ✓"), &mut markdown),
+            RICH_OK
+        );
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::content::rich_markdown_finish(&mut markdown, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        let mut json = ptr::null_mut();
+        assert_eq!(
+            crate::content::rich_json_new(s("{\"é\":\"✓\"}"), 2, 0, 0, &mut json),
+            RICH_OK
+        );
+        value = ptr::null_mut();
+        assert_eq!(
+            crate::content::rich_json_finish(&mut json, &mut value),
+            RICH_OK
+        );
+        renderables.push(value);
+
+        for &renderable in &renderables {
+            assert!(!render(console, renderable).is_empty());
+        }
+        assert_eq!(render(console, shared), "héllo ✓");
+
+        let mut progress = ptr::null_mut();
+        assert_eq!(crate::live::rich_progress_new(&mut progress), RICH_OK);
+        let mut task_id = u64::MAX;
+        assert_eq!(
+            crate::live::rich_progress_add_task(progress, s("tâche ✓"), 10.0, &mut task_id),
+            RICH_OK
+        );
+        let mut buffer = RichBuffer::default();
+        assert_eq!(
+            crate::live::rich_progress_render_frame(progress, console, &mut buffer),
+            RICH_OK
+        );
+        assert!(take_buffer(buffer).contains("tâche ✓"));
+
+        let mut status = ptr::null_mut();
+        assert_eq!(
+            crate::live::rich_status_new(s("état ✓"), &mut status),
+            RICH_OK
+        );
+        buffer = RichBuffer::default();
+        assert_eq!(
+            crate::live::rich_status_render_frame(status, console, &mut buffer),
+            RICH_OK
+        );
+        assert!(take_buffer(buffer).contains("état ✓"));
+
+        let mut spinner = ptr::null_mut();
+        assert_eq!(
+            crate::live::rich_spinner_new(s("dots"), &mut spinner),
+            RICH_OK
+        );
+        buffer = RichBuffer::default();
+        assert_eq!(
+            crate::live::rich_spinner_render_frame(spinner, console, 0.5, &mut buffer),
+            RICH_OK
+        );
+        assert!(!take_buffer(buffer).is_empty());
+
+        crate::live::rich_progress_free(progress);
+        crate::live::rich_status_free(status);
+        crate::live::rich_spinner_free(spinner);
+        for renderable in renderables {
+            rich_renderable_free(renderable);
+        }
+        rich_renderable_free(shared);
+        rich_console_free(console);
+    }
+
+    #[test]
+    fn failed_finish_keeps_builder_live() {
+        let mut text = ptr::null_mut();
+        assert_eq!(rich_text_new(s("hello"), &mut text), RICH_OK);
+        assert_eq!(
+            rich_text_finish(&mut text, ptr::null_mut()),
+            RICH_ERROR_NULL_ARGUMENT
+        );
+        assert!(!text.is_null());
+        rich_text_free(text);
+    }
+
+    #[test]
+    fn errors_initialize_scalar_and_buffer_outputs() {
+        let mut width = 99;
+        assert_eq!(
+            rich_console_width(ptr::null(), &mut width),
+            RICH_ERROR_NULL_ARGUMENT
+        );
+        assert_eq!(width, 0);
+        let mut buffer = RichBuffer {
+            data: ptr::dangling_mut(),
+            len: 99,
+        };
+        assert_eq!(
+            rich_console_render_markup(ptr::null_mut(), s("x"), &mut buffer),
+            RICH_ERROR_NULL_ARGUMENT
+        );
+        assert!(buffer.data.is_null());
+        assert_eq!(buffer.len, 0);
+    }
+
+    #[test]
+    fn exported_calls_initialize_outputs_before_forced_panic() {
+        let mut console = ptr::null_mut();
+        assert_eq!(rich_console_new(&mut console), RICH_OK);
+
+        let mut width = 99;
+        crate::common::force_next_boundary_panic();
+        assert_eq!(rich_console_width(console, &mut width), RICH_ERROR_PANIC);
+        assert_eq!(width, 0);
+
+        let mut buffer = RichBuffer {
+            data: ptr::dangling_mut(),
+            len: 99,
+        };
+        crate::common::force_next_boundary_panic();
+        assert_eq!(
+            rich_console_render_markup(console, s("hello"), &mut buffer),
+            RICH_ERROR_PANIC
+        );
+        assert!(buffer.data.is_null());
+        assert_eq!(buffer.len, 0);
+
+        rich_console_free(console);
+    }
+
+    #[test]
+    fn all_destructor_families_accept_null() {
+        rich_buffer_free(ptr::null_mut());
+        rich_console_free(ptr::null_mut());
+        rich_renderable_free(ptr::null_mut());
+        rich_text_free(ptr::null_mut());
+        rich_style_free(ptr::null_mut());
+        crate::table::rich_table_free(ptr::null_mut());
+        crate::panel::rich_panel_free(ptr::null_mut());
+        crate::tree::rich_tree_free(ptr::null_mut());
+        crate::layout::rich_rule_free(ptr::null_mut());
+        crate::layout::rich_columns_free(ptr::null_mut());
+        crate::layout::rich_align_free(ptr::null_mut());
+        crate::layout::rich_padding_free(ptr::null_mut());
+        crate::content::rich_syntax_free(ptr::null_mut());
+        crate::content::rich_markdown_free(ptr::null_mut());
+        crate::content::rich_json_free(ptr::null_mut());
+        crate::live::rich_progress_free(ptr::null_mut());
+        crate::live::rich_status_free(ptr::null_mut());
+        crate::live::rich_spinner_free(ptr::null_mut());
+    }
+
+    #[test]
+    fn terminal_mode_controls_ansi() {
+        let mut console = ptr::null_mut();
+        assert_eq!(rich_console_new(&mut console), RICH_OK);
+        let mut out = RichBuffer::default();
+        assert_eq!(rich_console_set_force_terminal(console, 0), RICH_OK);
+        assert_eq!(
+            rich_console_render_markup(console, s("[bold]x[/]"), &mut out),
+            RICH_OK
+        );
+        let plain = unsafe { std::slice::from_raw_parts(out.data, out.len as usize) };
+        assert!(!plain.windows(2).any(|w| w == b"\x1b["));
+        assert!(!plain.windows(2).any(|w| w == b"\x1b]"));
+        rich_buffer_free(&mut out);
+        assert_eq!(rich_console_set_force_terminal(console, 1), RICH_OK);
+        assert_eq!(
+            rich_console_render_markup(console, s("[bold]x[/]"), &mut out),
+            RICH_OK
+        );
+        let ansi = unsafe { std::slice::from_raw_parts(out.data, out.len as usize) };
+        assert!(ansi.windows(2).any(|w| w == b"\x1b["));
+        rich_buffer_free(&mut out);
+        rich_console_free(console);
+    }
 }

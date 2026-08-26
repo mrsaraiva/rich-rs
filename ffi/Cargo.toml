@@ -1,10 +1,10 @@
 [package]
 name = "rich-ffi"
-version = "0.1.0"
+version = "1.2.2"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"
-description = "C ABI bindings for rich-rs (for C/C++ consumers such as SafeTunnel)"
+description = "Stable native ABI foundation for rich-rs language bindings"
 publish = false
 
 [lib]
@@ -26,9 +26,8 @@ serde_json = "1"
 [build-dependencies]
 cbindgen = "0.29"
 
-# NOTE on panic strategy: we deliberately keep the default `unwind` and wrap every
-# FFI entry point in `catch_unwind`, converting any rich-rs panic into a NULL / no-op
-# return. We do NOT use `panic = "abort"` — aborting the whole SafeTunnel daemon or
-# CLI because a styling call panicked would be a regression. A panic that escaped a
-# bare `extern "C"` fn already aborts in current Rust, so the boundary is sound either
-# way; catch_unwind just lets us fail gracefully instead of killing the host process.
+# NOTE on panic strategy: keep the default `unwind` and contain every ABI operation
+# with `catch_unwind`. Fallible calls map a caught Rust panic to the distinct
+# `RICH_ERROR_PANIC` result after neutralizing outputs; NULL-safe destructors contain
+# and discard panics. We do not use `panic = "abort"`, because that would terminate a
+# foreign host instead of reporting the boundary failure.
