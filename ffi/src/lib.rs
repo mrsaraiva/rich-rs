@@ -15,15 +15,18 @@ use rich_rs::{ColorSystem, Console, Renderable, Style, Text};
 
 mod common;
 mod content;
+mod custom;
 mod layout;
 mod live;
 mod panel;
 mod table;
+mod trace;
 mod tree;
 
 use common::{
-    destroy, ffi_call, finish, init_buffer, init_out, init_scalar_out, maybe_test_boundary_panic,
-    parse_style, render_to_bytes, required_mut, required_ref, rich_str, strict_bool, write_buffer,
+    destroy, ffi_call, finish, guard_ordinary_call, init_buffer, init_out, init_scalar_out,
+    maybe_test_boundary_panic, parse_style, render_to_bytes, required_mut, required_ref, rich_str,
+    strict_bool, write_buffer,
 };
 
 #[repr(transparent)]
@@ -39,7 +42,7 @@ pub const RICH_ERROR_INVALID_STATE: RichResult = RichResult(4);
 pub const RICH_ERROR_IO: RichResult = RichResult(5);
 pub const RICH_ERROR_RENDER: RichResult = RichResult(6);
 pub const RICH_ERROR_PANIC: RichResult = RichResult(7);
-pub const RICH_FFI_ABI_VERSION: u32 = 1;
+pub const RICH_FFI_ABI_VERSION: u32 = 2;
 
 pub const RICH_COLOR_NONE: u32 = 0;
 pub const RICH_COLOR_STANDARD: u32 = 1;
@@ -72,6 +75,13 @@ pub const RICH_BOX_HORIZONTALS: u32 = 10;
 pub const RICH_BOX_MINIMAL_HEAVY_HEAD: u32 = 11;
 pub const RICH_BOX_SIMPLE_HEAVY: u32 = 12;
 pub const RICH_BOX_MARKDOWN: u32 = 13;
+pub const RICH_BOX_NONE: u32 = 14;
+pub const RICH_COLUMN_HAS_JUSTIFY: u32 = 1 << 0;
+pub const RICH_COLUMN_HAS_VERTICAL: u32 = 1 << 1;
+pub const RICH_COLUMN_HAS_WIDTH: u32 = 1 << 2;
+pub const RICH_COLUMN_HAS_MIN_WIDTH: u32 = 1 << 3;
+pub const RICH_COLUMN_HAS_RATIO: u32 = 1 << 4;
+pub const RICH_COLUMN_NO_WRAP: u32 = 1 << 5;
 pub const RICH_TREE_ROOT_ID: u64 = 0;
 
 #[repr(C)]
@@ -107,11 +117,20 @@ pub struct RichStyle {
     _value: Style,
 }
 
+pub use custom::{
+    RichCustomDropFn, RichCustomMeasureFn, RichCustomRenderFn, RichCustomRenderableVTable,
+    RichMeasurement, RichRenderOptions, RichSegmentSink,
+};
+
 #[unsafe(no_mangle)]
 /// Return the native ABI version. This infallible value must equal
 /// `RICH_FFI_ABI_VERSION` before ordinary calls are made.
 pub extern "C" fn rich_ffi_abi_version() -> u32 {
-    RICH_FFI_ABI_VERSION
+    if custom::callback_active() {
+        0
+    } else {
+        RICH_FFI_ABI_VERSION
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -126,6 +145,9 @@ pub extern "C" fn rich_ffi_version(out_version: *mut RichBuffer) -> RichResult {
 #[unsafe(no_mangle)]
 /// Free a produced buffer and reset it to `{NULL, 0}`. NULL is accepted.
 pub extern "C" fn rich_buffer_free(buffer: *mut RichBuffer) {
+    if custom::callback_active() {
+        return;
+    }
     if buffer.is_null() {
         return;
     }
@@ -206,6 +228,7 @@ pub extern "C" fn rich_console_set_color_system(
     system: u32,
 ) -> RichResult {
     ffi_call(|| {
+        guard_ordinary_call()?;
         let color = match system {
             RICH_COLOR_NONE => None,
             RICH_COLOR_STANDARD => Some(ColorSystem::Standard),
@@ -293,9 +316,13 @@ pub extern "C" fn rich_console_render(
 ) -> RichResult {
     ffi_call(|| {
         unsafe { init_buffer(out_rendered)? };
+        let invocation = custom::InvocationGuard::enter()?;
         let renderable = unsafe { required_ref(renderable)? };
         let console = unsafe { required_mut(console)? };
         let bytes = render_to_bytes(console, renderable.0.as_ref())?;
+        if let Some(error) = invocation.error() {
+            return Err(error);
+        }
         unsafe { write_buffer(out_rendered, bytes) }
     })
 }
@@ -413,7 +440,7 @@ mod tests {
         assert_eq!(RICH_ERROR_IO.0, 5);
         assert_eq!(RICH_ERROR_RENDER.0, 6);
         assert_eq!(RICH_ERROR_PANIC.0, 7);
-        assert_eq!(rich_ffi_abi_version(), 1);
+        assert_eq!(rich_ffi_abi_version(), 2);
         let root_manifest = include_str!("../../Cargo.toml");
         let root_version = root_manifest
             .lines()

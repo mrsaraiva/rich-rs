@@ -59,7 +59,10 @@ pub const BoxStyle = enum(u32) {
     minimal_heavy_head = raw.RICH_BOX_MINIMAL_HEAVY_HEAD,
     simple_heavy = raw.RICH_BOX_SIMPLE_HEAVY,
     markdown = raw.RICH_BOX_MARKDOWN,
+    none = raw.RICH_BOX_NONE,
 };
+
+pub const Box = BoxStyle;
 
 pub const NodeId = u64;
 pub const rootNode: NodeId = raw.RICH_TREE_ROOT_ID;
@@ -69,6 +72,46 @@ pub const JsonOptions = struct {
     highlight: bool = true,
     sort_keys: bool = false,
 };
+
+pub const ColumnOptions = struct {
+    justify: ?Justify = null,
+    vertical: ?VerticalAlign = null,
+    width: ?u32 = null,
+    min_width: ?u32 = null,
+    ratio: ?u32 = null,
+    style: []const u8 = "",
+    no_wrap: bool = false,
+};
+
+pub const RenderOptions = struct {
+    min_width: u32,
+    max_width: u32,
+    max_height: u32,
+    color_system: ColorSystem,
+    is_terminal: bool,
+};
+
+pub const Measurement = struct {
+    minimum: u32,
+    maximum: u32,
+};
+
+pub const CallbackError = Error || error{OutOfMemory};
+
+pub const CustomCallbacks = struct {
+    render: *const fn (?*anyopaque, RenderOptions, *SegmentSink) anyerror!void,
+    measure: ?*const fn (?*anyopaque, RenderOptions) anyerror!Measurement = null,
+    drop: ?*const fn (?*anyopaque) void = null,
+};
+
+const CallbackScope = enum { none, render, measure, drop };
+threadlocal var callback_scope: CallbackScope = .none;
+threadlocal var callback_sink_token: u64 = 0;
+threadlocal var callback_next_token: u64 = 1;
+
+fn guardPublicCall() Error!void {
+    if (callback_scope != .none) return error.InvalidState;
+}
 
 /// Translate one stable native result category. Unknown codes are treated as
 /// an ABI mismatch instead of being guessed at.
@@ -87,6 +130,7 @@ pub fn check(result: u32) Error!void {
 }
 
 pub fn ensureAbi() Error!void {
+    try guardPublicCall();
     if (raw.rich_ffi_abi_version() != raw.RICH_FFI_ABI_VERSION)
         return error.AbiMismatch;
 }
@@ -134,6 +178,7 @@ fn copyAndFreeBuffer(
 }
 
 fn requireHandle(comptime T: type, handle: ?*anyopaque) Error!*T {
+    try guardPublicCall();
     return @ptrCast(handle orelse return error.InvalidState);
 }
 
@@ -158,6 +203,7 @@ fn finishHandleWithCleanup(
     finishFn: anytype,
     cleanupFn: anytype,
 ) Error!Renderable {
+    try guardPublicCall();
     const live = slot.* orelse return error.InvalidState;
     var input: ?*T = @ptrCast(live);
     var output: ?*raw.RichRenderable = null;
@@ -213,6 +259,7 @@ pub const Renderable = struct {
     handle: ?*anyopaque,
 
     pub fn deinit(self: *Renderable) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_renderable_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -226,6 +273,7 @@ pub const Console = struct {
     }
 
     pub fn deinit(self: *Console) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_console_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -337,6 +385,7 @@ pub const Text = struct {
     }
 
     pub fn deinit(self: *Text) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_text_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -353,6 +402,7 @@ pub const Style = struct {
     }
 
     pub fn deinit(self: *Style) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_style_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -365,7 +415,12 @@ pub const Table = struct {
         return .{ .handle = try newHandle(raw.RichTable, raw.rich_table_new) };
     }
 
+    pub fn initGrid() Error!Table {
+        return .{ .handle = try newHandle(raw.RichTable, raw.rich_table_new_grid) };
+    }
+
     pub fn deinit(self: *Table) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_table_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -402,6 +457,30 @@ pub const Table = struct {
         try check(raw.rich_table_set_box(try requireHandle(raw.RichTable, self.handle), @intFromEnum(style)));
     }
 
+    pub fn setPadEdge(self: *Table, pad: bool) Error!void {
+        try check(raw.rich_table_set_pad_edge(
+            try requireHandle(raw.RichTable, self.handle),
+            nativeBool(pad),
+        ));
+    }
+
+    pub fn setRowStyles(
+        self: *Table,
+        allocator: std.mem.Allocator,
+        styles: []const []const u8,
+    ) !void {
+        const table = try requireHandle(raw.RichTable, self.handle);
+        const count = std.math.cast(u32, styles.len) orelse return error.InvalidArgument;
+        const native = try allocator.alloc(raw.RichStr, styles.len);
+        defer allocator.free(native);
+        for (styles, native) |style, *output| output.* = try nativeString(style);
+        try check(raw.rich_table_set_row_styles(
+            table,
+            if (native.len == 0) null else native.ptr,
+            count,
+        ));
+    }
+
     pub fn setShowHeader(self: *Table, show: bool) Error!void {
         try check(raw.rich_table_set_show_header(try requireHandle(raw.RichTable, self.handle), nativeBool(show)));
     }
@@ -435,6 +514,44 @@ pub const Table = struct {
             try requireHandle(raw.RichTable, self.handle),
             try renderableHandle(header),
         ));
+    }
+
+    pub fn addColumnOptions(
+        self: *Table,
+        header: ?*const Renderable,
+        options: ColumnOptions,
+    ) Error!void {
+        const table = try requireHandle(raw.RichTable, self.handle);
+        var flags: u32 = 0;
+        var native: raw.RichTableColumnOptions = std.mem.zeroes(raw.RichTableColumnOptions);
+        if (options.justify) |justify| {
+            flags |= raw.RICH_COLUMN_HAS_JUSTIFY;
+            native.justify = @intFromEnum(justify);
+        }
+        if (options.vertical) |vertical| {
+            flags |= raw.RICH_COLUMN_HAS_VERTICAL;
+            native.vertical = @intFromEnum(vertical);
+        }
+        if (options.width) |width_value| {
+            flags |= raw.RICH_COLUMN_HAS_WIDTH;
+            native.width = width_value;
+        }
+        if (options.min_width) |minimum| {
+            flags |= raw.RICH_COLUMN_HAS_MIN_WIDTH;
+            native.min_width = minimum;
+        }
+        if (options.ratio) |ratio| {
+            flags |= raw.RICH_COLUMN_HAS_RATIO;
+            native.ratio = ratio;
+        }
+        if (options.no_wrap) flags |= raw.RICH_COLUMN_NO_WRAP;
+        native.flags = flags;
+        native.style = try nativeString(options.style);
+        const native_header: ?*const raw.RichRenderable = if (header) |value|
+            try renderableHandle(value)
+        else
+            null;
+        try check(raw.rich_table_add_column_options(table, native_header, &native));
     }
 
     pub fn addRowStrings(
@@ -483,6 +600,7 @@ pub const Panel = struct {
     }
 
     pub fn deinit(self: *Panel) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_panel_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -548,6 +666,7 @@ pub const Tree = struct {
     }
 
     pub fn deinit(self: *Tree) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_tree_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -599,6 +718,7 @@ pub const Rule = struct {
     }
 
     pub fn deinit(self: *Rule) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_rule_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -635,6 +755,7 @@ pub const Columns = struct {
     }
 
     pub fn deinit(self: *Columns) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_columns_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -696,6 +817,7 @@ pub const Align = struct {
     }
 
     pub fn deinit(self: *Align) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_align_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -740,6 +862,7 @@ pub const Padding = struct {
     }
 
     pub fn deinit(self: *Padding) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_padding_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -785,6 +908,7 @@ pub const Syntax = struct {
     }
 
     pub fn deinit(self: *Syntax) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_syntax_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -814,6 +938,13 @@ pub const Syntax = struct {
         ));
     }
 
+    pub fn setIndentGuides(self: *Syntax, enabled: bool) Error!void {
+        try check(raw.rich_syntax_set_indent_guides(
+            try requireHandle(raw.RichSyntax, self.handle),
+            nativeBool(enabled),
+        ));
+    }
+
     pub fn setLineRange(self: *Syntax, start: ?u32, end: ?u32) Error!void {
         try check(raw.rich_syntax_set_line_range(
             try requireHandle(raw.RichSyntax, self.handle),
@@ -822,6 +953,34 @@ pub const Syntax = struct {
             nativeBool(end != null),
             end orelse 0,
         ));
+    }
+};
+
+pub const Pretty = struct {
+    handle: ?*anyopaque,
+
+    pub fn init(debug_repr: []const u8) Error!Pretty {
+        try ensureAbi();
+        var output: ?*raw.RichPretty = null;
+        try check(raw.rich_pretty_new(try nativeString(debug_repr), &output));
+        return .{ .handle = @ptrCast(output orelse return error.AbiMismatch) };
+    }
+
+    pub fn deinit(self: *Pretty) void {
+        if (callback_scope != .none) return;
+        if (self.handle) |handle| raw.rich_pretty_free(@ptrCast(handle));
+        self.handle = null;
+    }
+
+    pub fn setIndentGuides(self: *Pretty, enabled: bool) Error!void {
+        try check(raw.rich_pretty_set_indent_guides(
+            try requireHandle(raw.RichPretty, self.handle),
+            nativeBool(enabled),
+        ));
+    }
+
+    pub fn finish(self: *Pretty) Error!Renderable {
+        return finishHandle(raw.RichPretty, &self.handle, raw.rich_pretty_finish);
     }
 };
 
@@ -836,6 +995,7 @@ pub const Markdown = struct {
     }
 
     pub fn deinit(self: *Markdown) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_markdown_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -883,6 +1043,7 @@ pub const Json = struct {
     }
 
     pub fn deinit(self: *Json) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_json_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -892,6 +1053,191 @@ pub const Json = struct {
     }
 };
 
+/// Scoped segment writer supplied only during a custom render callback. Copies
+/// are rejected after that callback by a per-thread generation token.
+pub const SegmentSink = struct {
+    handle: ?*anyopaque = null,
+    token: u64 = 0,
+
+    pub fn push(self: *SegmentSink, text: []const u8, style: []const u8) CallbackError!void {
+        const handle = try self.requireLive();
+        try check(raw.rich_segment_sink_push(
+            @ptrCast(handle),
+            try nativeString(text),
+            try nativeString(style),
+        ));
+    }
+
+    pub fn line(self: *SegmentSink) CallbackError!void {
+        const handle = try self.requireLive();
+        try check(raw.rich_segment_sink_line(@ptrCast(handle)));
+    }
+
+    fn requireLive(self: *const SegmentSink) Error!*anyopaque {
+        if (callback_scope != .render or
+            self.token == 0 or
+            self.token != callback_sink_token)
+            return error.InvalidState;
+        return self.handle orelse error.InvalidState;
+    }
+
+    fn activate(self: *SegmentSink, handle: *raw.RichSegmentSink, token: u64) void {
+        self.handle = @ptrCast(handle);
+        self.token = token;
+    }
+
+    fn tombstone(self: *SegmentSink) void {
+        self.handle = null;
+        self.token = 0;
+    }
+};
+
+const CustomState = struct {
+    context: ?*anyopaque,
+    callbacks: CustomCallbacks,
+    sinks: ?*SinkNode = null,
+};
+
+// A callback may retain the Zig wrapper pointer despite its scoped contract.
+// Keep every wrapper allocated and permanently tombstoned until the adapter's
+// last native reference drops; reusing one object would reactivate old aliases.
+const SinkNode = struct {
+    sink: SegmentSink = .{},
+    next: ?*SinkNode = null,
+};
+
+/// Construct a synchronous callback-backed renderable. On success ownership of
+/// a non-null context transfers until the native last-Arc drop callback. On
+/// failure it remains with the caller. Callback code must never panic/unwind.
+pub fn customRenderable(
+    context: ?*anyopaque,
+    callbacks: CustomCallbacks,
+) (Error || error{OutOfMemory})!Renderable {
+    try ensureAbi();
+    if (context != null and callbacks.drop == null) return error.InvalidArgument;
+
+    const state = try std.heap.c_allocator.create(CustomState);
+    state.* = .{ .context = context, .callbacks = callbacks };
+    var transferred = false;
+    errdefer if (!transferred) std.heap.c_allocator.destroy(state);
+
+    const vtable: raw.RichCustomRenderableVTable = .{
+        .render = customRenderTrampoline,
+        .measure = if (callbacks.measure != null) customMeasureTrampoline else null,
+        .drop = customDropTrampoline,
+    };
+    var output: ?*raw.RichRenderable = null;
+    try check(raw.rich_custom_renderable_new(@ptrCast(state), &vtable, &output));
+    transferred = true;
+    return .{ .handle = @ptrCast(output orelse return error.AbiMismatch) };
+}
+
+fn copyRenderOptions(value: *const raw.RichRenderOptions) Error!RenderOptions {
+    const color_system: ColorSystem = switch (value.color_system) {
+        raw.RICH_COLOR_NONE => .none,
+        raw.RICH_COLOR_STANDARD => .standard,
+        raw.RICH_COLOR_EIGHT_BIT => .eight_bit,
+        raw.RICH_COLOR_TRUECOLOR => .truecolor,
+        raw.RICH_COLOR_WINDOWS => .windows,
+        else => return error.Render,
+    };
+    return .{
+        .min_width = value.min_width,
+        .max_width = value.max_width,
+        .max_height = value.max_height,
+        .color_system = color_system,
+        .is_terminal = value.is_terminal == 1,
+    };
+}
+
+fn callbackCode(failure: anyerror) raw.RichResult {
+    return switch (failure) {
+        error.NullArgument => raw.RICH_ERROR_NULL_ARGUMENT,
+        error.InvalidUtf8 => raw.RICH_ERROR_INVALID_UTF8,
+        error.InvalidArgument => raw.RICH_ERROR_INVALID_ARGUMENT,
+        error.InvalidState => raw.RICH_ERROR_INVALID_STATE,
+        error.Io => raw.RICH_ERROR_IO,
+        error.NativePanic => raw.RICH_ERROR_PANIC,
+        else => raw.RICH_ERROR_RENDER,
+    };
+}
+
+fn callbackResult(result: anyerror!void) raw.RichResult {
+    result catch |failure| return callbackCode(failure);
+    return raw.RICH_OK;
+}
+
+fn beginSinkToken() u64 {
+    var token = callback_next_token;
+    callback_next_token +%= 1;
+    if (callback_next_token == 0) callback_next_token = 1;
+    if (token == 0) token = 1;
+    callback_sink_token = token;
+    return token;
+}
+
+fn customRenderTrampoline(
+    context: ?*anyopaque,
+    options: ?*const raw.RichRenderOptions,
+    sink: ?*raw.RichSegmentSink,
+) callconv(.c) raw.RichResult {
+    if (callback_scope != .none) return raw.RICH_ERROR_INVALID_STATE;
+    const state: *CustomState = @ptrCast(@alignCast(context orelse
+        return raw.RICH_ERROR_NULL_ARGUMENT));
+    const native_options = options orelse return raw.RICH_ERROR_NULL_ARGUMENT;
+    const native_sink = sink orelse return raw.RICH_ERROR_NULL_ARGUMENT;
+    const copied = copyRenderOptions(native_options) catch return raw.RICH_ERROR_RENDER;
+    const node = std.heap.c_allocator.create(SinkNode) catch
+        return raw.RICH_ERROR_RENDER;
+    node.* = .{ .next = state.sinks };
+    state.sinks = node;
+
+    callback_scope = .render;
+    const token = beginSinkToken();
+    node.sink.activate(native_sink, token);
+    defer {
+        node.sink.tombstone();
+        callback_sink_token = 0;
+        callback_scope = .none;
+    }
+    return callbackResult(state.callbacks.render(state.context, copied, &node.sink));
+}
+
+fn customMeasureTrampoline(
+    context: ?*anyopaque,
+    options: ?*const raw.RichRenderOptions,
+    output: ?*raw.RichMeasurement,
+) callconv(.c) raw.RichResult {
+    if (callback_scope != .none) return raw.RICH_ERROR_INVALID_STATE;
+    const state: *CustomState = @ptrCast(@alignCast(context orelse
+        return raw.RICH_ERROR_NULL_ARGUMENT));
+    const native_options = options orelse return raw.RICH_ERROR_NULL_ARGUMENT;
+    const out = output orelse return raw.RICH_ERROR_NULL_ARGUMENT;
+    const measure = state.callbacks.measure orelse return raw.RICH_ERROR_INVALID_STATE;
+    const copied = copyRenderOptions(native_options) catch return raw.RICH_ERROR_RENDER;
+
+    callback_scope = .measure;
+    defer callback_scope = .none;
+    const value = measure(state.context, copied) catch |failure|
+        return callbackCode(failure);
+    out.* = .{ .minimum = value.minimum, .maximum = value.maximum };
+    return raw.RICH_OK;
+}
+
+fn customDropTrampoline(context: ?*anyopaque) callconv(.c) void {
+    const state: *CustomState = @ptrCast(@alignCast(context orelse return));
+    if (callback_scope != .none) return;
+    callback_scope = .drop;
+    if (state.callbacks.drop) |drop| drop(state.context);
+    var node = state.sinks;
+    while (node) |current| {
+        node = current.next;
+        std.heap.c_allocator.destroy(current);
+    }
+    callback_scope = .none;
+    std.heap.c_allocator.destroy(state);
+}
+
 pub const Progress = struct {
     handle: ?*anyopaque,
 
@@ -900,6 +1246,7 @@ pub const Progress = struct {
     }
 
     pub fn deinit(self: *Progress) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_progress_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -949,6 +1296,7 @@ pub const Status = struct {
     }
 
     pub fn deinit(self: *Status) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_status_free(@ptrCast(handle));
         self.handle = null;
     }
@@ -979,6 +1327,7 @@ pub const Spinner = struct {
     }
 
     pub fn deinit(self: *Spinner) void {
+        if (callback_scope != .none) return;
         if (self.handle) |handle| raw.rich_spinner_free(@ptrCast(handle));
         self.handle = null;
     }

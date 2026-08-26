@@ -2,8 +2,10 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -31,6 +33,7 @@ CLOSE_CALLBACK(ColumnsClose, OwnerKind::Columns, "Columns.close")
 CLOSE_CALLBACK(AlignClose, OwnerKind::Align, "Align.close")
 CLOSE_CALLBACK(PaddingClose, OwnerKind::Padding, "Padding.close")
 CLOSE_CALLBACK(SyntaxClose, OwnerKind::Syntax, "Syntax.close")
+CLOSE_CALLBACK(PrettyClose, OwnerKind::Pretty, "Pretty.close")
 CLOSE_CALLBACK(MarkdownClose, OwnerKind::Markdown, "Markdown.close")
 CLOSE_CALLBACK(JsonClose, OwnerKind::Json, "Json.close")
 CLOSE_CALLBACK(ProgressClose, OwnerKind::Progress, "Progress.close")
@@ -63,6 +66,8 @@ Callback CloseForKind(OwnerKind kind) {
     return PaddingClose;
   case OwnerKind::Syntax:
     return SyntaxClose;
+  case OwnerKind::Pretty:
+    return PrettyClose;
   case OwnerKind::Markdown:
     return MarkdownClose;
   case OwnerKind::Json:
@@ -92,6 +97,353 @@ bool BeginConstructor(const Napi::CallbackInfo& info, OwnerKind kind) {
   }
   EnsureAbi(info.Env());
   return false;
+}
+
+constexpr napi_type_tag kRenderOptionsTag{UINT64_C(0x726963682d6f7074),
+                                          UINT64_C(0x696f6e7300000002)};
+constexpr napi_type_tag kMeasurementTag{UINT64_C(0x726963682d6d6561), UINT64_C(0x7375726500000002)};
+constexpr napi_type_tag kSegmentSinkTag{UINT64_C(0x726963682d73696e), UINT64_C(0x6b00000000000002)};
+
+struct RenderOptionsValue {
+  RichRenderOptions value;
+};
+
+struct MeasurementValue {
+  RichMeasurement value;
+};
+
+struct SegmentSinkValue {
+  RichSegmentSink* sink;
+  std::thread::id thread;
+  bool active;
+};
+
+struct CustomContext {
+  napi_env env;
+  AddonData* data;
+  std::thread::id thread;
+  napi_ref renderer;
+  napi_ref render;
+  napi_ref measure;
+};
+
+bool ContextMatchesEnvironment(const CustomContext* context) noexcept {
+  if (context == nullptr || context->thread != std::this_thread::get_id() ||
+      context->data->creator_thread != std::this_thread::get_id()) {
+    return false;
+  }
+  void* instance = nullptr;
+  return napi_get_instance_data(context->env, &instance) == napi_ok && instance == context->data;
+}
+
+thread_local RenderOptionsValue* g_pending_render_options = nullptr;
+thread_local SegmentSinkValue* g_pending_segment_sink = nullptr;
+
+template <typename Value> void FinalizeValue(napi_env, void* raw, void*) {
+  delete static_cast<Value*>(raw);
+}
+
+void DefineReadonly(Napi::Object object, const char* name, Napi::Value value) {
+  object.DefineProperty(Napi::PropertyDescriptor::Value(
+      name, value, static_cast<napi_property_attributes>(napi_enumerable)));
+}
+
+void FreezeObject(Napi::Env env, Napi::Object object) {
+  if (napi_object_freeze(env, object) != napi_ok) {
+    throw Napi::Error::New(env, "failed to freeze immutable binding value");
+  }
+}
+
+template <typename Value>
+Value* UnwrapValue(Napi::Env env, const Napi::Value& input, const Napi::FunctionReference& ctor,
+                   const napi_type_tag* tag, std::string_view operation,
+                   std::string_view expected) {
+  if (!input.IsObject()) {
+    ThrowType(env, std::string(operation) + ": expected " + std::string(expected));
+  }
+  Napi::Object object = input.As<Napi::Object>();
+  if (!object.InstanceOf(ctor.Value())) {
+    ThrowType(env, std::string(operation) + ": expected " + std::string(expected));
+  }
+  bool tagged = false;
+  void* raw = nullptr;
+  if (napi_check_object_type_tag(env, object, tag, &tagged) != napi_ok || !tagged ||
+      napi_unwrap(env, object, &raw) != napi_ok || raw == nullptr) {
+    ThrowType(env, std::string(operation) + ": expected " + std::string(expected));
+  }
+  return static_cast<Value*>(raw);
+}
+
+Napi::Value RenderOptionsConstructor(const Napi::CallbackInfo& info) {
+  EnsureConstructCall(info, "RenderOptions");
+  AddonData* data = Data(info.Env());
+  if (info.Length() != 1 || !data->secret.Value().StrictEquals(info[0]) ||
+      g_pending_render_options == nullptr) {
+    ThrowType(info.Env(), "RenderOptions cannot be constructed directly");
+  }
+  auto* value = g_pending_render_options;
+  Napi::Object object = info.This().As<Napi::Object>();
+  if (napi_type_tag_object(info.Env(), object, &kRenderOptionsTag) != napi_ok ||
+      napi_wrap(info.Env(), object, value, FinalizeValue<RenderOptionsValue>, nullptr, nullptr) !=
+          napi_ok) {
+    g_pending_render_options = nullptr;
+    delete value;
+    throw Napi::Error::New(info.Env(), "failed to create RenderOptions");
+  }
+  g_pending_render_options = nullptr;
+  DefineReadonly(object, "minWidth", Napi::Number::New(info.Env(), value->value.min_width));
+  DefineReadonly(object, "maxWidth", Napi::Number::New(info.Env(), value->value.max_width));
+  DefineReadonly(object, "maxHeight", Napi::Number::New(info.Env(), value->value.max_height));
+  DefineReadonly(object, "colorSystem", Napi::Number::New(info.Env(), value->value.color_system));
+  DefineReadonly(object, "isTerminal",
+                 Napi::Boolean::New(info.Env(), value->value.is_terminal != 0));
+  FreezeObject(info.Env(), object);
+  return object;
+}
+
+Napi::Value MeasurementConstructor(const Napi::CallbackInfo& info) {
+  EnsureConstructCall(info, "Measurement");
+  if (info.Length() != 2) {
+    ThrowType(info.Env(), "Measurement: expected minimum and maximum");
+  }
+  auto* value = new MeasurementValue{
+      .value = RichMeasurement{.minimum = Uint32Arg(info[0], "Measurement minimum"),
+                               .maximum = Uint32Arg(info[1], "Measurement maximum")}};
+  Napi::Object object = info.This().As<Napi::Object>();
+  if (napi_type_tag_object(info.Env(), object, &kMeasurementTag) != napi_ok ||
+      napi_wrap(info.Env(), object, value, FinalizeValue<MeasurementValue>, nullptr, nullptr) !=
+          napi_ok) {
+    delete value;
+    throw Napi::Error::New(info.Env(), "failed to create Measurement");
+  }
+  DefineReadonly(object, "minimum", Napi::Number::New(info.Env(), value->value.minimum));
+  DefineReadonly(object, "maximum", Napi::Number::New(info.Env(), value->value.maximum));
+  FreezeObject(info.Env(), object);
+  return object;
+}
+
+Napi::Value SegmentSinkConstructor(const Napi::CallbackInfo& info) {
+  EnsureConstructCall(info, "SegmentSink");
+  AddonData* data = Data(info.Env());
+  if (info.Length() != 1 || !data->secret.Value().StrictEquals(info[0]) ||
+      g_pending_segment_sink == nullptr) {
+    ThrowType(info.Env(), "SegmentSink cannot be constructed directly");
+  }
+  auto* value = g_pending_segment_sink;
+  Napi::Object object = info.This().As<Napi::Object>();
+  if (napi_type_tag_object(info.Env(), object, &kSegmentSinkTag) != napi_ok ||
+      napi_wrap(info.Env(), object, value, FinalizeValue<SegmentSinkValue>, nullptr, nullptr) !=
+          napi_ok) {
+    g_pending_segment_sink = nullptr;
+    delete value;
+    throw Napi::Error::New(info.Env(), "failed to create SegmentSink");
+  }
+  g_pending_segment_sink = nullptr;
+  return object;
+}
+
+SegmentSinkValue* ThisSink(const Napi::CallbackInfo& info, std::string_view operation) {
+  AddonData* data = Data(info.Env());
+  SegmentSinkValue* value =
+      UnwrapValue<SegmentSinkValue>(info.Env(), info.This(), data->segment_sink_constructor,
+                                    &kSegmentSinkTag, operation, "SegmentSink");
+  if (!InCustomCallback() || !value->active || value->sink == nullptr ||
+      value->thread != std::this_thread::get_id()) {
+    ThrowRich(info.Env(), RICH_ERROR_INVALID_STATE, operation,
+              "SegmentSink is outside its callback scope");
+  }
+  return value;
+}
+
+Napi::Value SegmentSinkPush(const Napi::CallbackInfo& info) {
+  SegmentSinkValue* value = ThisSink(info, "SegmentSink.push");
+  Utf8Arg text(info[0], "SegmentSink.push text");
+  RichStr style{nullptr, 0};
+  std::unique_ptr<Utf8Arg> style_storage;
+  if (info.Length() > 1 && !info[1].IsUndefined()) {
+    style_storage = std::make_unique<Utf8Arg>(info[1], "SegmentSink.push style");
+    style = style_storage->native();
+  }
+  CheckResult(info.Env(), rich_segment_sink_push(value->sink, text.native(), style),
+              "SegmentSink.push");
+  return info.This();
+}
+
+Napi::Value SegmentSinkLine(const Napi::CallbackInfo& info) {
+  SegmentSinkValue* value = ThisSink(info, "SegmentSink.line");
+  CheckResult(info.Env(), rich_segment_sink_line(value->sink), "SegmentSink.line");
+  return info.This();
+}
+
+Napi::Object MakeRenderOptions(CustomContext* context, const RichRenderOptions* options) {
+  if (g_pending_render_options != nullptr) {
+    throw Napi::Error::New(context->env, "nested RenderOptions construction");
+  }
+  g_pending_render_options = new RenderOptionsValue{.value = *options};
+  try {
+    return context->data->render_options_constructor.New({context->data->secret.Value()});
+  } catch (...) {
+    delete g_pending_render_options;
+    g_pending_render_options = nullptr;
+    throw;
+  }
+}
+
+Napi::Object MakeSegmentSink(CustomContext* context, RichSegmentSink* sink,
+                             SegmentSinkValue** out_value) {
+  if (g_pending_segment_sink != nullptr) {
+    throw Napi::Error::New(context->env, "nested SegmentSink construction");
+  }
+  g_pending_segment_sink =
+      new SegmentSinkValue{.sink = sink, .thread = context->thread, .active = true};
+  *out_value = g_pending_segment_sink;
+  try {
+    return context->data->segment_sink_constructor.New({context->data->secret.Value()});
+  } catch (...) {
+    *out_value = nullptr;
+    delete g_pending_segment_sink;
+    g_pending_segment_sink = nullptr;
+    throw;
+  }
+}
+
+void CaptureCallbackFailure(CustomContext* context, const char* fallback) noexcept {
+  napi_value exception = nullptr;
+  if (napi_get_and_clear_last_exception(context->env, &exception) == napi_ok &&
+      exception != nullptr) {
+    RecordPendingException(context->env, exception);
+  } else {
+    RecordPendingError(context->env, fallback);
+  }
+}
+
+RichResult CustomRender(void* raw, const RichRenderOptions* options,
+                        RichSegmentSink* sink) noexcept {
+  auto* context = static_cast<CustomContext*>(raw);
+  if (context == nullptr || options == nullptr || sink == nullptr ||
+      !ContextMatchesEnvironment(context) || InCustomCallback()) {
+    return RICH_ERROR_INVALID_STATE;
+  }
+  SegmentSinkValue* sink_value = nullptr;
+  EnterCustomCallback();
+  try {
+    Napi::Object options_object = MakeRenderOptions(context, options);
+    Napi::Object sink_object = MakeSegmentSink(context, sink, &sink_value);
+    napi_value renderer = nullptr;
+    napi_value render = nullptr;
+    napi_value arguments[]{options_object, sink_object};
+    napi_value result = nullptr;
+    napi_status status = napi_get_reference_value(context->env, context->renderer, &renderer);
+    if (status == napi_ok)
+      status = napi_get_reference_value(context->env, context->render, &render);
+    if (status == napi_ok) {
+      status = napi_call_function(context->env, renderer, render, 2, arguments, &result);
+    }
+    napi_valuetype result_type = napi_undefined;
+    if (status == napi_ok)
+      status = napi_typeof(context->env, result, &result_type);
+    sink_value->active = false;
+    sink_value->sink = nullptr;
+    LeaveCustomCallback();
+    if (status != napi_ok) {
+      CaptureCallbackFailure(context, "custom render callback failed");
+      return RICH_ERROR_RENDER;
+    }
+    if (result_type != napi_undefined)
+      return RICH_ERROR_RENDER;
+    ++context->data->test_custom_renders;
+    return RICH_OK;
+  } catch (const Napi::Error& error) {
+    if (sink_value != nullptr) {
+      sink_value->active = false;
+      sink_value->sink = nullptr;
+    }
+    LeaveCustomCallback();
+    RecordPendingException(context->env, error.Value());
+    return RICH_ERROR_RENDER;
+  } catch (const std::exception& error) {
+    if (sink_value != nullptr) {
+      sink_value->active = false;
+      sink_value->sink = nullptr;
+    }
+    LeaveCustomCallback();
+    RecordPendingError(context->env, error.what());
+    return RICH_ERROR_RENDER;
+  } catch (...) {
+    if (sink_value != nullptr) {
+      sink_value->active = false;
+      sink_value->sink = nullptr;
+    }
+    LeaveCustomCallback();
+    RecordPendingError(context->env, "custom render callback threw an unknown exception");
+    return RICH_ERROR_RENDER;
+  }
+}
+
+RichResult CustomMeasure(void* raw, const RichRenderOptions* options,
+                         RichMeasurement* output) noexcept {
+  auto* context = static_cast<CustomContext*>(raw);
+  if (context == nullptr || options == nullptr || output == nullptr ||
+      context->measure == nullptr || !ContextMatchesEnvironment(context) || InCustomCallback()) {
+    return RICH_ERROR_INVALID_STATE;
+  }
+  EnterCustomCallback();
+  try {
+    Napi::Object options_object = MakeRenderOptions(context, options);
+    napi_value renderer = nullptr;
+    napi_value measure = nullptr;
+    napi_value argument = options_object;
+    napi_value result = nullptr;
+    napi_status status = napi_get_reference_value(context->env, context->renderer, &renderer);
+    if (status == napi_ok)
+      status = napi_get_reference_value(context->env, context->measure, &measure);
+    if (status == napi_ok) {
+      status = napi_call_function(context->env, renderer, measure, 1, &argument, &result);
+    }
+    if (status != napi_ok) {
+      LeaveCustomCallback();
+      CaptureCallbackFailure(context, "custom measure callback failed");
+      return RICH_ERROR_RENDER;
+    }
+    MeasurementValue* measurement = UnwrapValue<MeasurementValue>(
+        context->env, Napi::Value(context->env, result), context->data->measurement_constructor,
+        &kMeasurementTag, "customRenderable.measure", "Measurement");
+    *output = measurement->value;
+    LeaveCustomCallback();
+    return RICH_OK;
+  } catch (const Napi::Error& error) {
+    LeaveCustomCallback();
+    RecordPendingException(context->env, error.Value());
+    return RICH_ERROR_RENDER;
+  } catch (const std::exception& error) {
+    LeaveCustomCallback();
+    RecordPendingError(context->env, error.what());
+    return RICH_ERROR_RENDER;
+  } catch (...) {
+    LeaveCustomCallback();
+    RecordPendingError(context->env, "custom measure callback threw an unknown exception");
+    return RICH_ERROR_RENDER;
+  }
+}
+
+void DestroyCustomContext(CustomContext* context, bool native_drop) noexcept {
+  if (context == nullptr)
+    return;
+  if (ContextMatchesEnvironment(context)) {
+    if (context->measure != nullptr)
+      napi_delete_reference(context->env, context->measure);
+    if (context->render != nullptr)
+      napi_delete_reference(context->env, context->render);
+    if (context->renderer != nullptr)
+      napi_delete_reference(context->env, context->renderer);
+    if (native_drop)
+      ++context->data->test_custom_drops;
+  }
+  delete context;
+}
+
+void CustomDrop(void* raw) noexcept {
+  DestroyCustomContext(static_cast<CustomContext*>(raw), true);
 }
 
 void SetPrototypeMethod(Napi::Env env, Napi::Function constructor, const char* name,
@@ -232,10 +584,11 @@ Napi::Value ConsoleRender(const Napi::CallbackInfo& info) {
   Owner* owner = ThisOwner(info, OwnerKind::Console, "Console.render");
   Owner* renderable = UnwrapOwner(info.Env(), info[0], OwnerKind::Renderable, "Console.render");
   BufferGuard buffer;
-  CheckResult(info.Env(),
-              rich_console_render(OwnerPointer<RichConsole>(owner),
-                                  OwnerPointer<RichRenderable>(renderable), buffer.output()),
-              "Console.render");
+  const RichResult result = rich_console_render(
+      OwnerPointer<RichConsole>(owner), OwnerPointer<RichRenderable>(renderable), buffer.output());
+  if (RestorePendingException(info.Env()))
+    return info.Env().Undefined();
+  CheckResult(info.Env(), result, "Console.render");
   return BufferToString(info.Env(), buffer, "Console.render");
 }
 
@@ -335,6 +688,8 @@ BOOL_SETTER(SyntaxSetLineNumbers, OwnerKind::Syntax, RichSyntax, rich_syntax_set
             "Syntax.setLineNumbers")
 BOOL_SETTER(SyntaxSetWordWrap, OwnerKind::Syntax, RichSyntax, rich_syntax_set_word_wrap,
             "Syntax.setWordWrap")
+BOOL_SETTER(SyntaxSetIndentGuides, OwnerKind::Syntax, RichSyntax, rich_syntax_set_indent_guides,
+            "Syntax.setIndentGuides")
 
 Napi::Value SyntaxSetLineRange(const Napi::CallbackInfo& info) {
   Owner* owner = ThisOwner(info, OwnerKind::Syntax, "Syntax.setLineRange");
@@ -352,6 +707,68 @@ Napi::Value SyntaxSetLineRange(const Napi::CallbackInfo& info) {
 
 Napi::Value SyntaxFinish(const Napi::CallbackInfo& info) {
   return FinishOwner<RichSyntax, rich_syntax_finish>(info, OwnerKind::Syntax, "Syntax.finish");
+}
+
+Napi::Value PrettyConstructor(const Napi::CallbackInfo& info) {
+  if (BeginConstructor(info, OwnerKind::Pretty))
+    return info.This();
+  Utf8Arg representation(info[0], "Pretty");
+  return CreateOwnerChecked<RichPretty>(
+      info.Env(), OwnerKind::Pretty, "Pretty",
+      [&](RichPretty** output) { return rich_pretty_new(representation.native(), output); });
+}
+
+BOOL_SETTER(PrettySetIndentGuides, OwnerKind::Pretty, RichPretty, rich_pretty_set_indent_guides,
+            "Pretty.setIndentGuides")
+
+Napi::Value PrettyFinish(const Napi::CallbackInfo& info) {
+  return FinishOwner<RichPretty, rich_pretty_finish>(info, OwnerKind::Pretty, "Pretty.finish");
+}
+
+Napi::Value CustomRenderable(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  EnsureAbi(env);
+  Napi::Object renderer = ObjectArg(info[0], "customRenderable");
+  RejectUnknownKeys(renderer, {"render", "measure"}, "customRenderable");
+  Napi::Value render_value = renderer.Get("render");
+  if (!render_value.IsFunction()) {
+    ThrowType(env, "customRenderable: render must be a function");
+  }
+  Napi::Value measure_value = renderer.Get("measure");
+  if (!measure_value.IsUndefined() && !measure_value.IsFunction()) {
+    ThrowType(env, "customRenderable: measure must be a function when provided");
+  }
+
+  auto context = std::make_unique<CustomContext>(CustomContext{
+      .env = env,
+      .data = Data(env),
+      .thread = std::this_thread::get_id(),
+      .renderer = nullptr,
+      .render = nullptr,
+      .measure = nullptr,
+  });
+  if (napi_create_reference(env, renderer, 1, &context->renderer) != napi_ok ||
+      napi_create_reference(env, render_value, 1, &context->render) != napi_ok ||
+      (!measure_value.IsUndefined() &&
+       napi_create_reference(env, measure_value, 1, &context->measure) != napi_ok)) {
+    DestroyCustomContext(context.release(), false);
+    throw Napi::Error::New(env, "customRenderable: failed to retain callbacks");
+  }
+  const RichCustomRenderableVTable vtable{
+      .render = CustomRender,
+      .measure = context->measure == nullptr ? nullptr : CustomMeasure,
+      .drop = CustomDrop,
+  };
+  RichRenderable* output = nullptr;
+  const RichResult result = rich_custom_renderable_new(context.get(), &vtable, &output);
+  PendingOwner pending(Data(env), OwnerKind::Renderable, output);
+  if (result == RICH_OK || output != nullptr) {
+    context.release();
+  } else {
+    DestroyCustomContext(context.release(), false);
+  }
+  CheckResult(env, result, "customRenderable");
+  return pending.IntoObject(env, "customRenderable");
 }
 
 Napi::Value MarkdownConstructor(const Napi::CallbackInfo& info) {
@@ -667,10 +1084,21 @@ Napi::Value TableConstructor(const Napi::CallbackInfo& info) {
                                        [](RichTable** output) { return rich_table_new(output); });
 }
 
+Napi::Value TableGrid(const Napi::CallbackInfo& info) {
+  EnsureAbi(info.Env());
+  if (info.Length() != 0)
+    ThrowType(info.Env(), "Table.grid: takes no arguments");
+  return CreateOwnerChecked<RichTable>(
+      info.Env(), OwnerKind::Table, "Table.grid",
+      [](RichTable** output) { return rich_table_new_grid(output); });
+}
+
 STRING_SETTER(TableSetTitle, OwnerKind::Table, RichTable, rich_table_set_title, "Table.setTitle")
 STRING_SETTER(TableSetCaption, OwnerKind::Table, RichTable, rich_table_set_caption,
               "Table.setCaption")
 U32_SETTER(TableSetBox, OwnerKind::Table, RichTable, rich_table_set_box, "Table.setBox")
+BOOL_SETTER(TableSetPadEdge, OwnerKind::Table, RichTable, rich_table_set_pad_edge,
+            "Table.setPadEdge")
 BOOL_SETTER(TableSetShowHeader, OwnerKind::Table, RichTable, rich_table_set_show_header,
             "Table.setShowHeader")
 BOOL_SETTER(TableSetShowLines, OwnerKind::Table, RichTable, rich_table_set_show_lines,
@@ -709,6 +1137,73 @@ Napi::Value TableSetPadding(const Napi::CallbackInfo& info) {
   const std::uint32_t right = Uint32Arg(info[1], "Table.setPadding right");
   CheckResult(info.Env(), rich_table_set_padding(OwnerPointer<RichTable>(owner), left, right),
               "Table.setPadding");
+  return info.This();
+}
+
+Napi::Value TableSetRowStyles(const Napi::CallbackInfo& info) {
+  Owner* owner = ThisOwner(info, OwnerKind::Table, "Table.setRowStyles");
+  if (!info[0].IsArray())
+    ThrowType(info.Env(), "Table.setRowStyles: expected an array of strings");
+  Napi::Array input = info[0].As<Napi::Array>();
+  std::vector<Utf8Arg> storage;
+  std::vector<RichStr> styles;
+  storage.reserve(input.Length());
+  styles.reserve(input.Length());
+  for (std::uint32_t index = 0; index < input.Length(); ++index) {
+    storage.emplace_back(input.Get(index), "Table.setRowStyles style");
+  }
+  for (const Utf8Arg& style : storage)
+    styles.push_back(style.native());
+  CheckResult(info.Env(),
+              rich_table_set_row_styles(OwnerPointer<RichTable>(owner),
+                                        styles.empty() ? nullptr : styles.data(),
+                                        static_cast<std::uint32_t>(styles.size())),
+              "Table.setRowStyles");
+  return info.This();
+}
+
+Napi::Value TableAddColumnOptions(const Napi::CallbackInfo& info) {
+  Owner* owner = ThisOwner(info, OwnerKind::Table, "Table.addColumnOptions");
+  Napi::Object input = ObjectArg(info[0], "Table.addColumnOptions options");
+  RejectUnknownKeys(input, {"justify", "vertical", "width", "minWidth", "ratio", "style", "noWrap"},
+                    "Table.addColumnOptions options");
+  RichTableColumnOptions options{};
+  if (input.Has("justify")) {
+    options.flags |= RICH_COLUMN_HAS_JUSTIFY;
+    options.justify = Uint32Arg(input.Get("justify"), "Table.addColumnOptions justify");
+  }
+  if (input.Has("vertical")) {
+    options.flags |= RICH_COLUMN_HAS_VERTICAL;
+    options.vertical = Uint32Arg(input.Get("vertical"), "Table.addColumnOptions vertical");
+  }
+  if (input.Has("width")) {
+    options.flags |= RICH_COLUMN_HAS_WIDTH;
+    options.width = Uint32Arg(input.Get("width"), "Table.addColumnOptions width");
+  }
+  if (input.Has("minWidth")) {
+    options.flags |= RICH_COLUMN_HAS_MIN_WIDTH;
+    options.min_width = Uint32Arg(input.Get("minWidth"), "Table.addColumnOptions minWidth");
+  }
+  if (input.Has("ratio")) {
+    options.flags |= RICH_COLUMN_HAS_RATIO;
+    options.ratio = Uint32Arg(input.Get("ratio"), "Table.addColumnOptions ratio");
+  }
+  std::unique_ptr<Utf8Arg> style;
+  if (input.Has("style")) {
+    style = std::make_unique<Utf8Arg>(input.Get("style"), "Table.addColumnOptions style");
+    options.style = style->native();
+  }
+  if (input.Has("noWrap") && BoolArg(input.Get("noWrap"), "Table.addColumnOptions noWrap") != 0) {
+    options.flags |= RICH_COLUMN_NO_WRAP;
+  }
+  const RichRenderable* header = nullptr;
+  if (info.Length() > 1 && !info[1].IsUndefined() && !info[1].IsNull()) {
+    header = OwnerPointer<RichRenderable>(
+        UnwrapOwner(info.Env(), info[1], OwnerKind::Renderable, "Table.addColumnOptions header"));
+  }
+  CheckResult(info.Env(),
+              rich_table_add_column_options(OwnerPointer<RichTable>(owner), header, &options),
+              "Table.addColumnOptions");
   return info.This();
 }
 
@@ -1011,9 +1506,16 @@ Napi::Value TestFinishAddressReuse(const Napi::CallbackInfo& info) {
                                       });
 }
 
+Napi::Value TestCustomStats(const Napi::CallbackInfo& info) {
+  Napi::Object stats = Napi::Object::New(info.Env());
+  stats.Set("drops", Napi::BigInt::New(info.Env(), Data(info.Env())->test_custom_drops));
+  stats.Set("renders", Napi::BigInt::New(info.Env(), Data(info.Env())->test_custom_renders));
+  return stats;
+}
+
 Napi::Object Constants(Napi::Env env) {
   Napi::Object constants = Napi::Object::New(env);
-  const std::array<std::pair<const char*, std::uint32_t>, 45> values{{
+  const std::array<std::pair<const char*, std::uint32_t>, 46> values{{
       {"ABI_VERSION", RICH_FFI_ABI_VERSION},
       {"OK", RICH_OK},
       {"ERROR_NULL_ARGUMENT", RICH_ERROR_NULL_ARGUMENT},
@@ -1053,6 +1555,7 @@ Napi::Object Constants(Napi::Env env) {
       {"BOX_MINIMAL_HEAVY_HEAD", RICH_BOX_MINIMAL_HEAVY_HEAD},
       {"BOX_SIMPLE_HEAVY", RICH_BOX_SIMPLE_HEAVY},
       {"BOX_MARKDOWN", RICH_BOX_MARKDOWN},
+      {"BOX_NONE", RICH_BOX_NONE},
       {"TREE_ROOT_ID", RICH_TREE_ROOT_ID},
       {"ABI_MISMATCH", kAbiMismatch},
       {"UINT32_MAX", UINT32_MAX},
@@ -1069,6 +1572,7 @@ Napi::Object Constants(Napi::Env env) {
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   auto* data = new AddonData();
   env.SetInstanceData(data);
+  data->creator_thread = std::this_thread::get_id();
   data->secret = Napi::Persistent<Napi::Value>(Napi::Symbol::New(env, "rich-rs internal"));
 
   exports.Set("_configure", Napi::Function::New(env, Configure));
@@ -1081,6 +1585,21 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("_testFinishFailure", Napi::Function::New(env, TestFinishFailure));
   exports.Set("_testFinishMatrix", Napi::Function::New(env, TestFinishMatrix));
   exports.Set("_testFinishAddressReuse", Napi::Function::New(env, TestFinishAddressReuse));
+  exports.Set("_testCustomStats", Napi::Function::New(env, TestCustomStats));
+
+  Napi::Function render_options =
+      Napi::Function::New(env, RenderOptionsConstructor, "RenderOptions");
+  data->render_options_constructor = Napi::Persistent(render_options);
+  exports.Set("RenderOptions", render_options);
+  Napi::Function measurement = Napi::Function::New(env, MeasurementConstructor, "Measurement");
+  data->measurement_constructor = Napi::Persistent(measurement);
+  exports.Set("Measurement", measurement);
+  Napi::Function segment_sink = Napi::Function::New(env, SegmentSinkConstructor, "SegmentSink");
+  SetPrototypeMethod(env, segment_sink, "push", SegmentSinkPush);
+  SetPrototypeMethod(env, segment_sink, "line", SegmentSinkLine);
+  data->segment_sink_constructor = Napi::Persistent(segment_sink);
+  exports.Set("SegmentSink", segment_sink);
+  exports.Set("customRenderable", Napi::Function::New(env, CustomRenderable));
 
   RegisterClass(env, exports, OwnerKind::Renderable, RenderableConstructor, {});
   Napi::Function console = RegisterClass(env, exports, OwnerKind::Console, ConsoleConstructor,
@@ -1104,6 +1623,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
                                         {"setTitleMarkup", TableSetTitleMarkup},
                                         {"setCaptionMarkup", TableSetCaptionMarkup},
                                         {"setBox", TableSetBox},
+                                        {"setPadEdge", TableSetPadEdge},
+                                        {"setRowStyles", TableSetRowStyles},
                                         {"setShowHeader", TableSetShowHeader},
                                         {"setShowLines", TableSetShowLines},
                                         {"setShowEdge", TableSetShowEdge},
@@ -1112,10 +1633,11 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
                                         {"setStyle", TableSetStyle},
                                         {"addColumn", TableAddColumn},
                                         {"addColumnRenderable", TableAddColumnRenderable},
+                                        {"addColumnOptions", TableAddColumnOptions},
                                         {"addRowStrings", TableAddRowStrings},
                                         {"addRowRenderables", TableAddRowRenderables},
                                         {"finish", TableFinish}});
-  (void)table;
+  SetStaticMethod(env, table, "grid", TableGrid);
   RegisterClass(env, exports, OwnerKind::Panel, PanelConstructor,
                 {{"setTitle", PanelSetTitle},
                  {"setSubtitle", PanelSetSubtitle},
@@ -1158,9 +1680,12 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
                                         {{"setTheme", SyntaxSetTheme},
                                          {"setLineNumbers", SyntaxSetLineNumbers},
                                          {"setWordWrap", SyntaxSetWordWrap},
+                                         {"setIndentGuides", SyntaxSetIndentGuides},
                                          {"setLineRange", SyntaxSetLineRange},
                                          {"finish", SyntaxFinish}});
   SetStaticMethod(env, syntax, "fromPath", SyntaxFromPath);
+  RegisterClass(env, exports, OwnerKind::Pretty, PrettyConstructor,
+                {{"setIndentGuides", PrettySetIndentGuides}, {"finish", PrettyFinish}});
   RegisterClass(env, exports, OwnerKind::Markdown, MarkdownConstructor,
                 {{"setCodeTheme", MarkdownSetCodeTheme},
                  {"setHyperlinks", MarkdownSetHyperlinks},

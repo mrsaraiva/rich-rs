@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
         .root_module = demo_module,
     });
     const run_demo = b.addRunArtifact(demo);
+    if (b.args) |args| run_demo.addArgs(args);
     const example_step = b.step("example", "Build and run the Zig binding demo");
     example_step.dependOn(&run_demo.step);
 

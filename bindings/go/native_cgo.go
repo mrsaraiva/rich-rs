@@ -8,6 +8,62 @@ package rich
 #include <stdint.h>
 #include <stdlib.h>
 #include <rich.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
+
+extern RichResult goRichCustomRender(void *context, const RichRenderOptions *options, RichSegmentSink *sink);
+extern RichResult goRichCustomMeasure(void *context, const RichRenderOptions *options, RichMeasurement *measurement);
+extern void goRichCustomDrop(void *context);
+
+#if defined(_MSC_VER)
+#define GO_RICH_THREAD_LOCAL __declspec(thread)
+#else
+#define GO_RICH_THREAD_LOCAL _Thread_local
+#endif
+
+static GO_RICH_THREAD_LOCAL uint8_t go_rich_callback_depth = 0;
+
+static RichResult go_rich_render_trampoline(void *context, const RichRenderOptions *options, RichSegmentSink *sink) {
+    go_rich_callback_depth++;
+    RichResult result = goRichCustomRender(context, options, sink);
+    go_rich_callback_depth--;
+    return result;
+}
+
+static RichResult go_rich_measure_trampoline(void *context, const RichRenderOptions *options, RichMeasurement *measurement) {
+    go_rich_callback_depth++;
+    RichResult result = goRichCustomMeasure(context, options, measurement);
+    go_rich_callback_depth--;
+    return result;
+}
+
+static void go_rich_drop_trampoline(void *context) {
+    go_rich_callback_depth++;
+    goRichCustomDrop(context);
+    go_rich_callback_depth--;
+}
+
+static uint8_t go_rich_in_callback(void) { return go_rich_callback_depth != 0; }
+
+static uintptr_t go_rich_thread_id(void) {
+#if defined(_WIN32)
+    return (uintptr_t)GetCurrentThreadId();
+#else
+    return (uintptr_t)pthread_self();
+#endif
+}
+
+static RichResult go_rich_custom_new(uintptr_t token, uint8_t has_measure, RichRenderable **out) {
+    RichCustomRenderableVTable vtable = {
+        .render = go_rich_render_trampoline,
+        .measure = has_measure ? go_rich_measure_trampoline : NULL,
+        .drop = go_rich_drop_trampoline,
+    };
+    return rich_custom_renderable_new((void *)token, &vtable, out);
+}
 
 static size_t go_rich_result_size(void) { return sizeof(RichResult); }
 static size_t go_rich_str_size(void) { return sizeof(RichStr); }
@@ -18,6 +74,13 @@ static size_t go_rich_buffer_size(void) { return sizeof(RichBuffer); }
 static size_t go_rich_buffer_align(void) { return _Alignof(RichBuffer); }
 static size_t go_rich_buffer_data_offset(void) { return offsetof(RichBuffer, data); }
 static size_t go_rich_buffer_len_offset(void) { return offsetof(RichBuffer, len); }
+static size_t go_rich_render_options_size(void) { return sizeof(RichRenderOptions); }
+static size_t go_rich_render_options_align(void) { return _Alignof(RichRenderOptions); }
+static size_t go_rich_measurement_size(void) { return sizeof(RichMeasurement); }
+static size_t go_rich_measurement_align(void) { return _Alignof(RichMeasurement); }
+static size_t go_rich_column_options_size(void) { return sizeof(RichTableColumnOptions); }
+static size_t go_rich_column_options_align(void) { return _Alignof(RichTableColumnOptions); }
+static size_t go_rich_column_options_style_offset(void) { return offsetof(RichTableColumnOptions, style); }
 */
 import "C"
 
@@ -48,6 +111,9 @@ type nativeLayout struct {
 	ResultSize                                                 uintptr
 	StrSize, StrAlign, StrDataOffset, StrLenOffset             uintptr
 	BufferSize, BufferAlign, BufferDataOffset, BufferLenOffset uintptr
+	RenderOptionsSize, RenderOptionsAlign                      uintptr
+	MeasurementSize, MeasurementAlign                          uintptr
+	ColumnOptionsSize, ColumnOptionsAlign, ColumnStyleOffset   uintptr
 }
 
 func nativeLayoutInfo() nativeLayout {
@@ -57,16 +123,28 @@ func nativeLayoutInfo() nativeLayout {
 		StrDataOffset: uintptr(C.go_rich_str_data_offset()), StrLenOffset: uintptr(C.go_rich_str_len_offset()),
 		BufferSize: uintptr(C.go_rich_buffer_size()), BufferAlign: uintptr(C.go_rich_buffer_align()),
 		BufferDataOffset: uintptr(C.go_rich_buffer_data_offset()), BufferLenOffset: uintptr(C.go_rich_buffer_len_offset()),
+		RenderOptionsSize: uintptr(C.go_rich_render_options_size()), RenderOptionsAlign: uintptr(C.go_rich_render_options_align()),
+		MeasurementSize: uintptr(C.go_rich_measurement_size()), MeasurementAlign: uintptr(C.go_rich_measurement_align()),
+		ColumnOptionsSize: uintptr(C.go_rich_column_options_size()), ColumnOptionsAlign: uintptr(C.go_rich_column_options_align()),
+		ColumnStyleOffset: uintptr(C.go_rich_column_options_style_offset()),
 	}
 }
 
+func nativeInCallback() bool  { return C.go_rich_in_callback() != 0 }
+func nativeThreadID() uintptr { return uintptr(C.go_rich_thread_id()) }
+
 func EnsureABI() error {
+	if nativeInCallback() {
+		return ErrInvalidState
+	}
 	if uint32(C.RICH_FFI_ABI_VERSION) != ABIVersion || uint32(C.rich_ffi_abi_version()) != ABIVersion {
 		return ErrABIMismatch
 	}
 	l := nativeLayoutInfo()
 	if l.ResultSize != 4 || l.StrSize != 16 || l.StrAlign != 8 || l.StrDataOffset != 0 || l.StrLenOffset != 8 ||
-		l.BufferSize != 16 || l.BufferAlign != 8 || l.BufferDataOffset != 0 || l.BufferLenOffset != 8 {
+		l.BufferSize != 16 || l.BufferAlign != 8 || l.BufferDataOffset != 0 || l.BufferLenOffset != 8 ||
+		l.RenderOptionsSize != 24 || l.RenderOptionsAlign != 4 || l.MeasurementSize != 8 || l.MeasurementAlign != 4 ||
+		l.ColumnOptionsSize != 40 || l.ColumnOptionsAlign != 8 || l.ColumnStyleOffset != 24 {
 		return ErrABIMismatch
 	}
 	if uint32(C.RICH_OK) != 0 || uint32(C.RICH_ERROR_NULL_ARGUMENT) != uint32(ErrorNullArgument) ||
@@ -80,7 +158,10 @@ func EnsureABI() error {
 		uint32(C.RICH_COLOR_WINDOWS) != uint32(ColorWindows) || uint32(C.RICH_ALIGN_LEFT) != uint32(AlignLeft) ||
 		uint32(C.RICH_ALIGN_CENTER) != uint32(AlignCenter) || uint32(C.RICH_ALIGN_RIGHT) != uint32(AlignRight) ||
 		uint32(C.RICH_VERTICAL_TOP) != uint32(VerticalTop) || uint32(C.RICH_VERTICAL_MIDDLE) != uint32(VerticalMiddle) ||
-		uint32(C.RICH_VERTICAL_BOTTOM) != uint32(VerticalBottom) || uint64(C.RICH_TREE_ROOT_ID) != uint64(RootNodeID) {
+		uint32(C.RICH_VERTICAL_BOTTOM) != uint32(VerticalBottom) || uint32(C.RICH_JUSTIFY_DEFAULT) != uint32(JustifyDefault) ||
+		uint32(C.RICH_JUSTIFY_LEFT) != uint32(JustifyLeft) || uint32(C.RICH_JUSTIFY_CENTER) != uint32(JustifyCenter) ||
+		uint32(C.RICH_JUSTIFY_RIGHT) != uint32(JustifyRight) || uint32(C.RICH_JUSTIFY_FULL) != uint32(JustifyFull) ||
+		uint32(C.RICH_BOX_NONE) != uint32(BoxNone) || uint64(C.RICH_TREE_ROOT_ID) != uint64(RootNodeID) {
 		return ErrABIMismatch
 	}
 	return nil
@@ -129,6 +210,7 @@ var nativeStringLifetimeHook func(allocated bool)
 var nativeArrayLifetimeHook func(kind string, allocated bool)
 var nativeFreedHook func(handleKind)
 var nativeHandleFreedHook func(handleKind, nativeHandle)
+var consoleRenderBeforeHook func(nativeHandle, nativeHandle)
 var nativeFreeHooksMu sync.RWMutex
 
 func replaceNativeFreedHook(hook func(handleKind)) func(handleKind) {
@@ -220,6 +302,8 @@ func nativeFree(kind handleKind, h nativeHandle) {
 		C.rich_style_free((*C.RichStyle)(h.p))
 	case hSyntax:
 		C.rich_syntax_free((*C.RichSyntax)(h.p))
+	case hPretty:
+		C.rich_pretty_free((*C.RichPretty)(h.p))
 	case hMarkdown:
 		C.rich_markdown_free((*C.RichMarkdown)(h.p))
 	case hJSON:
@@ -297,6 +381,29 @@ func nativeNew(kind handleKind) (nativeHandle, error) {
 	return nativeHandle{p: p}, nil
 }
 
+func nativeTableNew(grid bool) (nativeHandle, error) {
+	if err := EnsureABI(); err != nil {
+		return nativeHandle{}, err
+	}
+	var out *C.RichTable
+	var result C.RichResult
+	if grid {
+		result = C.rich_table_new_grid(&out)
+	} else {
+		result = C.rich_table_new(&out)
+	}
+	if err := checkResult(uint32(result)); err != nil {
+		if out != nil {
+			C.rich_table_free(out)
+		}
+		return nativeHandle{}, err
+	}
+	if out == nil {
+		return nativeHandle{}, ErrABIMismatch
+	}
+	return nativeHandle{p: unsafe.Pointer(out)}, nil
+}
+
 func nativeFinish(kind handleKind, h nativeHandle) (nativeHandle, nativeHandle, uint32) {
 	if finishBeforeHook != nil {
 		if override := finishBeforeHook(kind); override != nil {
@@ -332,6 +439,10 @@ func nativeFinish(kind handleKind, h nativeHandle) (nativeHandle, nativeHandle, 
 	case hSyntax:
 		v := (*C.RichSyntax)(h.p)
 		r = C.rich_syntax_finish(&v, &out)
+		remaining = unsafe.Pointer(v)
+	case hPretty:
+		v := (*C.RichPretty)(h.p)
+		r = C.rich_pretty_finish(&v, &out)
 		remaining = unsafe.Pointer(v)
 	case hMarkdown:
 		v := (*C.RichMarkdown)(h.p)
@@ -419,6 +530,9 @@ func nativeConsoleRenderMarkup(h nativeHandle, markup string) (string, error) {
 	})
 }
 func nativeConsoleRender(h, renderable nativeHandle) (string, error) {
+	if consoleRenderBeforeHook != nil {
+		consoleRenderBeforeHook(h, renderable)
+	}
 	return nativeBufferResult(func(out *C.RichBuffer) C.RichResult {
 		return C.rich_console_render((*C.RichConsole)(h.p), (*C.RichRenderable)(renderable.p), out)
 	})
@@ -558,10 +672,15 @@ func nativeSyntaxTheme(h nativeHandle, theme string) error {
 }
 func nativeSyntaxBool(h nativeHandle, which uint8, value bool) error {
 	var r C.RichResult
-	if which == 0 {
+	switch which {
+	case 0:
 		r = C.rich_syntax_set_line_numbers((*C.RichSyntax)(h.p), nativeBool(value))
-	} else {
+	case 1:
 		r = C.rich_syntax_set_word_wrap((*C.RichSyntax)(h.p), nativeBool(value))
+	case 2:
+		r = C.rich_syntax_set_indent_guides((*C.RichSyntax)(h.p), nativeBool(value))
+	default:
+		return ErrABIMismatch
 	}
 	return checkResult(uint32(r))
 }
@@ -577,6 +696,85 @@ func nativeSyntaxRange(h nativeHandle, lr LineRange) error {
 		end = C.uint32_t(*lr.End)
 	}
 	return checkResult(uint32(C.rich_syntax_set_line_range((*C.RichSyntax)(h.p), hs, start, he, end)))
+}
+
+func nativePrettyNew(value string) (nativeHandle, error) {
+	if err := EnsureABI(); err != nil {
+		return nativeHandle{}, err
+	}
+	s, err := allocNativeString(value)
+	if err != nil {
+		return nativeHandle{}, err
+	}
+	defer s.free()
+	var out *C.RichPretty
+	result := C.rich_pretty_new(s.v, &out)
+	if err := checkResult(uint32(result)); err != nil {
+		if out != nil {
+			C.rich_pretty_free(out)
+		}
+		return nativeHandle{}, err
+	}
+	if out == nil {
+		return nativeHandle{}, ErrABIMismatch
+	}
+	return nativeHandle{p: unsafe.Pointer(out)}, nil
+}
+
+func nativePrettyIndentGuides(h nativeHandle, enabled bool) error {
+	return checkResult(uint32(C.rich_pretty_set_indent_guides((*C.RichPretty)(h.p), nativeBool(enabled))))
+}
+
+type customNewTestOverride struct {
+	result         uint32
+	createOutput   bool
+	suppressOutput bool
+	observeOutput  func(nativeHandle)
+}
+
+var customNewBeforeHook func(token uintptr, hasMeasure bool) *customNewTestOverride
+
+func nativeCustomRenderableNew(token uintptr, hasMeasure bool) (nativeHandle, bool, error) {
+	if err := EnsureABI(); err != nil {
+		return nativeHandle{}, false, err
+	}
+	var out *C.RichRenderable
+	var result C.RichResult
+	if customNewBeforeHook != nil {
+		if override := customNewBeforeHook(token, hasMeasure); override != nil {
+			if override.createOutput {
+				result = C.go_rich_custom_new(C.uintptr_t(token), nativeBool(hasMeasure), &out)
+				if err := checkResult(uint32(result)); err != nil {
+					return nativeHandle{}, false, err
+				}
+				if out != nil && override.observeOutput != nil {
+					override.observeOutput(nativeHandle{p: unsafe.Pointer(out)})
+				}
+			}
+			if override.suppressOutput && out != nil {
+				nativeFree(hRenderable, nativeHandle{p: unsafe.Pointer(out)})
+				out = nil
+			}
+			result = C.RichResult(override.result)
+		} else {
+			result = C.go_rich_custom_new(C.uintptr_t(token), nativeBool(hasMeasure), &out)
+		}
+	} else {
+		result = C.go_rich_custom_new(C.uintptr_t(token), nativeBool(hasMeasure), &out)
+	}
+	if err := checkResult(uint32(result)); err != nil {
+		if out != nil {
+			nativeFree(hRenderable, nativeHandle{p: unsafe.Pointer(out)})
+			return nativeHandle{}, true, ErrABIMismatch
+		}
+		return nativeHandle{}, false, err
+	}
+	if out == nil {
+		// RICH_OK is the ownership receipt even when the accompanying pointer is
+		// malformed. Native is responsible for the transferred token from here.
+		return nativeHandle{}, true, ErrABIMismatch
+	}
+	return nativeHandle{p: unsafe.Pointer(out)}, true, nil
 }
 
 func nativeMarkdownNew(source string) (nativeHandle, error) {
@@ -887,6 +1085,54 @@ func nativeTableMarkup(table, console nativeHandle, which uint8, value string) e
 func nativeTableBox(h nativeHandle, v BoxStyle) error {
 	return checkResult(uint32(C.rich_table_set_box((*C.RichTable)(h.p), C.uint32_t(v))))
 }
+func nativeTablePadEdge(h nativeHandle, v bool) error {
+	return checkResult(uint32(C.rich_table_set_pad_edge((*C.RichTable)(h.p), nativeBool(v))))
+}
+func nativeTableRowStyles(h nativeHandle, values []string) error {
+	a, err := allocNativeStringArray(values)
+	if err != nil {
+		return err
+	}
+	defer a.free()
+	return checkResult(uint32(C.rich_table_set_row_styles((*C.RichTable)(h.p), (*C.RichStr)(a.mem), a.count)))
+}
+func nativeTableColumnOptions(h nativeHandle, header nativeHandle, options ColumnOptions) error {
+	style, err := allocNativeString(options.Style)
+	if err != nil {
+		return err
+	}
+	defer style.free()
+	var native C.RichTableColumnOptions
+	if options.Justify != nil {
+		native.flags |= C.RICH_COLUMN_HAS_JUSTIFY
+		native.justify = C.uint32_t(*options.Justify)
+	}
+	if options.Vertical != nil {
+		native.flags |= C.RICH_COLUMN_HAS_VERTICAL
+		native.vertical = C.uint32_t(*options.Vertical)
+	}
+	if options.Width != nil {
+		native.flags |= C.RICH_COLUMN_HAS_WIDTH
+		native.width = C.uint32_t(*options.Width)
+	}
+	if options.MinWidth != nil {
+		native.flags |= C.RICH_COLUMN_HAS_MIN_WIDTH
+		native.min_width = C.uint32_t(*options.MinWidth)
+	}
+	if options.Ratio != nil {
+		native.flags |= C.RICH_COLUMN_HAS_RATIO
+		native.ratio = C.uint32_t(*options.Ratio)
+	}
+	if options.NoWrap {
+		native.flags |= C.RICH_COLUMN_NO_WRAP
+	}
+	native.style = style.v
+	var headerPointer *C.RichRenderable
+	if !header.isNil() {
+		headerPointer = (*C.RichRenderable)(header.p)
+	}
+	return checkResult(uint32(C.rich_table_add_column_options((*C.RichTable)(h.p), headerPointer, &native)))
+}
 func nativeTableBool(h nativeHandle, which uint8, v bool) error {
 	var r C.RichResult
 	switch which {
@@ -1062,5 +1308,5 @@ func nativeTreeHideRoot(h nativeHandle, v bool) error {
 
 // This exhaustive inventory is compared with the canonical header by tests.
 var nativeSymbolInventory = []string{
-	"rich_ffi_abi_version", "rich_ffi_version", "rich_buffer_free", "rich_console_new", "rich_console_free", "rich_console_set_force_terminal", "rich_console_set_size", "rich_console_set_color_system", "rich_console_set_markup_enabled", "rich_console_set_emoji_enabled", "rich_console_width", "rich_console_render_markup", "rich_console_render", "rich_renderable_free", "rich_text_new", "rich_text_new_markup", "rich_text_set_style", "rich_text_finish", "rich_text_free", "rich_style_parse", "rich_style_free", "rich_syntax_new", "rich_syntax_from_path", "rich_syntax_set_theme", "rich_syntax_set_line_numbers", "rich_syntax_set_word_wrap", "rich_syntax_set_line_range", "rich_syntax_finish", "rich_syntax_free", "rich_markdown_new", "rich_markdown_set_code_theme", "rich_markdown_set_hyperlinks", "rich_markdown_set_justify", "rich_markdown_finish", "rich_markdown_free", "rich_json_new", "rich_json_finish", "rich_json_free", "rich_rule_new", "rich_rule_set_title", "rich_rule_set_characters", "rich_rule_set_style", "rich_rule_set_align", "rich_rule_finish", "rich_rule_free", "rich_columns_new", "rich_columns_add", "rich_columns_add_str", "rich_columns_set_equal", "rich_columns_set_expand", "rich_columns_set_padding", "rich_columns_finish", "rich_columns_free", "rich_align_new", "rich_align_center", "rich_align_set_vertical", "rich_align_set_width", "rich_align_finish", "rich_align_free", "rich_padding_new", "rich_padding_set_style", "rich_padding_set_expand", "rich_padding_finish", "rich_padding_free", "rich_progress_new", "rich_progress_add_task", "rich_progress_update", "rich_progress_render_frame", "rich_progress_free", "rich_status_new", "rich_status_render_frame", "rich_status_free", "rich_spinner_new", "rich_spinner_render_frame", "rich_spinner_free", "rich_panel_new", "rich_panel_set_title", "rich_panel_set_subtitle", "rich_panel_set_box", "rich_panel_set_expand", "rich_panel_set_width", "rich_panel_set_padding", "rich_panel_set_style", "rich_panel_set_border_style", "rich_panel_finish", "rich_panel_free", "rich_table_new", "rich_table_finish", "rich_table_free", "rich_table_set_title", "rich_table_set_caption", "rich_table_set_title_markup", "rich_table_set_caption_markup", "rich_table_set_box", "rich_table_set_show_header", "rich_table_set_show_lines", "rich_table_set_show_edge", "rich_table_set_expand", "rich_table_set_padding", "rich_table_set_style", "rich_table_add_column", "rich_table_add_column_renderable", "rich_table_add_row_strs", "rich_table_add_row_renderables", "rich_tree_new", "rich_tree_new_renderable", "rich_tree_add", "rich_tree_add_renderable", "rich_tree_set_style", "rich_tree_set_guide_style", "rich_tree_set_hide_root", "rich_tree_finish", "rich_tree_free",
+	"rich_ffi_abi_version", "rich_ffi_version", "rich_buffer_free", "rich_console_new", "rich_console_free", "rich_console_set_force_terminal", "rich_console_set_size", "rich_console_set_color_system", "rich_console_set_markup_enabled", "rich_console_set_emoji_enabled", "rich_console_width", "rich_console_render_markup", "rich_console_render", "rich_renderable_free", "rich_text_new", "rich_text_new_markup", "rich_text_set_style", "rich_text_finish", "rich_text_free", "rich_style_parse", "rich_style_free", "rich_syntax_new", "rich_syntax_from_path", "rich_syntax_set_theme", "rich_syntax_set_line_numbers", "rich_syntax_set_word_wrap", "rich_syntax_set_indent_guides", "rich_syntax_set_line_range", "rich_syntax_finish", "rich_syntax_free", "rich_pretty_new", "rich_pretty_set_indent_guides", "rich_pretty_finish", "rich_pretty_free", "rich_markdown_new", "rich_markdown_set_code_theme", "rich_markdown_set_hyperlinks", "rich_markdown_set_justify", "rich_markdown_finish", "rich_markdown_free", "rich_json_new", "rich_json_finish", "rich_json_free", "rich_custom_renderable_new", "rich_segment_sink_push", "rich_segment_sink_line", "rich_rule_new", "rich_rule_set_title", "rich_rule_set_characters", "rich_rule_set_style", "rich_rule_set_align", "rich_rule_finish", "rich_rule_free", "rich_columns_new", "rich_columns_add", "rich_columns_add_str", "rich_columns_set_equal", "rich_columns_set_expand", "rich_columns_set_padding", "rich_columns_finish", "rich_columns_free", "rich_align_new", "rich_align_center", "rich_align_set_vertical", "rich_align_set_width", "rich_align_finish", "rich_align_free", "rich_padding_new", "rich_padding_set_style", "rich_padding_set_expand", "rich_padding_finish", "rich_padding_free", "rich_progress_new", "rich_progress_add_task", "rich_progress_update", "rich_progress_render_frame", "rich_progress_free", "rich_status_new", "rich_status_render_frame", "rich_status_free", "rich_spinner_new", "rich_spinner_render_frame", "rich_spinner_free", "rich_panel_new", "rich_panel_set_title", "rich_panel_set_subtitle", "rich_panel_set_box", "rich_panel_set_expand", "rich_panel_set_width", "rich_panel_set_padding", "rich_panel_set_style", "rich_panel_set_border_style", "rich_panel_finish", "rich_panel_free", "rich_table_new", "rich_table_new_grid", "rich_table_finish", "rich_table_free", "rich_table_set_title", "rich_table_set_caption", "rich_table_set_title_markup", "rich_table_set_caption_markup", "rich_table_set_box", "rich_table_set_pad_edge", "rich_table_set_row_styles", "rich_table_set_show_header", "rich_table_set_show_lines", "rich_table_set_show_edge", "rich_table_set_expand", "rich_table_set_padding", "rich_table_set_style", "rich_table_add_column", "rich_table_add_column_renderable", "rich_table_add_column_options", "rich_table_add_row_strs", "rich_table_add_row_renderables", "rich_tree_new", "rich_tree_new_renderable", "rich_tree_add", "rich_tree_add_renderable", "rich_tree_set_style", "rich_tree_set_guide_style", "rich_tree_set_hide_root", "rich_tree_finish", "rich_tree_free",
 }

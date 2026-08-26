@@ -1,5 +1,5 @@
 use rich_rs::markdown::Markdown;
-use rich_rs::{Json, Syntax};
+use rich_rs::{Json, Pretty, Syntax};
 
 use crate::common::{
     destroy, ffi_call, finish, init_out, justify_from_id, required_mut, rich_str, strict_bool,
@@ -114,6 +114,20 @@ pub extern "C" fn rich_syntax_set_word_wrap(syntax: *mut RichSyntax, enabled: u8
 }
 
 #[unsafe(no_mangle)]
+/// Enable or disable native syntax indentation guides.
+pub extern "C" fn rich_syntax_set_indent_guides(
+    syntax: *mut RichSyntax,
+    enabled: u8,
+) -> RichResult {
+    ffi_call(|| {
+        let enabled = strict_bool(enabled)?;
+        map_builder!(syntax, |syntax: Syntax| syntax.with_indent_guides(enabled))?;
+        crate::trace::event("syntax_indent_guides", None);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rich_syntax_set_line_range(
     syntax: *mut RichSyntax,
     has_start: u8,
@@ -153,6 +167,59 @@ pub extern "C" fn rich_syntax_finish(
 #[unsafe(no_mangle)]
 pub extern "C" fn rich_syntax_free(syntax: *mut RichSyntax) {
     unsafe { destroy(syntax) }
+}
+
+/// Owning native Pretty builder over a copied Debug/repr expression.
+pub struct RichPretty(Option<Pretty>);
+
+#[unsafe(no_mangle)]
+/// Copy a UTF-8 Debug/repr expression and create a native Pretty builder.
+/// Embedded NUL bytes are ordinary data.
+pub extern "C" fn rich_pretty_new(
+    debug_repr: RichStr,
+    out_pretty: *mut *mut RichPretty,
+) -> RichResult {
+    ffi_call(|| {
+        unsafe { init_out(out_pretty)? };
+        let debug_repr = unsafe { rich_str(debug_repr)? };
+        unsafe {
+            *out_pretty = Box::into_raw(Box::new(RichPretty(Some(Pretty::from_str(debug_repr)))))
+        };
+        crate::trace::event("pretty_new", None);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+/// Enable or disable native Pretty indentation guides.
+pub extern "C" fn rich_pretty_set_indent_guides(
+    pretty: *mut RichPretty,
+    enabled: u8,
+) -> RichResult {
+    ffi_call(|| {
+        let enabled = strict_bool(enabled)?;
+        map_builder!(pretty, |pretty: Pretty| pretty.with_indent_guides(enabled))
+    })
+}
+
+#[unsafe(no_mangle)]
+/// Consume a live Pretty builder on success, NULLing `*pretty`, and return an
+/// independently owned reusable renderable.
+pub extern "C" fn rich_pretty_finish(
+    pretty: *mut *mut RichPretty,
+    out_renderable: *mut *mut RichRenderable,
+) -> RichResult {
+    let result = unsafe { finish(pretty, out_renderable, |v| v.0.is_some(), |v| v.0) };
+    if result == crate::RICH_OK {
+        crate::trace::event("pretty_finish", None);
+    }
+    result
+}
+
+#[unsafe(no_mangle)]
+/// Destroy an unfinished Pretty builder. NULL is accepted.
+pub extern "C" fn rich_pretty_free(pretty: *mut RichPretty) {
+    unsafe { destroy(pretty) }
 }
 
 /// Owning Markdown builder over borrowed UTF-8 input copied by Rust. Successful
@@ -281,6 +348,32 @@ mod tests {
         }
     }
 
+    fn render_plain(renderable: *const RichRenderable) -> String {
+        let mut console = ptr::null_mut();
+        assert_eq!(crate::rich_console_new(&mut console), crate::RICH_OK);
+        assert_eq!(
+            crate::rich_console_set_force_terminal(console, 0),
+            crate::RICH_OK
+        );
+        assert_eq!(
+            crate::rich_console_set_size(console, 80, 24),
+            crate::RICH_OK
+        );
+        let mut output = crate::RichBuffer::default();
+        assert_eq!(
+            crate::rich_console_render(console, renderable, &mut output),
+            crate::RICH_OK
+        );
+        let bytes = if output.len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(output.data, output.len as usize) }.to_vec()
+        };
+        crate::rich_buffer_free(&mut output);
+        crate::rich_console_free(console);
+        String::from_utf8(bytes).unwrap()
+    }
+
     #[test]
     fn syntax_path_rejects_embedded_nul_as_argument_error() {
         let mut syntax = ptr::dangling_mut();
@@ -302,5 +395,120 @@ mod tests {
             RICH_ERROR_IO
         );
         assert!(syntax.is_null());
+    }
+
+    #[test]
+    fn syntax_indent_guides_toggle_native_segments() {
+        let code = "if ready:\n    print('yes')";
+        let mut without = ptr::null_mut();
+        assert_eq!(
+            rich_syntax_new(s(code), s("python"), &mut without),
+            crate::RICH_OK
+        );
+        assert_eq!(
+            rich_syntax_set_indent_guides(without, 2),
+            RICH_ERROR_INVALID_ARGUMENT
+        );
+        let mut without_renderable = ptr::null_mut();
+        assert_eq!(
+            rich_syntax_finish(&mut without, &mut without_renderable),
+            crate::RICH_OK
+        );
+
+        let mut with = ptr::null_mut();
+        assert_eq!(
+            rich_syntax_new(s(code), s("python"), &mut with),
+            crate::RICH_OK
+        );
+        assert_eq!(rich_syntax_set_indent_guides(with, 1), crate::RICH_OK);
+        let mut with_renderable = ptr::null_mut();
+        assert_eq!(
+            rich_syntax_finish(&mut with, &mut with_renderable),
+            crate::RICH_OK
+        );
+
+        let plain = render_plain(without_renderable);
+        let guided = render_plain(with_renderable);
+        assert!(!plain.contains('│'));
+        assert!(guided.contains('│'));
+        crate::rich_renderable_free(without_renderable);
+        crate::rich_renderable_free(with_renderable);
+    }
+
+    #[test]
+    fn pretty_finish_state_and_indent_guides() {
+        let repr = "{'outer': {'inner': ['a very long first value', 'a very long second value', 'a very long third value']}, 'tail': (False, True, None)}";
+        let mut plain = ptr::null_mut();
+        assert_eq!(rich_pretty_new(s(repr), &mut plain), crate::RICH_OK);
+        assert_eq!(
+            rich_pretty_set_indent_guides(plain, 2),
+            RICH_ERROR_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            rich_pretty_finish(&mut plain, ptr::null_mut()),
+            crate::RICH_ERROR_NULL_ARGUMENT
+        );
+        assert!(!plain.is_null());
+        let mut plain_renderable = ptr::null_mut();
+        assert_eq!(
+            rich_pretty_finish(&mut plain, &mut plain_renderable),
+            crate::RICH_OK
+        );
+        assert!(plain.is_null());
+
+        let mut guided = ptr::null_mut();
+        assert_eq!(rich_pretty_new(s(repr), &mut guided), crate::RICH_OK);
+        assert_eq!(rich_pretty_set_indent_guides(guided, 1), crate::RICH_OK);
+        let mut guided_renderable = ptr::null_mut();
+        assert_eq!(
+            rich_pretty_finish(&mut guided, &mut guided_renderable),
+            crate::RICH_OK
+        );
+
+        let plain_output = render_plain(plain_renderable);
+        let guided_output = render_plain(guided_renderable);
+        assert!(plain_output.contains("'inner'"));
+        assert!(guided_output.contains('│'));
+        assert_ne!(plain_output, guided_output);
+
+        let mut invalid_output = ptr::dangling_mut();
+        assert_eq!(
+            rich_pretty_finish(&mut plain, &mut invalid_output),
+            RICH_ERROR_INVALID_STATE
+        );
+        assert!(invalid_output.is_null());
+        rich_pretty_free(ptr::null_mut());
+        crate::rich_renderable_free(plain_renderable);
+        crate::rich_renderable_free(guided_renderable);
+    }
+
+    #[test]
+    fn pretty_post_transfer_panic_nulls_builder_and_output() {
+        let mut pretty = ptr::null_mut();
+        assert_eq!(
+            rich_pretty_new(s("Example { value: 1 }"), &mut pretty),
+            crate::RICH_OK
+        );
+        let mut output = ptr::dangling_mut();
+        crate::common::force_next_finish_panic();
+        assert_eq!(
+            rich_pretty_finish(&mut pretty, &mut output),
+            crate::RICH_ERROR_PANIC
+        );
+        assert!(pretty.is_null());
+        assert!(output.is_null());
+    }
+
+    #[test]
+    fn pretty_copies_non_ascii_and_embedded_nul() {
+        let bytes = "{'値': 'a\0b'}".as_bytes();
+        let input = RichStr {
+            data: bytes.as_ptr(),
+            len: bytes.len() as u64,
+        };
+        let mut pretty = ptr::dangling_mut();
+        assert_eq!(rich_pretty_new(input, &mut pretty), crate::RICH_OK);
+        assert!(!pretty.is_null());
+        rich_pretty_free(pretty);
     }
 }

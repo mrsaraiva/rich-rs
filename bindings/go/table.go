@@ -5,9 +5,18 @@ package rich
 type Table struct{ state *ownerState }
 
 func NewTable() (*Table, error) {
-	h, e := nativeNew(hTable)
+	h, e := nativeTableNew(false)
 	if e != nil {
 		return nil, e
+	}
+	return &Table{state: newOwnerState(hTable, h)}, nil
+}
+
+// NewGridTable creates the exact native Table::grid defaults.
+func NewGridTable() (*Table, error) {
+	h, err := nativeTableNew(true)
+	if err != nil {
+		return nil, err
 	}
 	return &Table{state: newOwnerState(hTable, h)}, nil
 }
@@ -52,6 +61,18 @@ func (t *Table) SetBox(v BoxStyle) error {
 		return ErrInvalidState
 	}
 	return withOwner(t.state, func(h nativeHandle) error { return nativeTableBox(h, v) })
+}
+func (t *Table) SetPadEdge(v bool) error {
+	if t == nil {
+		return ErrInvalidState
+	}
+	return withOwner(t.state, func(h nativeHandle) error { return nativeTablePadEdge(h, v) })
+}
+func (t *Table) SetRowStyles(styles ...string) error {
+	if t == nil {
+		return ErrInvalidState
+	}
+	return withOwner(t.state, func(h nativeHandle) error { return nativeTableRowStyles(h, styles) })
 }
 func (t *Table) SetShowHeader(v bool) error {
 	if t == nil {
@@ -100,6 +121,22 @@ func (t *Table) AddColumnRenderable(header *Renderable) error {
 		return ErrInvalidState
 	}
 	return withOwners(t.state, header.state, nativeTableColumnRenderable)
+}
+
+// AddColumnOptions validates and adds one configured column atomically. Header
+// may be nil and remains independently reusable when non-nil.
+func (t *Table) AddColumnOptions(header *Renderable, options ColumnOptions) error {
+	if t == nil {
+		return ErrInvalidState
+	}
+	if header == nil {
+		return withOwner(t.state, func(h nativeHandle) error {
+			return nativeTableColumnOptions(h, nativeHandle{}, options)
+		})
+	}
+	return withOwners(t.state, header.state, func(table, renderable nativeHandle) error {
+		return nativeTableColumnOptions(table, renderable, options)
+	})
 }
 func (t *Table) AddRow(cells ...string) error {
 	if t == nil {

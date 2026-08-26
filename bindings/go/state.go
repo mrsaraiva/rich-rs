@@ -17,6 +17,7 @@ const (
 	hText
 	hStyle
 	hSyntax
+	hPretty
 	hMarkdown
 	hJSON
 	hRule
@@ -39,6 +40,9 @@ type ownerState struct {
 }
 
 func withOwnerSet(states []*ownerState, f func([]nativeHandle) error) error {
+	if nativeInCallback() {
+		return ErrInvalidState
+	}
 	if len(states) == 0 {
 		return f(nil)
 	}
@@ -90,6 +94,9 @@ func closeOwnerState(s *ownerState) {
 	if s == nil {
 		return
 	}
+	if nativeInCallback() {
+		return
+	}
 	s.mu.Lock()
 	h := s.h
 	s.h = nativeHandle{}
@@ -103,6 +110,9 @@ func closeOwner(s *ownerState) error {
 	if s == nil {
 		return nil
 	}
+	if nativeInCallback() {
+		return ErrInvalidState
+	}
 	runtime.SetFinalizer(s, nil)
 	closeOwnerState(s)
 	runtime.KeepAlive(s)
@@ -110,6 +120,9 @@ func closeOwner(s *ownerState) error {
 }
 
 func withOwner(s *ownerState, f func(nativeHandle) error) error {
+	if nativeInCallback() {
+		return ErrInvalidState
+	}
 	if s == nil {
 		return ErrInvalidState
 	}
@@ -124,6 +137,9 @@ func withOwner(s *ownerState, f func(nativeHandle) error) error {
 }
 
 func withOwners(a, b *ownerState, f func(nativeHandle, nativeHandle) error) error {
+	if nativeInCallback() {
+		return ErrInvalidState
+	}
 	if a == nil || b == nil {
 		return ErrInvalidState
 	}
@@ -162,6 +178,9 @@ func withOwners(a, b *ownerState, f func(nativeHandle, nativeHandle) error) erro
 }
 
 func finishOwner(s *ownerState) (*Renderable, error) {
+	if nativeInCallback() {
+		return nil, ErrInvalidState
+	}
 	if s == nil {
 		return nil, ErrInvalidState
 	}

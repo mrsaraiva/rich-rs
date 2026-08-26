@@ -4,14 +4,15 @@
 //!
 //! This demonstrates the major features of rich-rs, mirroring the Python Rich demo.
 
-use std::io::Stdout;
+use std::io::{self, Stdout, Write};
 use std::time::Instant;
 
 use rich_rs::r#box::SIMPLE;
 use rich_rs::markdown::Markdown;
 use rich_rs::{
-    Column, Console, ConsoleOptions, JustifyMethod, Measurement, Panel, Pretty, Renderable, Row,
-    Segment, Segments, SimpleColor, Style, Syntax, Table, Text, VerticalAlignMethod,
+    ColorSystem, Column, Console, ConsoleOptions, JustifyMethod, Measurement, Panel, Pretty,
+    Renderable, Row, Segment, Segments, SimpleColor, Style, Syntax, Table, Text,
+    VerticalAlignMethod,
 };
 
 // ============================================================================
@@ -488,37 +489,35 @@ Supports much of the *markdown* __syntax__!
 // Main Entry Point
 // ============================================================================
 
-fn main() {
-    // Build the test card
-    let test_card = make_test_card();
-
-    // Time two renders off-screen, similar to the upstream Python demo.
-    let options = ConsoleOptions::from_terminal();
-    let mut measure_console = Console::<Vec<u8>>::capture_with_options(ConsoleOptions {
-        is_terminal: true,
-        ..options.clone()
-    });
-    measure_console.set_force_terminal(Some(true));
-
+fn measure_card(test_card: &Table, measure_console: &mut Console<Vec<u8>>) -> (f64, f64) {
     let start = Instant::now();
-    let _ = measure_console.print(&test_card, None, None, None, false, "");
-    let cold_time = start.elapsed();
+    measure_console
+        .print(test_card, None, None, None, false, "")
+        .expect("cold demo render failed");
+    let cold_time = start.elapsed().as_secs_f64() * 1000.0;
 
     measure_console.clear_captured();
     let start = Instant::now();
-    let _ = measure_console.print(&test_card, None, None, None, false, "");
-    let warm_time = start.elapsed();
+    measure_console
+        .print(test_card, None, None, None, false, "")
+        .expect("warm demo render failed");
+    let warm_time = start.elapsed().as_secs_f64() * 1000.0;
+    (cold_time, warm_time)
+}
 
-    // Print to stdout once
-    let mut console = Console::new();
-    let _ = console.print(&test_card, None, None, None, false, "");
+fn render_output<W: Write>(
+    console: &mut Console<W>,
+    test_card: &Table,
+    cold_ms: f64,
+    warm_ms: f64,
+) -> io::Result<()> {
+    console.print(test_card, None, None, None, false, "")?;
 
-    // Print timing info
-    let _ = console.line(1);
+    console.line(1)?;
     let timing_cold = Text::from_markup(
         &format!(
             "[dim]rendered in [not dim][cyan]{:.1}[/cyan]ms[/] (cold cache)",
-            cold_time.as_secs_f64() * 1000.0
+            cold_ms
         ),
         false,
     )
@@ -526,15 +525,15 @@ fn main() {
     let timing_warm = Text::from_markup(
         &format!(
             "[dim]rendered in [not dim][cyan]{:.1}[/cyan]ms[/] (warm cache)",
-            warm_time.as_secs_f64() * 1000.0
+            warm_ms
         ),
         false,
     )
     .unwrap();
 
-    let _ = console.print(&timing_cold, None, None, None, false, "\n");
-    let _ = console.print(&timing_warm, None, None, None, false, "\n");
-    let _ = console.line(1);
+    console.print(&timing_cold, None, None, None, false, "\n")?;
+    console.print(&timing_warm, None, None, None, false, "\n")?;
+    console.line(1)?;
 
     // "Help ensure Rich is maintained" panel (matches Python Rich demo output).
     let sponsor_body = Text::from_markup(
@@ -551,5 +550,43 @@ Consider sponsoring the upstream port to ensure it's maintained.\n\n\
         .with_border_style(Style::parse("green").unwrap_or_else(Style::new))
         .with_padding((1, 2));
 
-    let _ = console.print(&sponsor_panel, None, None, None, false, "\n");
+    console.print(&sponsor_panel, None, None, None, false, "\n")
+}
+
+fn parity_console() -> Console<Vec<u8>> {
+    let mut console = Console::capture();
+    console.set_size(120, 72);
+    console.set_force_terminal(Some(true));
+    console.set_color_system(Some(ColorSystem::TrueColor));
+    console.set_markup_enabled(true);
+    console.set_emoji_enabled(true);
+    console.set_encoding("utf-8");
+    console
+}
+
+fn main() {
+    let parity = std::env::args().skip(1).any(|arg| arg == "--parity");
+    let test_card = make_test_card();
+
+    if parity {
+        let mut measure_console = parity_console();
+        let (cold_ms, warm_ms) = measure_card(&test_card, &mut measure_console);
+        let mut output_console = parity_console();
+        render_output(&mut output_console, &test_card, cold_ms, warm_ms)
+            .expect("parity demo output failed");
+        io::stdout()
+            .write_all(output_console.get_captured_bytes())
+            .expect("writing parity demo stdout failed");
+    } else {
+        let options = ConsoleOptions::from_terminal();
+        let mut measure_console = Console::<Vec<u8>>::capture_with_options(ConsoleOptions {
+            is_terminal: true,
+            ..options
+        });
+        measure_console.set_force_terminal(Some(true));
+        let (cold_ms, warm_ms) = measure_card(&test_card, &mut measure_console);
+        let mut console = Console::new();
+        render_output(&mut console, &test_card, cold_ms, warm_ms)
+            .expect("interactive demo output failed");
+    }
 }

@@ -11,7 +11,7 @@ const rich = require('..');
 test('ABI, package version, layouts, and stable result mapping', () => {
   assert.doesNotThrow(() => rich.ensureAbi());
   assert.equal(rich.version(), '1.2.2');
-  assert.equal(rich._testing.constants.ABI_VERSION, 1);
+  assert.equal(rich._testing.constants.ABI_VERSION, 2);
   assert.equal(rich._testing.constants.RESULT_SIZE, 4);
   assert.ok(rich._testing.constants.STR_SIZE >= 16);
   assert.equal(rich._testing.constants.STR_SIZE, rich._testing.constants.BUFFER_SIZE);
@@ -161,7 +161,7 @@ test('finish reconciles the complete input/output/result ownership matrix', () =
   assert.equal(rich._testing.handle('stats'), beforeReuse);
 });
 
-test('compiled inventory exactly accounts for all 113 canonical functions', () => {
+test('compiled inventory exactly accounts for all 125 canonical functions', () => {
   const header = fs.readFileSync(path.resolve(__dirname, '../../../ffi/include/rich.h'), 'utf8');
   const inventory = fs.readFileSync(path.resolve(__dirname, '../src/native_symbols.inc'), 'utf8');
   const declarations = [
@@ -170,6 +170,6 @@ test('compiled inventory exactly accounts for all 113 canonical functions', () =
   const projected = [...inventory.matchAll(/RICH_NATIVE_SYMBOL\((rich_[a-z0-9_]+)\)/g)].map(
     (match) => match[1],
   );
-  assert.equal(declarations.length, 113);
+  assert.equal(declarations.length, 125);
   assert.deepEqual(projected.sort(), declarations.sort());
 });

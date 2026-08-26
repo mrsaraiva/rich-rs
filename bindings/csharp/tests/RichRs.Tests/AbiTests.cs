@@ -9,7 +9,7 @@ public sealed class AbiTests
     public void MetadataAndLayoutsMatchNativeContract()
     {
         RichRuntime.EnsureAbi();
-        Assert.Equal(1U, RichRuntime.AbiVersion);
+        Assert.Equal(2U, RichRuntime.AbiVersion);
         Assert.Equal("1.2.2", RichRuntime.Version);
         Assert.Equal(new Version(1, 2, 2, 0), typeof(RichRuntime).Assembly.GetName().Version);
         Assert.Equal(new JsonOptions(2, true, false), new JsonOptions());
@@ -19,6 +19,31 @@ public sealed class AbiTests
         Assert.Equal(IntPtr.Size, Marshal.OffsetOf<NativeRichStr>(nameof(NativeRichStr.Length)).ToInt32());
         Assert.Equal(0, Marshal.OffsetOf<NativeRichBuffer>(nameof(NativeRichBuffer.Data)).ToInt32());
         Assert.Equal(IntPtr.Size, Marshal.OffsetOf<NativeRichBuffer>(nameof(NativeRichBuffer.Length)).ToInt32());
+        Assert.Equal(24, Marshal.SizeOf<NativeRichRenderOptions>());
+        Assert.Equal(0, Marshal.OffsetOf<NativeRichRenderOptions>(nameof(NativeRichRenderOptions.MinWidth)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<NativeRichRenderOptions>(nameof(NativeRichRenderOptions.MaxWidth)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<NativeRichRenderOptions>(nameof(NativeRichRenderOptions.MaxHeight)).ToInt32());
+        Assert.Equal(12, Marshal.OffsetOf<NativeRichRenderOptions>(nameof(NativeRichRenderOptions.ColorSystem)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<NativeRichRenderOptions>(nameof(NativeRichRenderOptions.IsTerminal)).ToInt32());
+        Assert.Equal(8, Marshal.SizeOf<NativeRichMeasurement>());
+        Assert.Equal(0, Marshal.OffsetOf<NativeRichMeasurement>(nameof(NativeRichMeasurement.Minimum)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<NativeRichMeasurement>(nameof(NativeRichMeasurement.Maximum)).ToInt32());
+        Assert.Equal(IntPtr.Size * 3, Marshal.SizeOf<NativeRichCustomRenderableVTable>());
+        Assert.Equal(0, Marshal.OffsetOf<NativeRichCustomRenderableVTable>(nameof(NativeRichCustomRenderableVTable.Render)).ToInt32());
+        Assert.Equal(IntPtr.Size, Marshal.OffsetOf<NativeRichCustomRenderableVTable>(nameof(NativeRichCustomRenderableVTable.Measure)).ToInt32());
+        Assert.Equal(IntPtr.Size * 2, Marshal.OffsetOf<NativeRichCustomRenderableVTable>(nameof(NativeRichCustomRenderableVTable.Drop)).ToInt32());
+        Assert.Equal(24 + IntPtr.Size + sizeof(ulong), Marshal.SizeOf<NativeRichTableColumnOptions>());
+        Assert.Equal(0, Marshal.OffsetOf<NativeRichTableColumnOptions>(nameof(NativeRichTableColumnOptions.Flags)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<NativeRichTableColumnOptions>(nameof(NativeRichTableColumnOptions.Justify)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<NativeRichTableColumnOptions>(nameof(NativeRichTableColumnOptions.Vertical)).ToInt32());
+        Assert.Equal(12, Marshal.OffsetOf<NativeRichTableColumnOptions>(nameof(NativeRichTableColumnOptions.Width)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<NativeRichTableColumnOptions>(nameof(NativeRichTableColumnOptions.MinWidth)).ToInt32());
+        Assert.Equal(20, Marshal.OffsetOf<NativeRichTableColumnOptions>(nameof(NativeRichTableColumnOptions.Ratio)).ToInt32());
+        Assert.Equal(24, Marshal.OffsetOf<NativeRichTableColumnOptions>(nameof(NativeRichTableColumnOptions.Style)).ToInt32());
+        Assert.Equal([1U, 2U, 4U, 8U, 16U, 32U], [NativeColumnFlags.HasJustify,
+            NativeColumnFlags.HasVertical, NativeColumnFlags.HasWidth, NativeColumnFlags.HasMinimumWidth,
+            NativeColumnFlags.HasRatio, NativeColumnFlags.NoWrap]);
+        Assert.Equal(14U, (uint)Box.None);
         Assert.True(IntPtr.Size is 4 or 8);
     }
 
@@ -37,11 +62,11 @@ public sealed class AbiTests
     }
 
     [Fact]
-    public void All113HeaderFunctionsAreProjectedAndExported()
+    public void All125HeaderFunctionsAreProjectedAndExported()
     {
         HashSet<string> header = TestSupport.HeaderSymbols();
         HashSet<string> projected = TestSupport.ProjectedSymbols();
-        Assert.Equal(113, header.Count);
+        Assert.Equal(125, header.Count);
         Assert.Equal(header.Order(), projected.Order());
 
         string nativePath = Environment.GetEnvironmentVariable(NativeLibraryResolver.OverrideVariable)

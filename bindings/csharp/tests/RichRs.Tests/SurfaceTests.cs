@@ -28,7 +28,7 @@ public sealed class SurfaceTests
         table.SetCaption("caption");
         table.SetTitleMarkup(console, "[bold]markup title[/]");
         table.SetCaptionMarkup(console, "[italic]markup caption[/]");
-        table.Box = BoxStyle.Square;
+        table.Box = Box.Square;
         table.ShowHeader = true;
         table.ShowLines = true;
         table.ShowEdge = true;
@@ -46,7 +46,7 @@ public sealed class SurfaceTests
         using Panel panel = new(tableRenderable);
         panel.SetTitle("Panel");
         panel.SetSubtitle("subtitle");
-        panel.Box = BoxStyle.Rounded;
+        panel.Box = Box.Rounded;
         panel.Expand = false;
         panel.Width = 50;
         panel.SetPadding(0, 1, 0, 1);

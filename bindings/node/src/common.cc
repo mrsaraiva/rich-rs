@@ -19,6 +19,10 @@ constexpr auto MakeOwnerTags() {
 
 constexpr auto kOwnerTags = MakeOwnerTags();
 
+thread_local bool g_in_custom_callback = false;
+thread_local napi_env g_pending_exception_env = nullptr;
+thread_local napi_ref g_pending_exception = nullptr;
+
 const napi_type_tag* OwnerTag(OwnerKind kind) { return &kOwnerTags.at(KindIndex(kind)); }
 
 void FinalizeOwner(napi_env, void* data, void*) {
@@ -53,7 +57,19 @@ static_assert(offsetof(RichStr, data) == 0);
 static_assert(offsetof(RichStr, len) == sizeof(void*));
 static_assert(offsetof(RichBuffer, data) == 0);
 static_assert(offsetof(RichBuffer, len) == sizeof(void*));
-static_assert(RICH_FFI_ABI_VERSION == 1);
+static_assert(sizeof(RichRenderOptions) == 24);
+static_assert(offsetof(RichRenderOptions, reserved) == 17);
+static_assert(sizeof(RichMeasurement) == 8);
+static_assert(sizeof(RichTableColumnOptions) == 40);
+static_assert(offsetof(RichTableColumnOptions, style) == 24);
+static_assert(RICH_FFI_ABI_VERSION == 2);
+static_assert(RICH_BOX_NONE == 14);
+static_assert(RICH_COLUMN_HAS_JUSTIFY == (1 << 0));
+static_assert(RICH_COLUMN_HAS_VERTICAL == (1 << 1));
+static_assert(RICH_COLUMN_HAS_WIDTH == (1 << 2));
+static_assert(RICH_COLUMN_HAS_MIN_WIDTH == (1 << 3));
+static_assert(RICH_COLUMN_HAS_RATIO == (1 << 4));
+static_assert(RICH_COLUMN_NO_WRAP == (1 << 5));
 static_assert(RICH_OK == 0);
 static_assert(RICH_ERROR_PANIC == 7);
 
@@ -67,6 +83,9 @@ AddonData::~AddonData() {
   }
   secret.Reset();
   rich_error.Reset();
+  render_options_constructor.Reset();
+  measurement_constructor.Reset();
+  segment_sink_constructor.Reset();
 }
 
 Utf8Arg::Utf8Arg(const Napi::Value& value, std::string_view operation) {
@@ -148,9 +167,9 @@ AddonData* Data(Napi::Env env) {
 std::size_t KindIndex(OwnerKind kind) { return static_cast<std::size_t>(kind); }
 
 const char* KindName(OwnerKind kind) {
-  constexpr std::array names{"Console",  "Renderable", "Text",     "Style",  "Table",   "Panel",
-                             "Tree",     "Rule",       "Columns",  "Align",  "Padding", "Syntax",
-                             "Markdown", "Json",       "Progress", "Status", "Spinner"};
+  constexpr std::array names{"Console", "Renderable", "Text",    "Style",    "Table",   "Panel",
+                             "Tree",    "Rule",       "Columns", "Align",    "Padding", "Syntax",
+                             "Pretty",  "Markdown",   "Json",    "Progress", "Status",  "Spinner"};
   return names.at(KindIndex(kind));
 }
 
@@ -165,12 +184,72 @@ void EnsureConstructCall(const Napi::CallbackInfo& info, std::string_view name) 
 }
 
 void EnsureAbi(Napi::Env env) {
+  EnsureOrdinaryCallAllowed(env, "ensureAbi");
   const std::uint32_t loaded = rich_ffi_abi_version();
   if (loaded != RICH_FFI_ABI_VERSION) {
     std::ostringstream detail;
     detail << "compiled ABI " << RICH_FFI_ABI_VERSION << ", loaded ABI " << loaded;
     ThrowRich(env, kAbiMismatch, "ensureAbi", detail.str());
   }
+}
+
+void EnsureOrdinaryCallAllowed(Napi::Env env, std::string_view operation) {
+  if (g_in_custom_callback) {
+    ThrowRich(env, RICH_ERROR_INVALID_STATE, operation,
+              "operation is not allowed during a custom-renderable callback");
+  }
+}
+
+bool InCustomCallback() { return g_in_custom_callback; }
+
+void EnterCustomCallback() { g_in_custom_callback = true; }
+
+void LeaveCustomCallback() { g_in_custom_callback = false; }
+
+void RecordPendingException(napi_env env, napi_value exception) noexcept {
+  if (g_pending_exception != nullptr || exception == nullptr) {
+    return;
+  }
+  napi_ref reference = nullptr;
+  if (napi_create_reference(env, exception, 1, &reference) == napi_ok) {
+    g_pending_exception_env = env;
+    g_pending_exception = reference;
+  }
+}
+
+void RecordPendingError(napi_env env, const char* message) noexcept {
+  napi_value text = nullptr;
+  napi_value error = nullptr;
+  if (napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &text) == napi_ok &&
+      napi_create_error(env, nullptr, text, &error) == napi_ok) {
+    RecordPendingException(env, error);
+  }
+}
+
+bool RestorePendingException(napi_env env) noexcept {
+  if (g_pending_exception == nullptr) {
+    return false;
+  }
+  napi_ref reference = g_pending_exception;
+  napi_env exception_env = g_pending_exception_env;
+  g_pending_exception = nullptr;
+  g_pending_exception_env = nullptr;
+  if (exception_env != env) {
+    if (exception_env != nullptr) {
+      napi_delete_reference(exception_env, reference);
+    }
+    napi_throw_error(env, nullptr, "custom-renderable exception belongs to another environment");
+    return true;
+  }
+  napi_value exception = nullptr;
+  const napi_status get_status = napi_get_reference_value(env, reference, &exception);
+  napi_delete_reference(env, reference);
+  if (get_status != napi_ok || exception == nullptr) {
+    napi_throw_error(env, nullptr, "failed to restore custom-renderable exception");
+    return true;
+  }
+  napi_throw(env, exception);
+  return true;
 }
 
 void CheckResult(Napi::Env env, RichResult result, std::string_view operation) {
@@ -272,6 +351,7 @@ void RejectUnknownKeys(const Napi::Object& object, std::initializer_list<std::st
 
 Owner* UnwrapOwner(Napi::Env env, const Napi::Value& value, OwnerKind expected,
                    std::string_view operation, bool require_open) {
+  EnsureOrdinaryCallAllowed(env, operation);
   if (!value.IsObject()) {
     ThrowType(env, Message(operation, std::string("expected ") + KindName(expected)));
   }
@@ -367,6 +447,8 @@ void (*FreeFunction(OwnerKind kind))(void*) {
     return FreeErased<RichPadding, rich_padding_free>;
   case OwnerKind::Syntax:
     return FreeErased<RichSyntax, rich_syntax_free>;
+  case OwnerKind::Pretty:
+    return FreeErased<RichPretty, rich_pretty_free>;
   case OwnerKind::Markdown:
     return FreeErased<RichMarkdown, rich_markdown_free>;
   case OwnerKind::Json:

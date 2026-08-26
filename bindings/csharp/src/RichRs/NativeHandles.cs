@@ -23,6 +23,7 @@ internal sealed class RenderableHandle : NativeSafeHandle { protected override v
 internal sealed class TextHandle : NativeSafeHandle { protected override void Free(nint value) => NativeMethods.TextFree(value); }
 internal sealed class StyleHandle : NativeSafeHandle { protected override void Free(nint value) => NativeMethods.StyleFree(value); }
 internal sealed class SyntaxHandle : NativeSafeHandle { protected override void Free(nint value) => NativeMethods.SyntaxFree(value); }
+internal sealed class PrettyHandle : NativeSafeHandle { protected override void Free(nint value) => NativeMethods.PrettyFree(value); }
 internal sealed class MarkdownHandle : NativeSafeHandle { protected override void Free(nint value) => NativeMethods.MarkdownFree(value); }
 internal sealed class JsonHandle : NativeSafeHandle { protected override void Free(nint value) => NativeMethods.JsonFree(value); }
 internal sealed class RuleHandle : NativeSafeHandle { protected override void Free(nint value) => NativeMethods.RuleFree(value); }

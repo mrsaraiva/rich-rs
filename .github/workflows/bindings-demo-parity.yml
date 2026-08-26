@@ -1,0 +1,88 @@
+name: binding demo parity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "examples/demo.rs"
+      - "ffi/**"
+      - "bindings/**"
+      - "tests/demo-parity/**"
+      - "tests/golden/demo-120-truecolor.ansi"
+      - "docs/devel/BINDINGS_DEMO_PARITY_SPEC.md"
+      - ".github/workflows/bindings-demo-parity.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "examples/demo.rs"
+      - "ffi/**"
+      - "bindings/**"
+      - "tests/demo-parity/**"
+      - "tests/golden/demo-120-truecolor.ansi"
+      - "docs/devel/BINDINGS_DEMO_PARITY_SPEC.md"
+      - ".github/workflows/bindings-demo-parity.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: ABI v2 canonical demos (x86_64 Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+      RICH_PARITY_EVIDENCE_DIR: ${{ runner.temp }}/binding-demo-parity-evidence
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.0"
+          cache-dependency-path: bindings/go/go.mod
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: bindings/csharp/**/packages.lock.json
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
+
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3
+
+      - name: Restore pinned foreign dependencies
+        run: |
+          dotnet restore bindings/csharp/RichRs.sln --locked-mode
+          npm ci --prefix bindings/node --ignore-scripts --no-audit --no-fund
+
+      - name: Verify all canonical demos and feature traces
+        run: bash tests/demo-parity/run.sh
+
+      - name: Upload parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: binding-demo-parity-evidence
+          path: ${{ runner.temp }}/binding-demo-parity-evidence
+          if-no-files-found: warn

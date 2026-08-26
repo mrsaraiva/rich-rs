@@ -23,6 +23,167 @@ fn textRenderable(value: []const u8, style: ?[]const u8) !rich.Renderable {
     return text.finish();
 }
 
+fn renderColumnProbe(
+    allocator: std.mem.Allocator,
+    console: *rich.Console,
+    options: rich.ColumnOptions,
+    expand: bool,
+) ![]u8 {
+    var table = try rich.Table.initGrid();
+    defer table.deinit();
+    try table.setPadEdge(false);
+    try table.setExpand(expand);
+    try table.addColumnOptions(null, options);
+    try table.addColumnOptions(null, .{ .ratio = 1 });
+    const cells = [_][]const u8{ "alpha beta gamma\nlast", "one\ntwo\nthree" };
+    try table.addRowStrings(allocator, &cells);
+    var renderable = try table.finish();
+    defer renderable.deinit();
+    return console.render(allocator, &renderable);
+}
+
+fn renderPadEdgeProbe(
+    allocator: std.mem.Allocator,
+    console: *rich.Console,
+    pad_edge: bool,
+) ![]u8 {
+    var table = try rich.Table.initGrid();
+    defer table.deinit();
+    try table.setPadEdge(pad_edge);
+    try table.setExpand(false);
+    try table.setPadding(1, 1);
+    try table.addColumnOptions(null, .{ .width = 8 });
+    try table.addRowStrings(allocator, &.{"edge"});
+    var renderable = try table.finish();
+    defer renderable.deinit();
+    return console.render(allocator, &renderable);
+}
+
+fn renderBoxProbe(
+    allocator: std.mem.Allocator,
+    console: *rich.Console,
+    box: rich.Box,
+) ![]u8 {
+    var table = try rich.Table.init();
+    defer table.deinit();
+    try table.setShowHeader(false);
+    try table.setExpand(false);
+    try table.setBox(box);
+    try table.addColumnOptions(null, .{ .width = 8 });
+    try table.addRowStrings(allocator, &.{"box"});
+    var renderable = try table.finish();
+    defer renderable.deinit();
+    return console.render(allocator, &renderable);
+}
+
+const RowStyleProbe = enum { none, red, green, replace, clear };
+
+fn renderRowStyleProbe(
+    allocator: std.mem.Allocator,
+    console: *rich.Console,
+    mode: RowStyleProbe,
+) ![]u8 {
+    var table = try rich.Table.initGrid();
+    defer table.deinit();
+    try table.setPadEdge(false);
+    try table.setExpand(false);
+    switch (mode) {
+        .none => {},
+        .red => try table.setRowStyles(allocator, &.{"red"}),
+        .green => try table.setRowStyles(allocator, &.{"green"}),
+        .replace => {
+            try table.setRowStyles(allocator, &.{"red"});
+            try table.setRowStyles(allocator, &.{"green"});
+        },
+        .clear => {
+            try table.setRowStyles(allocator, &.{"red"});
+            try table.setRowStyles(allocator, &.{});
+        },
+    }
+    try table.addColumnOptions(null, .{ .width = 12 });
+    try table.addRowStrings(allocator, &.{"row style"});
+    var renderable = try table.finish();
+    defer renderable.deinit();
+    return console.render(allocator, &renderable);
+}
+
+const CallbackProbe = struct {
+    render_count: usize = 0,
+    measure_count: usize = 0,
+    drop_count: usize = 0,
+    last_width: u32 = 0,
+    height: u32 = 1,
+    retained_sink: ?*rich.SegmentSink = null,
+    prior_sink_rejected: bool = false,
+    console: ?*rich.Console = null,
+    reentry_rejected: bool = false,
+};
+
+fn probeRender(
+    context: ?*anyopaque,
+    options: rich.RenderOptions,
+    sink: *rich.SegmentSink,
+) !void {
+    const probe: *CallbackProbe = @ptrCast(@alignCast(context.?));
+    probe.render_count += 1;
+    probe.last_width = options.max_width;
+    if (probe.retained_sink) |prior| {
+        _ = prior.line() catch |failure| {
+            probe.prior_sink_rejected = failure == error.InvalidState;
+        };
+    }
+    probe.retained_sink = sink;
+    if (probe.console) |console| {
+        _ = console.width() catch |failure| {
+            probe.reentry_rejected = failure == error.InvalidState;
+        };
+    }
+    for (0..probe.height) |_| {
+        for (0..options.max_width) |_| try sink.push("▄", "rgb(255,0,0)");
+        try sink.line();
+    }
+}
+
+fn probeMeasure(context: ?*anyopaque, options: rich.RenderOptions) !rich.Measurement {
+    const probe: *CallbackProbe = @ptrCast(@alignCast(context.?));
+    probe.measure_count += 1;
+    probe.last_width = options.max_width;
+    return .{ .minimum = 1, .maximum = options.max_width };
+}
+
+fn probeDrop(context: ?*anyopaque) void {
+    const probe: *CallbackProbe = @ptrCast(@alignCast(context.?));
+    probe.drop_count += 1;
+}
+
+fn failingRender(
+    context: ?*anyopaque,
+    options: rich.RenderOptions,
+    sink: *rich.SegmentSink,
+) !void {
+    _ = context;
+    _ = options;
+    try sink.push("partial", "red");
+    return error.InvalidArgument;
+}
+
+fn defaultRender(
+    context: ?*anyopaque,
+    options: rich.RenderOptions,
+    sink: *rich.SegmentSink,
+) !void {
+    _ = context;
+    _ = options;
+    try sink.push("default measurement", "cyan");
+    try sink.line();
+}
+
+fn malformedMeasure(context: ?*anyopaque, options: rich.RenderOptions) !rich.Measurement {
+    _ = context;
+    _ = options;
+    return .{ .minimum = 2, .maximum = 1 };
+}
+
 test "ABI metadata, exact errors, strings, and buffers" {
     try rich.ensureAbi();
     try rich.check(rich.raw.RICH_OK);
@@ -219,6 +380,10 @@ test "every owning type has idempotent deinit" {
 
     var syntax = try rich.Syntax.init("x", "text");
     syntax.deinit();
+
+    var pretty = try rich.Pretty.init("{'x': [1, 2]}");
+    pretty.deinit();
+    pretty.deinit();
     syntax.deinit();
 
     var markdown = try rich.Markdown.init("text");
@@ -240,6 +405,428 @@ test "every owning type has idempotent deinit" {
     var spinner = try rich.Spinner.init("dots");
     spinner.deinit();
     spinner.deinit();
+}
+
+test "ABI v2 table options, Pretty, and syntax guides are native features" {
+    try std.testing.expectEqual(@as(u32, 2), rich.raw.RICH_FFI_ABI_VERSION);
+    try std.testing.expectEqual(@as(u32, 14), rich.raw.RICH_BOX_NONE);
+    try std.testing.expectEqual(@as(usize, 24), @sizeOf(rich.raw.RichRenderOptions));
+    try std.testing.expectEqual(@as(usize, 40), @sizeOf(rich.raw.RichTableColumnOptions));
+
+    const allocator = std.testing.allocator;
+    var console = try plainConsole();
+    defer console.deinit();
+    try console.setSize(48, 24);
+
+    var header = try textRenderable("Header", "bold cyan");
+    defer header.deinit();
+    var left = try textRenderable("left value wraps here", "green");
+    defer left.deinit();
+    var right = try textRenderable("42", "magenta");
+    defer right.deinit();
+
+    var table = try rich.Table.initGrid();
+    defer table.deinit();
+    try table.setBox(.none);
+    try table.setPadEdge(false);
+    try table.setRowStyles(allocator, &.{ "", "dim" });
+    try table.addColumnOptions(&header, .{
+        .justify = .left,
+        .vertical = .top,
+        .ratio = 1,
+        .style = "green",
+    });
+    try table.addColumnOptions(null, .{
+        .justify = .right,
+        .min_width = 8,
+        .no_wrap = true,
+        .style = "magenta",
+    });
+    const row = [_]*const rich.Renderable{ &left, &right };
+    try table.addRowRenderables(allocator, &row);
+    var table_renderable = try table.finish();
+    defer table_renderable.deinit();
+    const table_output = try console.render(allocator, &table_renderable);
+    defer allocator.free(table_output);
+    try std.testing.expect(std.mem.indexOf(u8, table_output, "Header") == null);
+    try std.testing.expect(std.mem.indexOf(u8, table_output, "left value") != null);
+
+    var invalid = try rich.Table.initGrid();
+    defer invalid.deinit();
+    try std.testing.expectError(
+        error.InvalidArgument,
+        invalid.addColumnOptions(null, .{ .ratio = 0 }),
+    );
+    try invalid.addColumnOptions(null, .{});
+
+    try console.setSize(32, 24);
+    const repr = "{'foo': [3.1427, ('Paul Atreides', 'Thufir Hawat')], 'atomic': (False, None)}";
+    var pretty_plain = try rich.Pretty.init(repr);
+    defer pretty_plain.deinit();
+    var pretty_plain_renderable = try pretty_plain.finish();
+    defer pretty_plain_renderable.deinit();
+    var pretty_guided = try rich.Pretty.init(repr);
+    defer pretty_guided.deinit();
+    try pretty_guided.setIndentGuides(true);
+    var pretty_guided_renderable = try pretty_guided.finish();
+    defer pretty_guided_renderable.deinit();
+    const pretty_without = try console.render(allocator, &pretty_plain_renderable);
+    defer allocator.free(pretty_without);
+    const pretty_with = try console.render(allocator, &pretty_guided_renderable);
+    defer allocator.free(pretty_with);
+    try std.testing.expect(!std.mem.eql(u8, pretty_without, pretty_with));
+    try std.testing.expect(std.mem.indexOf(u8, pretty_with, "│") != null);
+    try std.testing.expectError(error.InvalidState, pretty_guided.setIndentGuides(false));
+
+    const unicode_nul_repr = "{'日本語': ['nul\x00tail', {'emoji': '🦀', '値': [1, 2, 3, 4, 5]}]}";
+    var pretty_unicode_nul_plain = try rich.Pretty.init(unicode_nul_repr);
+    defer pretty_unicode_nul_plain.deinit();
+    var pretty_unicode_nul_plain_renderable = try pretty_unicode_nul_plain.finish();
+    defer pretty_unicode_nul_plain_renderable.deinit();
+    var pretty_unicode_nul_guided = try rich.Pretty.init(unicode_nul_repr);
+    defer pretty_unicode_nul_guided.deinit();
+    try pretty_unicode_nul_guided.setIndentGuides(true);
+    var pretty_unicode_nul_guided_renderable = try pretty_unicode_nul_guided.finish();
+    defer pretty_unicode_nul_guided_renderable.deinit();
+    const pretty_unicode_nul_without = try console.render(allocator, &pretty_unicode_nul_plain_renderable);
+    defer allocator.free(pretty_unicode_nul_without);
+    const pretty_unicode_nul_with = try console.render(allocator, &pretty_unicode_nul_guided_renderable);
+    defer allocator.free(pretty_unicode_nul_with);
+    try expectUtf8(pretty_unicode_nul_without);
+    try std.testing.expect(std.mem.indexOf(u8, pretty_unicode_nul_without, "日本語") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, pretty_unicode_nul_without, 0) != null);
+    try std.testing.expect(!std.mem.eql(u8, pretty_unicode_nul_without, pretty_unicode_nul_with));
+
+    const distinct_repr = "[Point(x=1, y=2), {'enabled': True, 'items': [10, 20, 30, 40]}]";
+    var pretty_distinct_plain = try rich.Pretty.init(distinct_repr);
+    defer pretty_distinct_plain.deinit();
+    var pretty_distinct_plain_renderable = try pretty_distinct_plain.finish();
+    defer pretty_distinct_plain_renderable.deinit();
+    var pretty_distinct_guided = try rich.Pretty.init(distinct_repr);
+    defer pretty_distinct_guided.deinit();
+    try pretty_distinct_guided.setIndentGuides(true);
+    var pretty_distinct_guided_renderable = try pretty_distinct_guided.finish();
+    defer pretty_distinct_guided_renderable.deinit();
+    const pretty_distinct_without = try console.render(allocator, &pretty_distinct_plain_renderable);
+    defer allocator.free(pretty_distinct_without);
+    const pretty_distinct_with = try console.render(allocator, &pretty_distinct_guided_renderable);
+    defer allocator.free(pretty_distinct_with);
+    try std.testing.expect(std.mem.indexOf(u8, pretty_distinct_without, "Point") != null);
+    try std.testing.expect(!std.mem.eql(u8, pretty_distinct_without, pretty_distinct_with));
+    try std.testing.expect(!std.mem.eql(u8, pretty_unicode_nul_without, pretty_distinct_without));
+
+    const syntax_source = "fn main() {\n    if true {\n        work();\n    }\n}";
+    var syntax_plain = try rich.Syntax.init(syntax_source, "rust");
+    defer syntax_plain.deinit();
+    var syntax_plain_renderable = try syntax_plain.finish();
+    defer syntax_plain_renderable.deinit();
+    var syntax_guided = try rich.Syntax.init(syntax_source, "rust");
+    defer syntax_guided.deinit();
+    try syntax_guided.setIndentGuides(true);
+    var syntax_guided_renderable = try syntax_guided.finish();
+    defer syntax_guided_renderable.deinit();
+    const syntax_without = try console.render(allocator, &syntax_plain_renderable);
+    defer allocator.free(syntax_without);
+    const syntax_with = try console.render(allocator, &syntax_guided_renderable);
+    defer allocator.free(syntax_with);
+    try std.testing.expect(!std.mem.eql(u8, syntax_without, syntax_with));
+    try std.testing.expect(std.mem.indexOf(u8, syntax_with, "│") != null);
+}
+
+test "configured table inputs are call-scoped and allocation failures leave it usable" {
+    const allocator = std.testing.allocator;
+    var console = try plainConsole();
+    defer console.deinit();
+
+    var header = try textRenderable("retained header", "bold cyan");
+    defer header.deinit();
+    var cell = try textRenderable("retained cell", null);
+    defer cell.deinit();
+    var table = try rich.Table.init();
+    defer table.deinit();
+
+    var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(
+        error.OutOfMemory,
+        table.setRowStyles(failing.allocator(), &.{"red"}),
+    );
+
+    const temporary_style = try allocator.dupe(u8, "green");
+    try table.setRowStyles(allocator, &.{temporary_style});
+    try table.addColumnOptions(&header, .{ .style = temporary_style });
+    header.deinit();
+    @memset(temporary_style, 'x');
+    allocator.free(temporary_style);
+
+    const cells = [_]*const rich.Renderable{&cell};
+    try table.addRowRenderables(allocator, &cells);
+    var renderable = try table.finish();
+    defer renderable.deinit();
+    const output = try console.render(allocator, &renderable);
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "retained header") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "retained cell") != null);
+
+    var panel = try rich.Panel.init(&cell);
+    defer panel.deinit();
+    try std.testing.expectError(error.InvalidArgument, panel.setBox(.none));
+    try panel.setBox(.rounded);
+}
+
+test "configured column options vary independently" {
+    const allocator = std.testing.allocator;
+    var console = try plainConsole();
+    defer console.deinit();
+    try console.setForceTerminal(true);
+    try console.setSize(36, 24);
+
+    const justify_left = try renderColumnProbe(
+        allocator,
+        &console,
+        .{ .justify = .left, .width = 18, .no_wrap = true },
+        false,
+    );
+    defer allocator.free(justify_left);
+    const justify_right = try renderColumnProbe(
+        allocator,
+        &console,
+        .{ .justify = .right, .width = 18, .no_wrap = true },
+        false,
+    );
+    defer allocator.free(justify_right);
+    try std.testing.expect(!std.mem.eql(u8, justify_left, justify_right));
+
+    const vertical_top = try renderColumnProbe(
+        allocator,
+        &console,
+        .{ .vertical = .top, .width = 18, .no_wrap = true },
+        false,
+    );
+    defer allocator.free(vertical_top);
+    const vertical_bottom = try renderColumnProbe(
+        allocator,
+        &console,
+        .{ .vertical = .bottom, .width = 18, .no_wrap = true },
+        false,
+    );
+    defer allocator.free(vertical_bottom);
+    try std.testing.expect(!std.mem.eql(u8, vertical_top, vertical_bottom));
+
+    const narrow_width = try renderColumnProbe(allocator, &console, .{ .width = 8 }, false);
+    defer allocator.free(narrow_width);
+    const wide_width = try renderColumnProbe(allocator, &console, .{ .width = 18 }, false);
+    defer allocator.free(wide_width);
+    try std.testing.expect(!std.mem.eql(u8, narrow_width, wide_width));
+
+    const small_minimum = try renderColumnProbe(allocator, &console, .{ .min_width = 4 }, false);
+    defer allocator.free(small_minimum);
+    const large_minimum = try renderColumnProbe(allocator, &console, .{ .min_width = 18 }, false);
+    defer allocator.free(large_minimum);
+    try std.testing.expect(!std.mem.eql(u8, small_minimum, large_minimum));
+
+    const equal_ratio = try renderColumnProbe(allocator, &console, .{ .ratio = 1 }, true);
+    defer allocator.free(equal_ratio);
+    const weighted_ratio = try renderColumnProbe(allocator, &console, .{ .ratio = 3 }, true);
+    defer allocator.free(weighted_ratio);
+    try std.testing.expect(!std.mem.eql(u8, equal_ratio, weighted_ratio));
+
+    const wrapping = try renderColumnProbe(allocator, &console, .{ .width = 8 }, false);
+    defer allocator.free(wrapping);
+    const no_wrapping = try renderColumnProbe(
+        allocator,
+        &console,
+        .{ .width = 8, .no_wrap = true },
+        false,
+    );
+    defer allocator.free(no_wrapping);
+    try std.testing.expect(!std.mem.eql(u8, wrapping, no_wrapping));
+
+    const red_style = try renderColumnProbe(
+        allocator,
+        &console,
+        .{ .width = 18, .style = "red" },
+        false,
+    );
+    defer allocator.free(red_style);
+    const green_style = try renderColumnProbe(
+        allocator,
+        &console,
+        .{ .width = 18, .style = "green" },
+        false,
+    );
+    defer allocator.free(green_style);
+    try std.testing.expect(!std.mem.eql(u8, red_style, green_style));
+
+    const padded_edge = try renderPadEdgeProbe(allocator, &console, true);
+    defer allocator.free(padded_edge);
+    const unpadded_edge = try renderPadEdgeProbe(allocator, &console, false);
+    defer allocator.free(unpadded_edge);
+    try std.testing.expect(!std.mem.eql(u8, padded_edge, unpadded_edge));
+
+    const square_box = try renderBoxProbe(allocator, &console, .square);
+    defer allocator.free(square_box);
+    const no_box = try renderBoxProbe(allocator, &console, .none);
+    defer allocator.free(no_box);
+    try std.testing.expect(!std.mem.eql(u8, square_box, no_box));
+
+    const no_row_style = try renderRowStyleProbe(allocator, &console, .none);
+    defer allocator.free(no_row_style);
+    const red_row_style = try renderRowStyleProbe(allocator, &console, .red);
+    defer allocator.free(red_row_style);
+    const green_row_style = try renderRowStyleProbe(allocator, &console, .green);
+    defer allocator.free(green_row_style);
+    const replaced_row_style = try renderRowStyleProbe(allocator, &console, .replace);
+    defer allocator.free(replaced_row_style);
+    const cleared_row_style = try renderRowStyleProbe(allocator, &console, .clear);
+    defer allocator.free(cleared_row_style);
+    try std.testing.expect(!std.mem.eql(u8, red_row_style, green_row_style));
+    try std.testing.expectEqualSlices(u8, green_row_style, replaced_row_style);
+    try std.testing.expectEqualSlices(u8, no_row_style, cleared_row_style);
+}
+
+test "custom renderable scopes, errors, and native last-Arc drop are safe" {
+    const allocator = std.testing.allocator;
+    var console = try plainConsole();
+    defer console.deinit();
+    try console.setForceTerminal(true);
+    try console.setSize(7, 24);
+
+    var probe: CallbackProbe = .{ .height = 3, .console = &console };
+    var custom = try rich.customRenderable(&probe, .{
+        .render = probeRender,
+        .measure = probeMeasure,
+        .drop = probeDrop,
+    });
+    var table = try rich.Table.initGrid();
+    defer table.deinit();
+    try table.addColumnOptions(null, .{ .ratio = 1 });
+    const cells = [_]*const rich.Renderable{&custom};
+    try table.addRowRenderables(allocator, &cells);
+    var panel = try rich.Panel.init(&custom);
+    defer panel.deinit();
+    custom.deinit();
+    try std.testing.expectEqual(@as(usize, 0), probe.drop_count);
+
+    var table_renderable = try table.finish();
+    var panel_renderable = try panel.finish();
+    const output = try console.render(allocator, &table_renderable);
+    defer allocator.free(output);
+    try std.testing.expectEqual(@as(usize, 1), probe.render_count);
+    try std.testing.expect(probe.measure_count > 0);
+    try std.testing.expectEqual(@as(u32, 7), probe.last_width);
+    try std.testing.expect(probe.reentry_rejected);
+    try std.testing.expectEqual(@as(usize, 21), std.mem.count(u8, output, "▄"));
+    try std.testing.expect(probe.retained_sink != null);
+    try std.testing.expectError(error.InvalidState, probe.retained_sink.?.line());
+
+    const panel_output = try console.render(allocator, &panel_renderable);
+    defer allocator.free(panel_output);
+    try std.testing.expectEqual(@as(usize, 2), probe.render_count);
+    try std.testing.expect(probe.prior_sink_rejected);
+    try std.testing.expectError(error.InvalidState, probe.retained_sink.?.line());
+
+    table_renderable.deinit();
+    try std.testing.expectEqual(@as(usize, 0), probe.drop_count);
+    panel_renderable.deinit();
+    try std.testing.expectEqual(@as(usize, 1), probe.drop_count);
+
+    var failure_probe: CallbackProbe = .{};
+    var failing = try rich.customRenderable(&failure_probe, .{
+        .render = failingRender,
+        .drop = probeDrop,
+    });
+    defer failing.deinit();
+    try std.testing.expectError(error.InvalidArgument, console.render(allocator, &failing));
+
+    try std.testing.expectError(
+        error.InvalidArgument,
+        rich.customRenderable(&failure_probe, .{ .render = probeRender }),
+    );
+
+    var null_context = try rich.customRenderable(null, .{ .render = probeRender });
+    null_context.deinit();
+    null_context.deinit();
+}
+
+test "custom feature probes adapt height and width and validate measurement" {
+    const allocator = std.testing.allocator;
+    inline for (.{ 1, 3 }) |height| {
+        inline for (.{ 1, 7 }) |width_value| {
+            var console = try plainConsole();
+            defer console.deinit();
+            try console.setForceTerminal(true);
+            try console.setSize(width_value, 24);
+            var probe: CallbackProbe = .{ .height = height };
+            var custom = try rich.customRenderable(&probe, .{
+                .render = probeRender,
+                .measure = probeMeasure,
+                .drop = probeDrop,
+            });
+            const output = try console.render(allocator, &custom);
+            defer allocator.free(output);
+            try std.testing.expectEqual(
+                @as(usize, height * width_value),
+                std.mem.count(u8, output, "▄"),
+            );
+            try std.testing.expectEqual(@as(u32, width_value), probe.last_width);
+            try std.testing.expect(std.mem.indexOf(u8, output, "38;2;255;0;0") != null);
+            custom.deinit();
+            try std.testing.expectEqual(@as(usize, 1), probe.drop_count);
+        }
+    }
+
+    var console = try plainConsole();
+    defer console.deinit();
+    var default_callbacks: rich.CustomCallbacks = .{ .render = defaultRender };
+    var defaults = try rich.customRenderable(null, default_callbacks);
+    defer defaults.deinit();
+    // The wrapper copies callback values. Mutating the caller's temporary
+    // descriptor cannot redirect a live adapter.
+    default_callbacks.render = failingRender;
+    var default_table = try rich.Table.initGrid();
+    defer default_table.deinit();
+    try default_table.addColumnOptions(null, .{ .ratio = 1 });
+    const default_cells = [_]*const rich.Renderable{&defaults};
+    try default_table.addRowRenderables(allocator, &default_cells);
+    var default_renderable = try default_table.finish();
+    defer default_renderable.deinit();
+    const default_output = try console.render(allocator, &default_renderable);
+    defer allocator.free(default_output);
+    try std.testing.expect(std.mem.indexOf(u8, default_output, "default measurement") != null);
+
+    var malformed = try rich.customRenderable(null, .{
+        .render = defaultRender,
+        .measure = malformedMeasure,
+    });
+    defer malformed.deinit();
+    var measurement_table = try rich.Table.initGrid();
+    defer measurement_table.deinit();
+    try measurement_table.addColumnOptions(null, .{ .ratio = 1 });
+    const malformed_cells = [_]*const rich.Renderable{&malformed};
+    try measurement_table.addRowRenderables(allocator, &malformed_cells);
+    var measurement_renderable = try measurement_table.finish();
+    defer measurement_renderable.deinit();
+    if (console.render(allocator, &measurement_renderable)) |unexpected| {
+        defer allocator.free(unexpected);
+        return error.TestExpectedError;
+    } else |err| {
+        try std.testing.expectEqual(error.Render, err);
+    }
+}
+
+test "native buffers are released when Zig output allocation fails" {
+    var console = try plainConsole();
+    defer console.deinit();
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{
+        .fail_index = 0,
+    });
+    try std.testing.expectError(
+        error.OutOfMemory,
+        console.renderMarkup(failing.allocator(), "allocator cleanup"),
+    );
+    const retry = try console.renderMarkup(std.testing.allocator, "still healthy");
+    defer std.testing.allocator.free(retry);
+    try std.testing.expectEqualStrings("still healthy", retry);
 }
 
 test "table, panel, and tree expose the full composition surface" {

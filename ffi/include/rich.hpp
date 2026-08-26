@@ -3,10 +3,13 @@
 
 #include "rich.h"
 
+#include <atomic>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -31,11 +34,25 @@ private:
 
 namespace detail {
 
+inline thread_local std::exception_ptr callback_exception;
+inline thread_local bool callback_active = false;
+
+inline void ensure_not_callback() {
+    if (callback_active) throw Exception(RICH_ERROR_INVALID_STATE);
+}
+
 inline void check(RichResult result) {
-    if (result != RICH_OK) throw Exception(result);
+    if (result != RICH_OK) {
+        if (callback_exception) {
+            auto error = std::exchange(callback_exception, nullptr);
+            std::rethrow_exception(error);
+        }
+        throw Exception(result);
+    }
 }
 
 inline void ensure_abi() {
+    ensure_not_callback();
     if (rich_ffi_abi_version() != RICH_FFI_ABI_VERSION) {
         throw std::runtime_error("rich-ffi ABI version mismatch");
     }
@@ -56,9 +73,14 @@ class Owned {
 public:
     Owned() noexcept = default;
     explicit Owned(H* handle) noexcept : handle_(handle) {}
-    Owned(Owned&& other) noexcept : handle_(other.handle_) { other.handle_ = nullptr; }
-    Owned& operator=(Owned&& other) noexcept {
+    Owned(Owned&& other) {
+        ensure_not_callback();
+        handle_ = other.handle_;
+        other.handle_ = nullptr;
+    }
+    Owned& operator=(Owned&& other) {
         if (this != &other) {
+            ensure_not_callback();
             reset();
             handle_ = other.handle_;
             other.handle_ = nullptr;
@@ -67,16 +89,20 @@ public:
     }
     Owned(const Owned&) = delete;
     Owned& operator=(const Owned&) = delete;
-    ~Owned() { reset(); }
+    ~Owned() {
+        if (handle_ && !callback_active) Free(handle_);
+    }
 
     H* get() const noexcept { return handle_; }
     H** address() noexcept { return &handle_; }
-    H* release() noexcept {
+    H* release() {
+        ensure_not_callback();
         H* value = handle_;
         handle_ = nullptr;
         return value;
     }
-    void reset(H* handle = nullptr) noexcept {
+    void reset(H* handle = nullptr) {
+        ensure_not_callback();
         if (handle_) Free(handle_);
         handle_ = handle;
     }
@@ -148,6 +174,17 @@ enum class Box : std::uint32_t {
     HeavyEdge = RICH_BOX_HEAVY_EDGE, DoubleEdge = RICH_BOX_DOUBLE_EDGE,
     Horizontals = RICH_BOX_HORIZONTALS, MinimalHeavyHead = RICH_BOX_MINIMAL_HEAVY_HEAD,
     SimpleHeavy = RICH_BOX_SIMPLE_HEAVY, Markdown = RICH_BOX_MARKDOWN,
+    None = RICH_BOX_NONE,
+};
+
+struct ColumnOptions {
+    std::optional<Justify> justify;
+    std::optional<VAlign> vertical;
+    std::optional<std::uint32_t> width;
+    std::optional<std::uint32_t> min_width;
+    std::optional<std::uint32_t> ratio;
+    std::string_view style;
+    bool no_wrap = false;
 };
 
 class Renderable {
@@ -158,6 +195,152 @@ public:
 private:
     detail::Owned<RichRenderable, rich_renderable_free> handle_;
 };
+
+struct RenderOptions {
+    std::uint32_t min_width;
+    std::uint32_t max_width;
+    std::uint32_t max_height;
+    ColorSystem color_system;
+    bool is_terminal;
+};
+
+struct Measurement {
+    std::uint32_t minimum;
+    std::uint32_t maximum;
+};
+
+class SegmentSink {
+public:
+    SegmentSink(const SegmentSink&) noexcept = default;
+    SegmentSink& operator=(const SegmentSink&) noexcept = default;
+    void push(std::string_view text, std::string_view style = {}) {
+        detail::check(rich_segment_sink_push(native_sink(), detail::str(text), detail::str(style)));
+    }
+    void line() {
+        detail::check(rich_segment_sink_line(native_sink()));
+    }
+private:
+    struct State {
+        std::atomic<RichSegmentSink*> sink{nullptr};
+        std::atomic<bool> active{false};
+    };
+    explicit SegmentSink(RichSegmentSink* sink) : state_(std::make_shared<State>()) {
+        activate(sink);
+    }
+    void require_active() const {
+        if (!state_ || !detail::callback_active ||
+            !state_->active.load(std::memory_order_acquire)) {
+            throw Exception(RICH_ERROR_INVALID_STATE);
+        }
+    }
+    RichSegmentSink* native_sink() const {
+        require_active();
+        return state_->sink.load(std::memory_order_relaxed);
+    }
+    void activate(RichSegmentSink* sink) noexcept {
+        state_->sink.store(sink, std::memory_order_relaxed);
+        state_->active.store(true, std::memory_order_release);
+    }
+    void tombstone() noexcept {
+        state_->active.store(false, std::memory_order_release);
+        state_->sink.store(nullptr, std::memory_order_relaxed);
+    }
+    std::shared_ptr<State> state_;
+    friend struct detail_CustomTrampoline;
+};
+
+class CustomRenderer {
+public:
+    virtual ~CustomRenderer() = default;
+    virtual void render(RenderOptions options, SegmentSink& sink) = 0;
+    virtual Measurement measure(RenderOptions options) {
+        return Measurement{1, options.max_width};
+    }
+};
+
+struct detail_CustomTrampoline {
+    struct Context {
+        explicit Context(std::shared_ptr<CustomRenderer> value) : renderer(std::move(value)) {}
+        std::shared_ptr<CustomRenderer> renderer;
+    };
+
+    class Scope {
+    public:
+        Scope() noexcept { detail::callback_active = true; }
+        ~Scope() { detail::callback_active = false; }
+        Scope(const Scope&) = delete;
+        Scope& operator=(const Scope&) = delete;
+    };
+
+    static RenderOptions copy_options(const RichRenderOptions& value) noexcept {
+        return RenderOptions{
+            value.min_width,
+            value.max_width,
+            value.max_height,
+            static_cast<ColorSystem>(value.color_system),
+            value.is_terminal != 0,
+        };
+    }
+
+    static RichResult render(
+        void* context,
+        const RichRenderOptions* options,
+        RichSegmentSink* native_sink) noexcept {
+        Scope scope;
+        auto* state = static_cast<Context*>(context);
+        try {
+            SegmentSink sink(native_sink);
+            try {
+                state->renderer->render(copy_options(*options), sink);
+                sink.tombstone();
+                return RICH_OK;
+            } catch (...) {
+                sink.tombstone();
+                throw;
+            }
+        } catch (...) {
+            detail::callback_exception = std::current_exception();
+            return RICH_ERROR_RENDER;
+        }
+    }
+
+    static RichResult measure(
+        void* context,
+        const RichRenderOptions* options,
+        RichMeasurement* output) noexcept {
+        Scope scope;
+        try {
+            const auto value = static_cast<Context*>(context)->renderer->measure(copy_options(*options));
+            output->minimum = value.minimum;
+            output->maximum = value.maximum;
+            return RICH_OK;
+        } catch (...) {
+            detail::callback_exception = std::current_exception();
+            return RICH_ERROR_RENDER;
+        }
+    }
+
+    static void drop(void* context) noexcept {
+        Scope scope;
+        delete static_cast<Context*>(context);
+    }
+};
+
+inline Renderable custom_renderable(std::shared_ptr<CustomRenderer> renderer) {
+    detail::ensure_abi();
+    detail::ensure_not_callback();
+    if (!renderer) throw Exception(RICH_ERROR_INVALID_ARGUMENT);
+    auto context = std::make_unique<detail_CustomTrampoline::Context>(std::move(renderer));
+    const RichCustomRenderableVTable vtable{
+        detail_CustomTrampoline::render,
+        detail_CustomTrampoline::measure,
+        detail_CustomTrampoline::drop,
+    };
+    RichRenderable* output = nullptr;
+    detail::check(rich_custom_renderable_new(context.get(), &vtable, &output));
+    context.release();
+    return Renderable(output);
+}
 
 class Console {
 public:
@@ -236,12 +419,25 @@ private:
 class Table {
 public:
     Table() { detail::ensure_abi(); detail::check(rich_table_new(handle_.address())); }
+    static Table grid() {
+        detail::ensure_abi();
+        RichTable* out = nullptr;
+        detail::check(rich_table_new_grid(&out));
+        return Table(out);
+    }
     RichTable* get() const noexcept { return handle_.get(); }
     Table& set_title(std::string_view v) { detail::check(rich_table_set_title(get(), detail::str(v))); return *this; }
     Table& set_caption(std::string_view v) { detail::check(rich_table_set_caption(get(), detail::str(v))); return *this; }
     Table& set_title_markup(Console& c, std::string_view v) { detail::check(rich_table_set_title_markup(get(), c.get(), detail::str(v))); return *this; }
     Table& set_caption_markup(Console& c, std::string_view v) { detail::check(rich_table_set_caption_markup(get(), c.get(), detail::str(v))); return *this; }
     Table& set_box(Box v) { detail::check(rich_table_set_box(get(), static_cast<std::uint32_t>(v))); return *this; }
+    Table& set_pad_edge(bool v) { detail::check(rich_table_set_pad_edge(get(), v ? 1 : 0)); return *this; }
+    Table& set_row_styles(std::initializer_list<std::string_view> values) {
+        std::vector<RichStr> raw; raw.reserve(values.size());
+        for (auto value : values) raw.push_back(detail::str(value));
+        detail::check(rich_table_set_row_styles(get(), raw.data(), detail::count(raw.size())));
+        return *this;
+    }
     Table& set_show_header(bool v) { detail::check(rich_table_set_show_header(get(), v ? 1 : 0)); return *this; }
     Table& set_show_lines(bool v) { detail::check(rich_table_set_show_lines(get(), v ? 1 : 0)); return *this; }
     Table& set_show_edge(bool v) { detail::check(rich_table_set_show_edge(get(), v ? 1 : 0)); return *this; }
@@ -250,6 +446,27 @@ public:
     Table& set_style(std::string_view v) { detail::check(rich_table_set_style(get(), detail::str(v))); return *this; }
     Table& add_column(std::string_view v) { detail::check(rich_table_add_column(get(), detail::str(v))); return *this; }
     Table& add_column(const Renderable& v) { detail::check(rich_table_add_column_renderable(get(), v.get())); return *this; }
+    Table& add_column(
+        ColumnOptions value,
+        std::optional<std::reference_wrapper<const Renderable>> header = std::nullopt) {
+        RichTableColumnOptions raw{};
+        raw.style = detail::str(value.style);
+        if (value.justify) {
+            raw.flags |= RICH_COLUMN_HAS_JUSTIFY;
+            raw.justify = static_cast<std::uint32_t>(*value.justify);
+        }
+        if (value.vertical) {
+            raw.flags |= RICH_COLUMN_HAS_VERTICAL;
+            raw.vertical = static_cast<std::uint32_t>(*value.vertical);
+        }
+        if (value.width) { raw.flags |= RICH_COLUMN_HAS_WIDTH; raw.width = *value.width; }
+        if (value.min_width) { raw.flags |= RICH_COLUMN_HAS_MIN_WIDTH; raw.min_width = *value.min_width; }
+        if (value.ratio) { raw.flags |= RICH_COLUMN_HAS_RATIO; raw.ratio = *value.ratio; }
+        if (value.no_wrap) raw.flags |= RICH_COLUMN_NO_WRAP;
+        const RichRenderable* raw_header = header ? header->get().get() : nullptr;
+        detail::check(rich_table_add_column_options(get(), raw_header, &raw));
+        return *this;
+    }
     Table& add_row(const std::vector<std::string>& cells) {
         std::vector<RichStr> raw; raw.reserve(cells.size());
         for (const auto& cell : cells) raw.push_back(detail::str(cell));
@@ -269,6 +486,7 @@ public:
     }
     RICH_FINISH_METHOD(Table, RichTable, rich_table_finish)
 private:
+    explicit Table(RichTable* handle) noexcept : handle_(handle) {}
     detail::Owned<RichTable, rich_table_free> handle_;
 };
 
@@ -316,8 +534,17 @@ public:
         detail::ensure_abi();
         RichTree* out = nullptr; detail::check(rich_tree_new_renderable(label.get(), &out)); return Tree(out);
     }
-    Tree(Tree&&) noexcept = default;
-    Tree& operator=(Tree&&) noexcept = default;
+    Tree(Tree&& other) {
+        detail::ensure_not_callback();
+        state_ = std::move(other.state_);
+    }
+    Tree& operator=(Tree&& other) {
+        if (this != &other) {
+            detail::ensure_not_callback();
+            state_ = std::move(other.state_);
+        }
+        return *this;
+    }
     Tree(const Tree&) = delete;
     Tree& operator=(const Tree&) = delete;
     TreeNode add(std::string_view label) { return add_at(RICH_TREE_ROOT_ID, label); }
@@ -433,11 +660,27 @@ public:
     Syntax& set_theme(std::string_view v) { detail::check(rich_syntax_set_theme(handle_.get(), detail::str(v))); return *this; }
     Syntax& set_line_numbers(bool v) { detail::check(rich_syntax_set_line_numbers(handle_.get(), v ? 1 : 0)); return *this; }
     Syntax& set_word_wrap(bool v) { detail::check(rich_syntax_set_word_wrap(handle_.get(), v ? 1 : 0)); return *this; }
+    Syntax& set_indent_guides(bool v) { detail::check(rich_syntax_set_indent_guides(handle_.get(), v ? 1 : 0)); return *this; }
     Syntax& set_line_range(bool hs, std::uint32_t s, bool he, std::uint32_t e) { detail::check(rich_syntax_set_line_range(handle_.get(), hs ? 1 : 0, s, he ? 1 : 0, e)); return *this; }
     RICH_FINISH_METHOD(Syntax, RichSyntax, rich_syntax_finish)
 private:
     explicit Syntax(RichSyntax* handle) noexcept : handle_(handle) {}
     detail::Owned<RichSyntax, rich_syntax_free> handle_;
+};
+
+class Pretty {
+public:
+    explicit Pretty(std::string_view value) {
+        detail::ensure_abi();
+        detail::check(rich_pretty_new(detail::str(value), handle_.address()));
+    }
+    Pretty& set_indent_guides(bool value) {
+        detail::check(rich_pretty_set_indent_guides(handle_.get(), value ? 1 : 0));
+        return *this;
+    }
+    RICH_FINISH_METHOD(Pretty, RichPretty, rich_pretty_finish)
+private:
+    detail::Owned<RichPretty, rich_pretty_free> handle_;
 };
 
 class Markdown {

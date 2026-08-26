@@ -3,8 +3,8 @@
 use rich_rs::{LiveOptions, Progress, Spinner, Status, TaskID};
 
 use crate::common::{
-    destroy, ffi_call, init_buffer, init_out, init_scalar_out, render_to_bytes, required_mut,
-    required_ref, rich_str, write_buffer,
+    destroy, ffi_call, guard_ordinary_call, init_buffer, init_out, init_scalar_out,
+    render_to_bytes, required_mut, required_ref, rich_str, write_buffer,
 };
 use crate::{
     RICH_ERROR_INVALID_ARGUMENT, RICH_ERROR_INVALID_STATE, RichBuffer, RichConsole, RichResult,
@@ -60,6 +60,7 @@ pub extern "C" fn rich_progress_update(
     completed: f64,
 ) -> RichResult {
     ffi_call(|| {
+        guard_ordinary_call()?;
         if !completed.is_finite() {
             return Err(RICH_ERROR_INVALID_ARGUMENT);
         }

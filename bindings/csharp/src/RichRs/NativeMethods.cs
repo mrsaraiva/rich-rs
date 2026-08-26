@@ -90,6 +90,9 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "rich_syntax_set_word_wrap")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint SyntaxSetWordWrap(nint value, byte enabled);
+    [LibraryImport(Library, EntryPoint = "rich_syntax_set_indent_guides")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint SyntaxSetIndentGuides(nint value, byte enabled);
     [LibraryImport(Library, EntryPoint = "rich_syntax_set_line_range")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint SyntaxSetLineRange(nint value, byte hasStart, uint start, byte hasEnd, uint end);
@@ -99,6 +102,30 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "rich_syntax_free")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial void SyntaxFree(nint value);
+
+    [LibraryImport(Library, EntryPoint = "rich_pretty_new")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint PrettyNew(NativeRichStr debugRepresentation, nint* output);
+    [LibraryImport(Library, EntryPoint = "rich_pretty_set_indent_guides")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint PrettySetIndentGuides(nint value, byte enabled);
+    [LibraryImport(Library, EntryPoint = "rich_pretty_finish")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint PrettyFinish(nint* value, nint* output);
+    [LibraryImport(Library, EntryPoint = "rich_pretty_free")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void PrettyFree(nint value);
+
+    [LibraryImport(Library, EntryPoint = "rich_custom_renderable_new")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint CustomRenderableNew(
+        nint context, NativeRichCustomRenderableVTable* vtable, nint* output);
+    [LibraryImport(Library, EntryPoint = "rich_segment_sink_push")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint SegmentSinkPush(nint sink, NativeRichStr text, NativeRichStr style);
+    [LibraryImport(Library, EntryPoint = "rich_segment_sink_line")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint SegmentSinkLine(nint sink);
 
     [LibraryImport(Library, EntryPoint = "rich_markdown_new")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -284,6 +311,9 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "rich_table_new")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint TableNew(nint* output);
+    [LibraryImport(Library, EntryPoint = "rich_table_new_grid")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint TableNewGrid(nint* output);
     [LibraryImport(Library, EntryPoint = "rich_table_finish")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint TableFinish(nint* value, nint* output);
@@ -320,6 +350,12 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "rich_table_set_padding")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint TableSetPadding(nint value, uint left, uint right);
+    [LibraryImport(Library, EntryPoint = "rich_table_set_pad_edge")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint TableSetPadEdge(nint value, byte pad);
+    [LibraryImport(Library, EntryPoint = "rich_table_set_row_styles")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint TableSetRowStyles(nint value, NativeRichStr* styles, uint count);
     [LibraryImport(Library, EntryPoint = "rich_table_set_style")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint TableSetStyle(nint value, NativeRichStr style);
@@ -329,6 +365,10 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "rich_table_add_column_renderable")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint TableAddColumnRenderable(nint value, nint header);
+    [LibraryImport(Library, EntryPoint = "rich_table_add_column_options")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint TableAddColumnOptions(
+        nint value, nint header, NativeRichTableColumnOptions* options);
     [LibraryImport(Library, EntryPoint = "rich_table_add_row_strs")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint TableAddRowStrings(nint value, NativeRichStr* cells, uint count);

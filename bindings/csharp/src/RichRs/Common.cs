@@ -17,6 +17,54 @@ internal unsafe struct NativeRichBuffer
     internal ulong Length;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct NativeRichRenderOptions
+{
+    internal uint MinWidth;
+    internal uint MaxWidth;
+    internal uint MaxHeight;
+    internal uint ColorSystem;
+    internal byte IsTerminal;
+    internal fixed byte Reserved[7];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeRichMeasurement
+{
+    internal uint Minimum;
+    internal uint Maximum;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct NativeRichCustomRenderableVTable
+{
+    internal delegate* unmanaged[Cdecl]<nint, NativeRichRenderOptions*, nint, uint> Render;
+    internal delegate* unmanaged[Cdecl]<nint, NativeRichRenderOptions*, NativeRichMeasurement*, uint> Measure;
+    internal delegate* unmanaged[Cdecl]<nint, void> Drop;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct NativeRichTableColumnOptions
+{
+    internal uint Flags;
+    internal uint Justify;
+    internal uint Vertical;
+    internal uint Width;
+    internal uint MinWidth;
+    internal uint Ratio;
+    internal NativeRichStr Style;
+}
+
+internal static class NativeColumnFlags
+{
+    internal const uint HasJustify = 1U << 0;
+    internal const uint HasVertical = 1U << 1;
+    internal const uint HasWidth = 1U << 2;
+    internal const uint HasMinimumWidth = 1U << 3;
+    internal const uint HasRatio = 1U << 4;
+    internal const uint NoWrap = 1U << 5;
+}
+
 internal unsafe delegate uint Utf8Call(NativeRichStr value);
 internal unsafe delegate T Utf8Func<T>(NativeRichStr value);
 internal unsafe delegate uint RichStrArrayCall(NativeRichStr* values, uint count);
@@ -37,6 +85,7 @@ internal static class NativeFactory
 
     internal static unsafe void Initialize(NativeSafeHandle handle, NewHandleCall create)
     {
+        CallbackGuard.ThrowIfActive();
         nint output = 0;
         try
         {
@@ -191,6 +240,7 @@ internal static class NativeBuffer
 
     internal static unsafe string Call(BufferCall call)
     {
+        CallbackGuard.ThrowIfActive();
         NativeRichBuffer buffer = default;
         try
         {
@@ -277,6 +327,7 @@ internal sealed class NativeOwner<THandle> : IDisposable where THandle : NativeS
 
     internal T Use<T>(Func<nint, T> call)
     {
+        CallbackGuard.ThrowIfActive();
         lock (sync)
         {
             ThrowIfDisposed();
@@ -310,6 +361,7 @@ internal sealed class NativeOwner<THandle> : IDisposable where THandle : NativeS
     {
         get
         {
+            CallbackGuard.ThrowIfActive();
             lock (sync)
             {
                 ThrowIfDisposed();
@@ -320,6 +372,7 @@ internal sealed class NativeOwner<THandle> : IDisposable where THandle : NativeS
 
     internal unsafe void Finish(FinishCall finish, NativeSafeHandle outputHandle)
     {
+        CallbackGuard.ThrowIfActive();
         lock (sync)
         {
             ThrowIfDisposed();
@@ -389,6 +442,7 @@ internal sealed class NativeOwner<THandle> : IDisposable where THandle : NativeS
 
     public void Dispose()
     {
+        CallbackGuard.ThrowIfActive();
         lock (sync)
         {
             handle.Dispose();
@@ -445,7 +499,7 @@ public enum Justify : uint
     Full = 4,
 }
 /// <summary>Table or panel border style.</summary>
-public enum BoxStyle : uint
+public enum Box : uint
 {
     /// <summary>Rounded border.</summary>
     Rounded = 0,
@@ -475,7 +529,37 @@ public enum BoxStyle : uint
     SimpleHeavy = 12,
     /// <summary>Markdown-compatible border.</summary>
     Markdown = 13,
+    /// <summary>No table border or divider lines. Panels reject this value.</summary>
+    None = 14,
 }
+
+/// <summary>Atomic options for one table column.</summary>
+public readonly record struct ColumnOptions(
+    Justify? Justification = null,
+    VerticalAlignment? Vertical = null,
+    uint? Width = null,
+    uint? MinimumWidth = null,
+    uint? Ratio = null,
+    string Style = "",
+    bool NoWrap = false)
+{
+    /// <summary>Creates native default column options.</summary>
+    public ColumnOptions()
+        : this(null, null, null, null, null, "", false)
+    {
+    }
+}
+
+/// <summary>Immutable rendering constraints supplied to a custom renderer.</summary>
+public readonly record struct RenderOptions(
+    uint MinWidth,
+    uint MaxWidth,
+    uint MaxHeight,
+    ColorSystem ColorSystem,
+    bool IsTerminal);
+
+/// <summary>Immutable minimum and maximum width reported by a custom renderer.</summary>
+public readonly record struct Measurement(uint Minimum, uint Maximum);
 
 /// <summary>Options for JSON rendering.</summary>
 public readonly record struct JsonOptions(uint Indent = 2, bool Highlight = true, bool SortKeys = false)

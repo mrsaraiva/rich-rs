@@ -34,6 +34,8 @@ jobs:
           version: 0.16.0
       - name: Build rich-ffi static library
         run: cargo build --manifest-path ffi/Cargo.toml
+      - name: Canonical demo source policy
+        run: bash tests/demo-parity/check-sources.sh
       - name: Zig formatting
         run: zig fmt --check bindings/zig
       - name: Zig tests
@@ -42,6 +44,33 @@ jobs:
         run: zig build --build-file bindings/zig/build.zig example
       - name: Zig compile checks
         run: zig build --build-file bindings/zig/build.zig check
+      - name: ABI-v2 parity build
+        run: cargo build --manifest-path ffi/Cargo.toml --release --features parity-trace
+      - name: Zig ReleaseSafe parity and feature trace
+        shell: bash
+        run: |
+          trace_dir="$(mktemp -d)"
+          trace="$trace_dir/events.jsonl"
+          capture="$(mktemp)"
+          normalized="$(mktemp)"
+          RICH_FFI_PARITY_TRACE="$trace" zig build --build-file bindings/zig/build.zig example \
+            -Doptimize=ReleaseSafe \
+            -Drich-ffi-include-dir=../../ffi/include \
+            -Drich-ffi-static=../../ffi/target/release/librich_ffi.a -- --parity > "$capture"
+          python3 tests/demo-parity/normalize.py "$capture" "$normalized"
+          cmp tests/golden/demo-120-truecolor.ansi "$normalized"
+          python3 - "$trace" <<'PY'
+          import json, pathlib, sys
+          events = [json.loads(line)["event"] for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+          required = {
+              "table_grid", "table_none", "table_pad_edge", "table_row_styles",
+              "table_column_options", "syntax_indent_guides", "pretty_new", "pretty_finish",
+              "custom_new", "custom_measure", "custom_render", "sink_push", "sink_line",
+          }
+          missing = required - set(events)
+          if missing or events.count("custom_drop") != 1:
+              raise SystemExit(f"trace mismatch: missing={sorted(missing)} custom_drop={events.count('custom_drop')}")
+          PY
 
   # Cross-target Zig checks require the matching native archive. The FFI CI
   # workflow builds macOS ARM64 and Windows x86_64/ARM64 on native runners;

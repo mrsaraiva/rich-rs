@@ -40,6 +40,8 @@ jobs:
         run: cargo build --manifest-path ffi/Cargo.toml
       - name: Check formatting
         run: test -z "$(gofmt -l bindings/go)"
+      - name: Anti-fake demo source check
+        run: bash tests/demo-parity/check-sources.sh
       - name: Vet
         working-directory: bindings/go
         run: go vet ./...
@@ -55,8 +57,12 @@ jobs:
         working-directory: bindings/go
         run: go test -race ./...
       - name: Demo
-        working-directory: bindings/go
-        run: go run ./cmd/demo
+        run: |
+          cd bindings/go
+          go run ./cmd/demo --parity > "$RUNNER_TEMP/go-demo.ansi"
+          cd ../..
+          python3 tests/demo-parity/normalize.py "$RUNNER_TEMP/go-demo.ansi" "$RUNNER_TEMP/go-demo.norm"
+          cmp tests/golden/demo-120-truecolor.ansi "$RUNNER_TEMP/go-demo.norm"
       - name: External consumer
         run: |
           consumer=$(mktemp -d)
@@ -64,7 +70,7 @@ jobs:
           go mod init example.com/rich-consumer
           go mod edit -require github.com/mrsaraiva/rich-rs/bindings/go@v0.0.0
           go mod edit -replace github.com/mrsaraiva/rich-rs/bindings/go=${GITHUB_WORKSPACE}/bindings/go
-          printf '%s\n' 'package main' 'import rich "github.com/mrsaraiva/rich-rs/bindings/go"' 'func main() { c, err := rich.NewConsole(); if err != nil { panic(err) }; defer c.Close(); if _, err = c.RenderMarkup("hello"); err != nil { panic(err) } }' > main.go
+          printf '%s\n' 'package main' 'import rich "github.com/mrsaraiva/rich-rs/bindings/go"' 'func main() { c, err := rich.NewConsole(); if err != nil { panic(err) }; defer c.Close(); p, err := rich.NewPretty("{\x27external\x27: true}"); if err != nil { panic(err) }; defer p.Close(); r, err := p.Finish(); if err != nil { panic(err) }; defer r.Close(); if _, err = c.Render(r); err != nil { panic(err) } }' > main.go
           go run .
       - name: Package release source
         run: |
@@ -74,4 +80,6 @@ jobs:
           archive="$output/rich-go-$version.tar.gz"
           test -f "$archive"
           tar -tzf "$archive" | grep -Fx "rich-go-$version/include/rich.h" >/dev/null
+          tar -tzf "$archive" | grep -Fx "rich-go-$version/cmd/demo/main.go" >/dev/null
+          tar -xOzf "$archive" "rich-go-$version/include/rich.h" | grep -F '#define RICH_FFI_ABI_VERSION 2' >/dev/null
           if tar -tzf "$archive" | grep -E '\.(a|lib|so|dylib|dll)$'; then exit 1; fi

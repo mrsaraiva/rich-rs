@@ -1,9 +1,15 @@
 # rich-ffi native binding foundation
 
-`rich-ffi` is the stable C ABI shared by the Zig, C#, Go, and Node projections
+`rich-ffi` is the ABI-v2 C surface shared by the C++, Zig, C#, Go, and Node projections
 of [rich-rs](..). Rendering and allocation stay in Rust; language packages add
 only idiomatic ownership and error handling over this boundary. `rich.h` is the
 exhaustive ABI and `rich.hpp` is the reference safe C++ projection.
+
+ABI v2 contains exactly 125 exported functions. It adds native grid/configured
+table construction, alternating row styles, Syntax indentation guides, Pretty,
+and a synchronous custom-renderable adapter. The canonical full feature card is
+[`examples/demo.rs`](../examples/demo.rs); maintained foreign demos construct
+the same card and support deterministic `--parity` capture.
 
 ## Artifacts
 
@@ -70,6 +76,22 @@ These checks do not make arbitrary pointers safe. A non-NULL handle must still
 be live, produced by this library, accessed according to its ownership rules,
 and not concurrently mutated or freed.
 
+## Synchronous custom renderables
+
+`rich_custom_renderable_new` copies a vtable into an Arc-backed adapter. Render
+is required; a NULL measure callback selects `{1, options.max_width}`. A
+non-NULL retained context requires a drop callback, which runs once when the
+last native shared reference is released. Render and measure run synchronously
+on the outer render thread and calls for one adapter are serialized.
+
+The callback receives borrowed options and an ephemeral `RichSegmentSink`.
+Only `rich_segment_sink_push` and `rich_segment_sink_line` are legal during a
+render callback. They copy UTF-8/style input into a transactional native segment
+list; any callback or sink error makes the outer render fail with an empty
+buffer. The sink must not be retained. The C++ `SegmentSink` wrapper is scoped
+and the wrapper contains callback exceptions before rethrowing them after the
+outer native render returns.
+
 ## Plain output and live widgets
 
 `rich_console_set_force_terminal(console, 0)` is the daemon/logging contract:
@@ -97,6 +119,34 @@ g++ -std=c++17 -Iffi/include ffi/examples/smoke_hpp.cpp \
 
 CI also runs these two programs under ASan/UBSan on Linux x86_64 and compiles
 all family-specific examples with warnings as errors.
+
+## Canonical demos
+
+`examples/demo.c` uses the raw C11 ABI with explicit result checks and cleanup;
+`examples/demo.cpp` builds the same card through the safe RAII wrapper. Both
+implement the adaptive five-row HLS ColorBox through the synchronous custom
+renderable API and use native Table, Pretty, Syntax, Markdown, and Panel
+renderables throughout. After building the release archive:
+
+```bash
+cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -Iffi/include \
+  ffi/examples/demo.c ffi/target/release/librich_ffi.a \
+  -lpthread -ldl -lm -o /tmp/rich-demo-c
+/tmp/rich-demo-c --parity
+
+c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Iffi/include \
+  ffi/examples/demo.cpp ffi/target/release/librich_ffi.a \
+  -lpthread -ldl -lm -o /tmp/rich-demo-cpp
+/tmp/rich-demo-cpp --parity
+```
+
+`--parity` fixes the console at 120×72, forced-terminal truecolor. The combined
+gate builds every maintained language demo, performs the anti-fake source scan,
+normalizes only the two timing numbers, and compares exact ANSI bytes:
+
+```bash
+tests/demo-parity/run.sh
+```
 
 ## Release matrix
 

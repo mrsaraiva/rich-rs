@@ -13,9 +13,11 @@ test('multiple Worker environments have isolated constructor and error state', a
     const console = new rich.Console().setForceTerminal(false);
     const text = new rich.Text('worker');
     const renderable = text.finish();
-    const output = console.render(renderable);
-    renderable.close(); text.close(); console.close();
-    parentPort.postMessage({ version: rich.version(), output });
+    const custom = rich.customRenderable({ render(_options, sink) { sink.push(' custom'); } });
+    const output = console.render(renderable) + console.render(custom);
+    const isolated = custom instanceof rich.Renderable && new rich.Measurement(1, 2) instanceof rich.Measurement;
+    custom.close(); renderable.close(); text.close(); console.close();
+    parentPort.postMessage({ version: rich.version(), output, isolated });
   `;
   const run = () =>
     new Promise((resolve, reject) => {
@@ -28,8 +30,8 @@ test('multiple Worker environments have isolated constructor and error state', a
     });
   const results = await Promise.all([run(), run(), run()]);
   assert.deepEqual(results, [
-    { version: '1.2.2', output: 'worker' },
-    { version: '1.2.2', output: 'worker' },
-    { version: '1.2.2', output: 'worker' },
+    { version: '1.2.2', output: 'worker custom', isolated: true },
+    { version: '1.2.2', output: 'worker custom', isolated: true },
+    { version: '1.2.2', output: 'worker custom', isolated: true },
   ]);
 });

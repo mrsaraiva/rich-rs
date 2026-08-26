@@ -19,7 +19,7 @@ public sealed class Panel : IDisposable
     /// <summary>Sets the panel subtitle.</summary>
     public void SetSubtitle(string subtitle) => WithString(subtitle, NativeMethods.PanelSetSubtitle);
     /// <summary>Sets the box style.</summary>
-    public BoxStyle Box { set => owner.Use(pointer => NativeResult.Check(NativeMethods.PanelSetBox(pointer, (uint)value))); }
+    public Box Box { set => owner.Use(pointer => NativeResult.Check(NativeMethods.PanelSetBox(pointer, (uint)value))); }
     /// <summary>Enables or disables expansion.</summary>
     public bool Expand { set => owner.Use(pointer => NativeResult.Check(NativeMethods.PanelSetExpand(pointer, NativeFactory.Bool(value)))); }
     /// <summary>Sets the panel width.</summary>

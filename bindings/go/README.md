@@ -32,7 +32,7 @@ export CGO_LDFLAGS="$(pwd)/ffi/target/debug/librich_ffi.a"
 cd bindings/go
 go test ./...
 go test -race ./...
-go run ./cmd/demo
+go run ./cmd/demo --parity
 ```
 
 The module's Linux cgo directive supplies the exact native-static library list
@@ -91,13 +91,18 @@ ABI output, or a Go-side copy failure. Returned strings are wholly Go-owned.
 Trees use scalar `NodeID` values and `RootNodeID` (`0`); IDs are meaningful
 only while their tree builder is live. Progress uses scalar `TaskID`; task ID
 zero is valid. Progress, status, and spinner rendering is caller-driven: this
-module starts no goroutine, timer, callback, or cursor-control loop.
+module starts no goroutine, timer, callback, or cursor-control loop. Custom
+renderables are the one scoped callback facility. Native code calls them only
+during the invoking thread's synchronous `Console.Render`; it never queues or
+background-dispatches them.
 
 ## ABI and errors
 
-Every constructor verifies native ABI version 1 before its first native call.
+Every constructor verifies native ABI version 2 before its first native call.
 `EnsureABI` can check explicitly, and `Version` returns the synchronized native
-package version. Native failures are `*rich.Error` values with an exact
+package version. The low-level inventory is exhaustive: exactly 125 canonical
+`rich.h` functions are compiled and checked by the test suite. Native failures
+are `*rich.Error` values with an exact
 `ErrorCode`; use `errors.Is(err, rich.ErrInvalidArgument)` and the other
 exported sentinels. An unknown native code or malformed output is
 `ErrABIMismatch`. A contained Rust panic is returned as `ErrNativePanic`, never
@@ -106,15 +111,52 @@ raised as a Go panic.
 ## Features
 
 The public API covers Console/Renderable/Text/Style, Table/Panel/Tree,
-Rule/Columns/Align/Padding, Syntax/Markdown/JSON, and caller-driven
-Progress/Status/Spinner frames. `NewJSONOptions` supplies deliberate defaults;
-`LineRange` preserves separate optional syntax endpoints.
+Rule/Columns/Align/Padding, Syntax/Pretty/Markdown/JSON, scoped custom
+renderables, and caller-driven Progress/Status/Spinner frames.
+
+`NewGridTable` selects Rust's exact `Table::grid()` defaults. `BoxNone`,
+`SetPadEdge`, `SetRowStyles`, and atomic `AddColumnOptions` expose the layout
+used by the canonical Rust demo; optional column enum/dimension pointers mean
+"use the native default." `NewPretty` owns a copied preformatted Debug/repr
+expression, and both Pretty and Syntax expose native indentation guides.
+
+Custom renderers implement a mandatory synchronous method and may implement
+the optional measurement interface:
+
+```go
+type Swatch struct{}
+
+func (Swatch) Render(options rich.RenderOptions, sink *rich.SegmentSink) error {
+    return sink.Push("x", "bold red")
+}
+
+func (Swatch) Measure(options rich.RenderOptions) (rich.Measurement, error) {
+    return rich.Measurement{Minimum: 1, Maximum: options.MaxWidth}, nil
+}
+
+renderable, err := rich.NewCustomRenderable(Swatch{})
+```
+
+The sink and options are callback-scoped. Retaining and later using a sink
+returns `ErrInvalidState`; invoking any other rich API from render/measure is
+also rejected. The binding stores only a numeric `runtime/cgo.Handle` token in
+native memory. Native last-Arc destruction deletes it exactly once after any
+active callback quiesces, including when containers retain the renderable.
+Panics are recovered inside the Go trampoline and become `ErrNativePanic`.
+`NewJSONOptions` supplies deliberate JSON defaults; `LineRange` preserves
+separate optional syntax endpoints.
 
 ## Verification and release source
 
+The canonical demo is a direct port of `examples/demo.rs`. `--parity` forces a
+120-column, 72-row, terminal/truecolor configuration and writes only rendered
+bytes to stdout; after normalizing its two timing numbers those bytes must
+equal `tests/golden/demo-120-truecolor.ansi` exactly.
+
 The normal gates are `gofmt`, `go vet ./...`, `go test ./...`,
-`go test -race ./...`, the demo, and an external consumer module using a local
-`replace`. All require the explicit cgo environment above.
+`GOEXPERIMENT=cgocheck2 go test ./...`, `go test -race ./...`, the anti-fake
+source scan, canonical demo byte comparison, and an external consumer module
+using a local `replace`. All require the explicit cgo environment above.
 
 From a repository checkout:
 

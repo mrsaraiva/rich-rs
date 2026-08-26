@@ -37,7 +37,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define RICH_FFI_ABI_VERSION 1
+#define RICH_FFI_ABI_VERSION 2
 
 #define RICH_COLOR_NONE 0
 
@@ -99,6 +99,20 @@
 
 #define RICH_BOX_MARKDOWN 13
 
+#define RICH_BOX_NONE 14
+
+#define RICH_COLUMN_HAS_JUSTIFY (1 << 0)
+
+#define RICH_COLUMN_HAS_VERTICAL (1 << 1)
+
+#define RICH_COLUMN_HAS_WIDTH (1 << 2)
+
+#define RICH_COLUMN_HAS_MIN_WIDTH (1 << 3)
+
+#define RICH_COLUMN_HAS_RATIO (1 << 4)
+
+#define RICH_COLUMN_NO_WRAP (1 << 5)
+
 #define RICH_TREE_ROOT_ID 0
 
 // Owning alignment builder around borrowed, internally retained content.
@@ -127,6 +141,9 @@ typedef struct RichPadding RichPadding;
 // internally; successful finish consumes and NULLs only the panel builder.
 typedef struct RichPanel RichPanel;
 
+// Owning native Pretty builder over a copied Debug/repr expression.
+typedef struct RichPretty RichPretty;
+
 // Owning caller-driven progress state. No ABI call starts a refresh thread;
 // frame output is owned by the caller and released with `rich_buffer_free`.
 typedef struct RichProgress RichProgress;
@@ -138,6 +155,10 @@ typedef struct RichRenderable RichRenderable;
 // Owning horizontal-rule builder. Setters reject invalid styles/enums;
 // successful finish consumes and NULLs the builder.
 typedef struct RichRule RichRule;
+
+// Ephemeral, thread-bound segment staging area. Its pointer is valid only
+// during the render callback that receives it.
+typedef struct RichSegmentSink RichSegmentSink;
 
 // Owning caller-driven spinner selected by name. Unknown names and non-finite
 // frame times are invalid arguments.
@@ -181,6 +202,54 @@ typedef struct {
   const uint8_t *data;
   uint64_t len;
 } RichStr;
+
+// Stable rendering constraints borrowed by a custom-renderable callback.
+typedef struct {
+  uint32_t min_width;
+  uint32_t max_width;
+  uint32_t max_height;
+  uint32_t color_system;
+  uint8_t is_terminal;
+  uint8_t reserved[7];
+} RichRenderOptions;
+
+// Width bounds written by a custom measurement callback.
+typedef struct {
+  uint32_t minimum;
+  uint32_t maximum;
+} RichMeasurement;
+
+// Nullable synchronous callback pointers copied by `rich_custom_renderable_new`.
+// Construction requires render; measure/drop follow the documented NULL rules.
+typedef struct {
+  RichResult (*render)(void *context, const RichRenderOptions *options, RichSegmentSink *sink);
+  RichResult (*measure)(void *context,
+                        const RichRenderOptions *options,
+                        RichMeasurement *out_measurement);
+  void (*drop)(void *context);
+} RichCustomRenderableVTable;
+
+// Atomic configured-column input. Zero initialization selects every Column
+// default and `{NULL,0}` style means the default style.
+typedef struct {
+  uint32_t flags;
+  uint32_t justify;
+  uint32_t vertical;
+  uint32_t width;
+  uint32_t min_width;
+  uint32_t ratio;
+  RichStr style;
+} RichTableColumnOptions;
+
+typedef RichResult (*RichCustomRenderFn)(void *context,
+                                         const RichRenderOptions *options,
+                                         RichSegmentSink *sink);
+
+typedef RichResult (*RichCustomMeasureFn)(void *context,
+                                          const RichRenderOptions *options,
+                                          RichMeasurement *out_measurement);
+
+typedef void (*RichCustomDropFn)(void *context);
 
 #define RICH_OK 0
 
@@ -273,6 +342,9 @@ RichResult rich_syntax_set_line_numbers(RichSyntax *syntax, uint8_t enabled);
 
 RichResult rich_syntax_set_word_wrap(RichSyntax *syntax, uint8_t enabled);
 
+// Enable or disable native syntax indentation guides.
+RichResult rich_syntax_set_indent_guides(RichSyntax *syntax, uint8_t enabled);
+
 RichResult rich_syntax_set_line_range(RichSyntax *syntax,
                                       uint8_t has_start,
                                       uint32_t start,
@@ -283,6 +355,20 @@ RichResult rich_syntax_set_line_range(RichSyntax *syntax,
 RichResult rich_syntax_finish(RichSyntax **syntax, RichRenderable **out);
 
 void rich_syntax_free(RichSyntax *syntax);
+
+// Copy a UTF-8 Debug/repr expression and create a native Pretty builder.
+// Embedded NUL bytes are ordinary data.
+RichResult rich_pretty_new(RichStr debug_repr, RichPretty **out_pretty);
+
+// Enable or disable native Pretty indentation guides.
+RichResult rich_pretty_set_indent_guides(RichPretty *pretty, uint8_t enabled);
+
+// Consume a live Pretty builder on success, NULLing `*pretty`, and return an
+// independently owned reusable renderable.
+RichResult rich_pretty_finish(RichPretty **pretty, RichRenderable **out_renderable);
+
+// Destroy an unfinished Pretty builder. NULL is accepted.
+void rich_pretty_free(RichPretty *pretty);
 
 // Create Markdown content through `out_markdown`.
 RichResult rich_markdown_new(RichStr source, RichMarkdown **out_markdown);
@@ -309,6 +395,21 @@ RichResult rich_json_new(RichStr data,
 RichResult rich_json_finish(RichJson **json, RichRenderable **out);
 
 void rich_json_free(RichJson *json);
+
+// Create an Arc-backed synchronous custom renderable. Render is required;
+// NULL measure selects `{1,max_width}`, and NULL drop requires NULL context.
+// Context ownership transfers only on success and is released by drop when
+// the last native Arc is gone.
+RichResult rich_custom_renderable_new(void *context,
+                                      const RichCustomRenderableVTable *vtable,
+                                      RichRenderable **out_renderable);
+
+// Stage copied UTF-8 text with a native-parsed style. `{NULL,0}` style is
+// unstyled. A failed push poisons the transactional sink with its first error.
+RichResult rich_segment_sink_push(RichSegmentSink *sink, RichStr text, RichStr style);
+
+// Stage one native newline segment in the active transactional sink.
+RichResult rich_segment_sink_line(RichSegmentSink *sink);
 
 // Create a rule builder through `out_rule`.
 RichResult rich_rule_new(RichRule **out_rule);
@@ -446,6 +547,9 @@ void rich_panel_free(RichPanel *panel);
 // Create an empty table builder through `out_table`.
 RichResult rich_table_new(RichTable **out_table);
 
+// Create an exact `Table::grid()` builder through `out_table`.
+RichResult rich_table_new_grid(RichTable **out_table);
+
 // Consume a live table on success, NULLing `*table`, and return an owned renderable.
 RichResult rich_table_finish(RichTable **table, RichRenderable **out_renderable);
 
@@ -462,6 +566,13 @@ RichResult rich_table_set_caption_markup(RichTable *table, RichConsole *console,
 
 RichResult rich_table_set_box(RichTable *table, uint32_t box_id);
 
+// Enable or disable padding on the outermost table cells.
+RichResult rich_table_set_pad_edge(RichTable *table, uint8_t pad);
+
+// Atomically replace alternating row styles. `{NULL,0}` clears the list;
+// every input string is copied and parsed before the table is mutated.
+RichResult rich_table_set_row_styles(RichTable *table, const RichStr *styles, uint32_t style_count);
+
 RichResult rich_table_set_show_header(RichTable *table, uint8_t show);
 
 RichResult rich_table_set_show_lines(RichTable *table, uint8_t show);
@@ -477,6 +588,12 @@ RichResult rich_table_set_style(RichTable *table, RichStr style);
 RichResult rich_table_add_column(RichTable *table, RichStr header);
 
 RichResult rich_table_add_column_renderable(RichTable *table, const RichRenderable *header);
+
+// Validate and add one fully configured column atomically. `header` may be
+// NULL; a non-NULL renderable is borrowed and retained through shared ownership.
+RichResult rich_table_add_column_options(RichTable *table,
+                                         const RichRenderable *header,
+                                         const RichTableColumnOptions *options);
 
 RichResult rich_table_add_row_strs(RichTable *table, const RichStr *cells, uint32_t cell_count);
 

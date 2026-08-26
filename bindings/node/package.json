@@ -20,6 +20,7 @@
     "binding.gyp",
     "index.js",
     "index.d.ts",
+    "examples/demo.js",
     "package-release.sh",
     "README.md",
     "src/",

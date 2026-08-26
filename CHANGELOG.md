@@ -9,8 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Canonical demo parity across Rust, C, C++, Zig, Go, C#, and Node.** Every
+  binding now builds the complete 120-column truecolor feature card from
+  `examples/demo.rs`, including the adaptive gradient, configured/grid tables,
+  Pretty output, Syntax indent guides, Markdown, multilingual text, timing
+  lines, and sponsor panel. A checked ANSI golden, anti-fake feature traces,
+  C/C++ sanitizer runs, and combined CI/release gate require byte parity with
+  normalization limited to the two timing numbers.
+
+- **Scoped custom renderables in every native projection.** ABI v2 exposes a
+  general synchronous render/measure vtable with copied render options,
+  transactional segment sinks, serialized Arc-shared callbacks, exact
+  last-reference context cleanup, contained foreign errors, and no background
+  dispatch. The binding surfaces also add grid/configured-column and row-style
+  table APIs, native Pretty builders, and Syntax indent-guide control.
+
 - **Node.js 24/22 bindings through Node-API 10.** The complete owning addon
-  and TypeScript API project all 113 native functions with exception-safe
+  and TypeScript API project all 125 native functions with exception-safe
   output-buffer RAII, BigInt tree/task IDs, explicit `close`/GC lifecycles,
   and borrowed reusable-renderable composition. Binding tests, a deterministic
   demo, dedicated CI, and the reproducible `rich-rs-native-<version>.tgz`
@@ -37,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI, and the `rich-zig-<version>.tar.gz` release source artifact are included.
 
 ### Changed
+
+- **Advanced the shared native binding contract to ABI v2.** The generated C
+  header now exhaustively declares 125 functions, adding twelve calls for
+  configured/grid tables, alternating row styles, Pretty, Syntax indent guides,
+  and callback-backed custom renderables. C and safe C++ ship full canonical
+  demos, and all native/source release packages validate the v2 header and demo
+  inputs before publication.
 
 - **Redesigned the experimental native ABI as the shared Zig, C#, Go, and Node
   binding foundation.** All calls now use fixed-width wire types, checked

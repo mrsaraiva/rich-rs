@@ -6,11 +6,30 @@ public sealed unsafe class Table : IDisposable
     private readonly NativeOwner<TableHandle> owner;
 
     /// <summary>Creates an empty table.</summary>
-    public unsafe Table()
+    public Table()
+        : this(NativeMethods.TableNew)
     {
-        RichRuntime.EnsureAbi();
-        owner = new(NativeFactory.Create(new TableHandle(), NativeMethods.TableNew));
     }
+
+    private Table(NewHandleCall create)
+    {
+        CallbackGuard.ThrowIfActive();
+        TableHandle handle = new();
+        owner = new(handle);
+        try
+        {
+            RichRuntime.EnsureAbi();
+            NativeFactory.Initialize(handle, create);
+        }
+        catch
+        {
+            owner.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Creates a borderless grid with native grid defaults.</summary>
+    public static Table CreateGrid() => new(NativeMethods.TableNewGrid);
 
     /// <summary>Sets a plain title.</summary>
     public void SetTitle(string title) => WithString(title, NativeMethods.TableSetTitle);
@@ -23,7 +42,7 @@ public sealed unsafe class Table : IDisposable
     public void SetCaptionMarkup(RichConsole console, string markup) => SetMarkup(console, markup, NativeMethods.TableSetCaptionMarkup);
 
     /// <summary>Sets the table border style.</summary>
-    public BoxStyle Box { set => owner.Use(pointer => NativeResult.Check(NativeMethods.TableSetBox(pointer, (uint)value))); }
+    public Box Box { set => owner.Use(pointer => NativeResult.Check(NativeMethods.TableSetBox(pointer, (uint)value))); }
     /// <summary>Shows or hides the header.</summary>
     public bool ShowHeader { set => owner.Use(pointer => NativeResult.Check(NativeMethods.TableSetShowHeader(pointer, NativeFactory.Bool(value)))); }
     /// <summary>Shows or hides row separators.</summary>
@@ -37,6 +56,15 @@ public sealed unsafe class Table : IDisposable
     public void SetPadding(uint left, uint right) => owner.Use(pointer =>
         NativeResult.Check(NativeMethods.TableSetPadding(pointer, left, right)));
 
+    /// <summary>Controls padding at the outer table edge.</summary>
+    public void SetPadEdge(bool pad) => owner.Use(pointer => NativeResult.Check(
+        NativeMethods.TableSetPadEdge(pointer, NativeFactory.Bool(pad))));
+
+    /// <summary>Atomically replaces the alternating row styles.</summary>
+    public void SetRowStyles(IReadOnlyList<string> styles) => owner.Use(table =>
+        NativeResult.Check(Utf8.WithArray(styles,
+            (values, count) => NativeMethods.TableSetRowStyles(table, values, count))));
+
     /// <summary>Sets the table style.</summary>
     public void SetStyle(string style) => WithString(style, NativeMethods.TableSetStyle);
 
@@ -49,6 +77,38 @@ public sealed unsafe class Table : IDisposable
         ArgumentNullException.ThrowIfNull(header);
         owner.Use(table => header.Borrow(renderable =>
             NativeResult.Check(NativeMethods.TableAddColumnRenderable(table, renderable))));
+    }
+
+    /// <summary>Adds an atomically configured column with an optional borrowed header.</summary>
+    public void AddColumnOptions(ColumnOptions options, Renderable? header = null)
+    {
+        byte[] styleBytes = Utf8.Encode(options.Style);
+        Utf8.Map(styleBytes, nativeStyle =>
+        {
+            NativeRichTableColumnOptions native = new()
+            {
+                Flags = ColumnFlags(options),
+                Justify = (uint)options.Justification.GetValueOrDefault(),
+                Vertical = (uint)options.Vertical.GetValueOrDefault(),
+                Width = options.Width.GetValueOrDefault(),
+                MinWidth = options.MinimumWidth.GetValueOrDefault(),
+                Ratio = options.Ratio.GetValueOrDefault(),
+                Style = nativeStyle,
+            };
+            owner.Use(table =>
+            {
+                if (header is null)
+                {
+                    NativeResult.Check(AddColumnOptionsCore(table, 0, native));
+                }
+                else
+                {
+                    header.Borrow(headerPointer => NativeResult.Check(
+                        AddColumnOptionsCore(table, headerPointer, native)));
+                }
+            });
+            return 0;
+        });
     }
 
     /// <summary>Adds an atomically validated row of strings.</summary>
@@ -98,4 +158,18 @@ public sealed unsafe class Table : IDisposable
         owner.Use(table => console.Borrow(consolePointer =>
             NativeResult.Check(Utf8.With(markup, native => setter(table, consolePointer, native)))));
     }
+
+    private static uint ColumnFlags(ColumnOptions options)
+    {
+        return (options.Justification.HasValue ? NativeColumnFlags.HasJustify : 0)
+            | (options.Vertical.HasValue ? NativeColumnFlags.HasVertical : 0)
+            | (options.Width.HasValue ? NativeColumnFlags.HasWidth : 0)
+            | (options.MinimumWidth.HasValue ? NativeColumnFlags.HasMinimumWidth : 0)
+            | (options.Ratio.HasValue ? NativeColumnFlags.HasRatio : 0)
+            | (options.NoWrap ? NativeColumnFlags.NoWrap : 0);
+    }
+
+    private static unsafe uint AddColumnOptionsCore(
+        nint table, nint header, NativeRichTableColumnOptions options) =>
+        NativeMethods.TableAddColumnOptions(table, header, &options);
 }

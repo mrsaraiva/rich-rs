@@ -1113,6 +1113,7 @@ func TestEveryOwnerCloseIsIdempotent(t *testing.T) {
 	style, _ := ParseStyle("bold")
 	text, _ := NewText("x")
 	syntax, _ := NewSyntax("x", "text")
+	pretty, _ := NewPretty("{'x': 1}")
 	markdown, _ := NewMarkdown("x")
 	jsonValue, _ := NewJSON("{}", NewJSONOptions())
 	rule, _ := NewRule()
@@ -1126,7 +1127,7 @@ func TestEveryOwnerCloseIsIdempotent(t *testing.T) {
 	align, _ := NewAlign(r, AlignLeft)
 	padding, _ := NewPadding(r, PaddingDimensions{})
 	panel, _ := NewPanel(r)
-	closers := []interface{ Close() error }{c, style, text, syntax, markdown, jsonValue, rule, columns, align, padding, progress, status, spinner, panel, table, tree, r}
+	closers := []interface{ Close() error }{c, style, text, syntax, pretty, markdown, jsonValue, rule, columns, align, padding, progress, status, spinner, panel, table, tree, r}
 	for _, closer := range closers {
 		requireNoError(t, closer.Close())
 		requireNoError(t, closer.Close())

@@ -5,15 +5,22 @@ import {
   Console,
   HorizontalAlign,
   Json,
+  Justify,
   Panel,
   Progress,
+  Pretty,
   Renderable,
+  Measurement,
   ROOT_NODE_ID,
   RichError,
   RichErrorCode,
   Table,
   Text,
   Tree,
+  VerticalAlign,
+  customRenderable,
+  type RenderOptions,
+  type SegmentSink,
   type NodeId,
   type TaskId,
 } from '../../index.js';
@@ -37,6 +44,33 @@ const progress = new Progress();
 const task: TaskId = progress.addTask('typed', 1);
 progress.update(task, 1);
 new Json('{"typed":true}', { indent: 2, highlight: true, sortKeys: false });
+const pretty = new Pretty("{'typed': true}").setIndentGuides(true).finish();
+const custom = customRenderable({
+  measure(options: RenderOptions): Measurement {
+    return new Measurement(1, options.maxWidth);
+  },
+  render(_options: RenderOptions, sink: SegmentSink): void {
+    sink.push('typed custom', 'green').line();
+  },
+});
+Table.grid()
+  .setPadEdge(false)
+  .setRowStyles(['', 'dim'])
+  .setBox(Box.None)
+  .addColumnOptions(
+    {
+      justify: Justify.Right,
+      vertical: VerticalAlign.Top,
+      width: 12,
+      minWidth: 3,
+      ratio: 1,
+      style: 'cyan',
+      noWrap: true,
+    },
+    custom,
+  );
+richConsole.render(pretty);
+richConsole.render(custom);
 
 const error: RichError = new RichError('typed', RichErrorCode.InvalidArgument);
 const evidence: readonly [string, RichErrorCode] = [output, error.code];

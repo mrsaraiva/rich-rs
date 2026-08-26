@@ -56,6 +56,7 @@ export const Box: Readonly<{
   MinimalHeavyHead: 11;
   SimpleHeavy: 12;
   Markdown: 13;
+  None: 14;
 }>;
 export type BoxValue = (typeof Box)[keyof typeof Box];
 
@@ -104,11 +105,14 @@ export class Style implements Owner {
 
 export class Table implements Owner {
   constructor();
+  static grid(): Table;
   setTitle(title: string): this;
   setCaption(caption: string): this;
   setTitleMarkup(console: Console, markup: string): this;
   setCaptionMarkup(console: Console, markup: string): this;
   setBox(box: BoxValue): this;
+  setPadEdge(pad: boolean): this;
+  setRowStyles(styles: readonly string[]): this;
   setShowHeader(show: boolean): this;
   setShowLines(show: boolean): this;
   setShowEdge(show: boolean): this;
@@ -117,10 +121,21 @@ export class Table implements Owner {
   setStyle(style: string): this;
   addColumn(header: string): this;
   addColumnRenderable(header: Renderable): this;
+  addColumnOptions(options: TableColumnOptions, header?: Renderable | null): this;
   addRowStrings(cells: readonly string[]): this;
   addRowRenderables(cells: readonly Renderable[]): this;
   finish(): Renderable;
   close(): void;
+}
+
+export interface TableColumnOptions {
+  justify?: JustifyValue;
+  vertical?: VerticalAlignValue;
+  width?: number;
+  minWidth?: number;
+  ratio?: number;
+  style?: string;
+  noWrap?: boolean;
 }
 
 export class Panel implements Owner {
@@ -199,10 +214,46 @@ export class Syntax implements Owner {
   setTheme(theme: string): this;
   setLineNumbers(enabled: boolean): this;
   setWordWrap(enabled: boolean): this;
+  setIndentGuides(enabled: boolean): this;
   setLineRange(start: number | null, end: number | null): this;
   finish(): Renderable;
   close(): void;
 }
+
+export class Pretty implements Owner {
+  constructor(debugRepr: string);
+  setIndentGuides(enabled: boolean): this;
+  finish(): Renderable;
+  close(): void;
+}
+
+export class RenderOptions {
+  private constructor();
+  readonly minWidth: number;
+  readonly maxWidth: number;
+  readonly maxHeight: number;
+  readonly colorSystem: ColorSystemValue;
+  readonly isTerminal: boolean;
+}
+
+export class Measurement {
+  constructor(minimum: number, maximum: number);
+  readonly minimum: number;
+  readonly maximum: number;
+}
+
+export class SegmentSink {
+  private constructor();
+  push(text: string, style?: string): this;
+  line(): this;
+}
+
+export interface CustomRenderer {
+  render(options: RenderOptions, sink: SegmentSink): void;
+  measure?(options: RenderOptions): Measurement;
+}
+
+export function customRenderable(renderer: CustomRenderer): Renderable;
 
 export class Markdown implements Owner {
   constructor(source: string);

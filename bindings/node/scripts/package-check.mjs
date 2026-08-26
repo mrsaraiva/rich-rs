@@ -18,8 +18,8 @@ const inventoryNames = [...inventory.matchAll(/RICH_NATIVE_SYMBOL\((rich_[a-z0-9
   .map((match) => match[1])
   .sort();
 
-if (headerNames.length !== 113) {
-  throw new Error(`expected 113 canonical symbols, found ${headerNames.length}`);
+if (headerNames.length !== 125) {
+  throw new Error(`expected 125 canonical symbols, found ${headerNames.length}`);
 }
 if (JSON.stringify(headerNames) !== JSON.stringify(inventoryNames)) {
   const missing = headerNames.filter((name) => !inventoryNames.includes(name));
@@ -39,7 +39,14 @@ for (const forbidden of ['node_modules/', 'build/', 'coverage/']) {
     throw new Error(`package includes forbidden path ${forbidden}`);
   }
 }
-for (const required of ['binding.gyp', 'index.js', 'index.d.ts', 'src/addon.cc', 'src/common.cc']) {
+for (const required of [
+  'binding.gyp',
+  'examples/demo.js',
+  'index.js',
+  'index.d.ts',
+  'src/addon.cc',
+  'src/common.cc',
+]) {
   if (!files.includes(required)) throw new Error(`package is missing ${required}`);
 }
 process.stdout.write(`Package and ${headerNames.length}-symbol inventory checks passed\n`);

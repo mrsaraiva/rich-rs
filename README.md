@@ -31,6 +31,36 @@ Run the demo to see rich-rs in action:
 cargo run --example demo
 ```
 
+## Native language bindings
+
+The Rust demo in [`examples/demo.rs`](examples/demo.rs) is the canonical feature card for the
+C, C++, Zig 0.16, Go 1.27, .NET 10, and Node 24/22 bindings. All projections use the same
+`rich-ffi` ABI v2 rendering engine and exhaustively account for its 125 exported functions;
+there is no separate renderer or Python binding behind them.
+
+ABI v2 includes the grid/configured-column and alternating-row table features used by the
+card, native Pretty rendering, Syntax indent guides, and scoped custom renderables. Custom
+render/measure callbacks run synchronously and serially on the invoking thread, emit through a
+transactional native segment sink, and are never dispatched by a refresh worker. Returned
+buffers and owning handles still follow each binding's documented explicit lifecycle.
+
+The checked parity mode fixes the terminal at 120 columns with truecolor enabled:
+
+```sh
+cargo run --release --example demo -- --parity
+bash tests/demo-parity/run.sh
+```
+
+The parity runner builds and executes the Rust, C, C++, Zig, Go, C#, and Node demos against the
+same native library. Their ANSI output must match
+[`tests/golden/demo-120-truecolor.ansi`](tests/golden/demo-120-truecolor.ansi) byte-for-byte;
+only the two measured timing numbers are normalized. Binding-specific build, ownership, and
+package instructions live under `ffi/` and `bindings/<language>/`.
+
+Native release archives are target-specific: Linux GNU x86_64/ARM64, macOS Apple Silicon, and
+Windows MSVC x86_64/ARM64. Source projections must be paired with the matching ABI-v2 archive;
+they do not download native libraries or substitute an archive from another platform.
+
 ## Console Printing
 
 To add rich output to your application, create a `Console` and use its print methods:

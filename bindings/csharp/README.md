@@ -2,7 +2,7 @@
 
 `RichRs.Native` is the safe .NET 10 / C# 14 projection of the `rich-ffi`
 native ABI. Rust remains the only rendering implementation. The managed
-package checks ABI version 1, converts native result codes to typed
+package checks ABI version 2 and its exact 125-symbol inventory, converts native result codes to typed
 exceptions, and exposes every native family without exposing raw pointers.
 
 ## Requirements and native loading
@@ -40,7 +40,7 @@ RICH_RS_NATIVE_LIBRARY="$PWD/ffi/target/debug/librich_ffi.so" \
   dotnet test bindings/csharp/RichRs.sln --configuration Release --no-build
 RICH_RS_NATIVE_LIBRARY="$PWD/ffi/target/debug/librich_ffi.so" \
   dotnet run --project bindings/csharp/examples/RichRs.Demo \
-    --configuration Release --no-build
+    --configuration Release --no-build -- --parity
 
 RICH_RS_NATIVE_LIBRARY="$PWD/ffi/target/debug/librich_ffi.so" \
   bindings/csharp/package-release.sh 1.2.2 /tmp/rich-csharp-package
@@ -105,3 +105,55 @@ Native failures throw `RichException` with a stable `RichErrorCode`:
 `NullArgument`, `InvalidUtf8`, `InvalidArgument`, `InvalidState`, `Io`,
 `Render`, `NativePanic`, or managed-only `AbiMismatch`. Styles, JSON, themes,
 spinner names, task/node IDs, and finite-number rules remain native-authoritative.
+
+## ABI v2 composition and custom rendering
+
+[`examples/demo.rs`](../../examples/demo.rs) is the canonical demo. The .NET
+demo constructs the same card through the public API; `--parity` fixes the
+console at 120 by 72, forced-terminal truecolor and emits deterministic UTF-8
+apart from the two measured durations.
+
+`Table.CreateGrid()` exposes native grid defaults. `SetPadEdge`,
+`SetRowStyles`, `Box.None`, and `AddColumnOptions` project native layout
+without a managed layout engine. Optional `ColumnOptions` values map to the
+ABI presence flags, and a renderable header remains borrowed and reusable.
+`Pretty` is a normal `SafeHandle` builder, while `Syntax.SetIndentGuides`
+enables native syntax guides.
+
+```csharp
+using Table table = Table.CreateGrid();
+table.Box = Box.None;
+table.SetPadEdge(false);
+table.SetRowStyles(["", "dim"]);
+table.AddColumnOptions(new ColumnOptions(
+    Justification: Justify.Right,
+    MinimumWidth: 12,
+    Ratio: 1,
+    Style: "cyan",
+    NoWrap: true));
+```
+
+Implement `ICustomRenderer` for synchronous, layout-aware native segments.
+`RenderOptions` and `Measurement` are immutable managed values. `SegmentSink`
+is valid only on the invoking thread during `Render`; the wrapper tombstones
+it on callback exit, so retained or wrong-thread use fails locally. All other
+binding calls, including disposal, are locally prohibited inside callbacks.
+Managed exceptions are contained by static Cdecl trampolines and rethrown
+after the outer `RichConsole.Render` unwinds. The renderer is held by a
+`GCHandle` until the last native Arc is released; no callback is dispatched to
+a worker or retained by live widgets.
+
+```csharp
+sealed class Rule : ICustomRenderer
+{
+    public void Render(RenderOptions options, SegmentSink sink)
+    {
+        sink.Push(new string('=', checked((int)options.MaxWidth)), "green");
+        sink.Line();
+    }
+
+    public Measurement Measure(RenderOptions options) => new(1, options.MaxWidth);
+}
+
+using Renderable custom = CustomRenderable.Create(new Rule());
+```

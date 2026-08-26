@@ -34,6 +34,9 @@ public sealed unsafe class Syntax : IDisposable
     public bool LineNumbers { set => owner.Use(pointer => NativeResult.Check(NativeMethods.SyntaxSetLineNumbers(pointer, NativeFactory.Bool(value)))); }
     /// <summary>Enables or disables word wrapping.</summary>
     public bool WordWrap { set => owner.Use(pointer => NativeResult.Check(NativeMethods.SyntaxSetWordWrap(pointer, NativeFactory.Bool(value)))); }
+    /// <summary>Enables or disables native indentation guides.</summary>
+    public void SetIndentGuides(bool enabled) => owner.Use(pointer => NativeResult.Check(
+        NativeMethods.SyntaxSetIndentGuides(pointer, NativeFactory.Bool(enabled))));
     /// <summary>Sets optional inclusive line range endpoints.</summary>
     public void SetLineRange(uint? start, uint? end) => owner.Use(pointer => NativeResult.Check(
         NativeMethods.SyntaxSetLineRange(pointer, NativeFactory.Bool(start.HasValue), start.GetValueOrDefault(),
@@ -41,6 +44,31 @@ public sealed unsafe class Syntax : IDisposable
     /// <summary>Consumes this syntax builder.</summary>
     public unsafe Renderable Finish() => Renderable.Finish(owner, NativeMethods.SyntaxFinish);
     /// <summary>Releases an unfinished syntax builder.</summary>
+    public void Dispose() => owner.Dispose();
+}
+
+/// <summary>A native Debug/repr highlighter builder.</summary>
+public sealed unsafe class Pretty : IDisposable
+{
+    private readonly NativeOwner<PrettyHandle> owner;
+
+    /// <summary>Creates a Pretty builder from a copied, length-delimited representation.</summary>
+    public Pretty(string debugRepresentation)
+    {
+        byte[] encoded = Utf8.Encode(debugRepresentation);
+        RichRuntime.EnsureAbi();
+        owner = new(Utf8.Map(encoded, native => NativeFactory.Create(
+            new PrettyHandle(), output => NativeMethods.PrettyNew(native, output))));
+    }
+
+    /// <summary>Enables or disables native indentation guides.</summary>
+    public void SetIndentGuides(bool enabled) => owner.Use(pointer => NativeResult.Check(
+        NativeMethods.PrettySetIndentGuides(pointer, NativeFactory.Bool(enabled))));
+
+    /// <summary>Consumes this builder and returns a reusable renderable.</summary>
+    public Renderable Finish() => Renderable.Finish(owner, NativeMethods.PrettyFinish);
+
+    /// <summary>Releases an unfinished builder.</summary>
     public void Dispose() => owner.Dispose();
 }
 

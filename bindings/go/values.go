@@ -3,7 +3,7 @@
 package rich
 
 // ABIVersion is the ABI expected by this Go module.
-const ABIVersion uint32 = 1
+const ABIVersion uint32 = 2
 
 type ColorSystem uint32
 
@@ -58,7 +58,35 @@ const (
 	BoxMinimalHeavyHead
 	BoxSimpleHeavy
 	BoxMarkdown
+	BoxNone
 )
+
+// ColumnOptions configures one table column atomically. Nil optional fields
+// retain the native Column default; selected dimensions must be nonzero.
+type ColumnOptions struct {
+	Justify  *Justify
+	Vertical *VerticalAlign
+	Width    *uint32
+	MinWidth *uint32
+	Ratio    *uint32
+	Style    string
+	NoWrap   bool
+}
+
+// RenderOptions is a callback-scoped copy of native rendering constraints.
+type RenderOptions struct {
+	MinWidth    uint32
+	MaxWidth    uint32
+	MaxHeight   uint32
+	ColorSystem ColorSystem
+	IsTerminal  bool
+}
+
+// Measurement is the width range reported by an optional CustomMeasurer.
+type Measurement struct {
+	Minimum uint32
+	Maximum uint32
+}
 
 type NodeID uint64
 

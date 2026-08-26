@@ -87,6 +87,7 @@ const Box = frozen({
   MinimalHeavyHead: c.BOX_MINIMAL_HEAVY_HEAD,
   SimpleHeavy: c.BOX_SIMPLE_HEAVY,
   Markdown: c.BOX_MARKDOWN,
+  None: c.BOX_NONE,
 });
 
 const api = {
@@ -112,6 +113,11 @@ const api = {
   Align: native.Align,
   Padding: native.Padding,
   Syntax: native.Syntax,
+  Pretty: native.Pretty,
+  RenderOptions: native.RenderOptions,
+  Measurement: native.Measurement,
+  SegmentSink: native.SegmentSink,
+  customRenderable: native.customRenderable,
   Markdown: native.Markdown,
   Json: native.Json,
   Progress: native.Progress,
@@ -129,6 +135,7 @@ if (process.env.RICH_RS_NATIVE_TEST === '1') {
       finishFailure: native._testFinishFailure,
       finishMatrix: native._testFinishMatrix,
       finishAddressReuse: native._testFinishAddressReuse,
+      customStats: native._testCustomStats,
     }),
     enumerable: false,
   });

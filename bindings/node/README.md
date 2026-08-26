@@ -20,7 +20,7 @@ npm run build -- \
   --rich_ffi_include_dir="$PWD/../../ffi/include" \
   --rich_ffi_static="$PWD/../../ffi/target/debug/librich_ffi.a"
 npm test
-npm run demo
+npm run demo -- --parity
 ```
 
 The two node-gyp variables always accept explicit absolute paths. Monorepo debug defaults
@@ -39,6 +39,8 @@ claim based on this Linux job.
 Node-API 10 gives one addon ABI across the maintained Node 22/24 runtime lines. The build
 uses C++ exceptions for `node-addon-api`, disables RTTI, enables warnings as errors, and does
 not use `NAPI_EXPERIMENTAL`, NAN, direct V8 APIs, or runtime FFI packages.
+The addon requires `rich-ffi` ABI version 2 and mechanically inventories all 125 exported
+functions from the generated header.
 
 ## Ownership, errors, and values
 
@@ -72,9 +74,12 @@ constructor/factory and may also be called explicitly; `version()` returns copie
 import {
   Box,
   Console,
+  Justify,
+  Measurement,
   Panel,
   Table,
   Text,
+  customRenderable,
 } from '@rich-rs/native';
 
 const console = new Console().setForceTerminal(false);
@@ -89,6 +94,47 @@ const output = console.render(panel.finish());
 
 `index.d.ts` covers every constructor, factory, option, method, enum, ID, error and lifecycle
 operation without pointer-shaped numbers or `any`.
+
+## ABI v2 rendering APIs
+
+`Table.grid()` exposes the native borderless grid defaults. `setPadEdge`, `setRowStyles`,
+and `addColumnOptions` project the native table configuration atomically; column option
+objects reject unknown keys. `Box.None` is valid for tables. `Pretty` is an owning builder
+with the same exact-once `finish()`/`close()` state machine as other content builders, and
+both `Pretty` and `Syntax` expose `setIndentGuides`.
+
+```ts
+const table = Table.grid()
+  .setPadEdge(false)
+  .setRowStyles(['', 'dim'])
+  .setBox(Box.None)
+  .addColumnOptions({ ratio: 1, justify: Justify.Left, noWrap: true });
+```
+
+`customRenderable({ render, measure? })` installs synchronous JavaScript callbacks behind a
+native `Renderable`. `RenderOptions` and `Measurement` are immutable values. A
+`SegmentSink` may only be used during the `render` callback that receives it; retained sinks
+are tombstoned and fail locally. Callbacks run only in the creating Node environment and OS
+thread, are never dispatched to a background thread, and may not reenter any other binding
+operation. The addon retains the renderer strongly until the native last `Arc` is released,
+catches every callback exception at the C boundary, discards staged segments transactionally,
+and restores the original JavaScript exception after the outer render returns.
+
+```ts
+const custom = customRenderable({
+  measure(options) {
+    return new Measurement(1, options.maxWidth);
+  },
+  render(options, sink) {
+    sink.push(`width=${options.maxWidth}`, 'bold cyan').line();
+  },
+});
+```
+
+The repository's `examples/demo.rs` is canonical. `npm run demo -- --parity` recreates that
+card through the public high-level API at 120 columns with forced truecolor, performs cold and
+warm offscreen renders, and writes the canonical capture. The demo closes every owner in
+reverse order and emits no manual terminal control or layout bytes.
 
 ## Caller-driven live frames
 
@@ -106,7 +152,7 @@ npm run package:check
 ./package-release.sh 1.2.2 /tmp/rich-node-package
 ```
 
-The package check compares the compiled symbol inventory with all 113 declarations in the
+The package check compares the compiled symbol inventory with all 125 declarations in the
 canonical generated header. `package-release.sh` stages source, metadata, the canonical
 header and MIT license, excludes host binaries/build output, creates the npm `.tgz`, extracts
 it, rebuilds against the supplied matching FFI archive, and loads the resulting consumer.

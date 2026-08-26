@@ -30,13 +30,14 @@ fi
 native_archive=$(realpath "$native_archive")
 
 stage=$stage_root/package
-mkdir -p "$stage/src" "$stage/scripts" "$stage/include" "$output_dir"
+mkdir -p "$stage/src" "$stage/scripts" "$stage/include" "$stage/examples" "$output_dir"
 cp "$script_dir/package.json" "$script_dir/package-lock.json" "$stage/"
 cp "$script_dir/.clang-format" "$stage/"
 cp "$script_dir/binding.gyp" "$script_dir/index.js" "$script_dir/index.d.ts" "$stage/"
 cp "$script_dir/README.md" "$script_dir/package-release.sh" "$stage/"
 cp "$script_dir"/src/* "$stage/src/"
 cp "$script_dir"/scripts/* "$stage/scripts/"
+cp "$script_dir/examples/demo.js" "$stage/examples/"
 cp "$repo_root/ffi/include/rich.h" "$stage/include/"
 cp "$repo_root/LICENSE" "$stage/"
 
@@ -58,7 +59,7 @@ tar --sort=name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 \
 
 tar -tzf "$archive" >"$stage_root/archive.list"
 for required in package/include/rich.h package/LICENSE package/package-lock.json \
-    package/src/addon.cc package/index.d.ts; do
+    package/src/addon.cc package/index.d.ts package/examples/demo.js; do
   grep -Fxq "$required" "$stage_root/archive.list" || {
     echo "release archive is missing $required" >&2
     exit 1
@@ -77,5 +78,6 @@ npm run build --prefix "$extract_root/package" -- \
   "--rich_ffi_static=$native_archive" >/dev/null
 node -e "const rich=require(process.argv[1]); rich.ensureAbi(); if (rich.version() !== '$version') process.exit(1)" \
   "$extract_root/package"
+npm run demo --prefix "$extract_root/package" -- --parity >/dev/null
 
 printf '%s\n' "$archive"

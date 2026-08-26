@@ -3,6 +3,7 @@
 package rich
 
 type Syntax struct{ state *ownerState }
+type Pretty struct{ state *ownerState }
 type Markdown struct{ state *ownerState }
 type JSON struct{ state *ownerState }
 
@@ -44,6 +45,12 @@ func (s *Syntax) SetWordWrap(v bool) error {
 	}
 	return withOwner(s.state, func(h nativeHandle) error { return nativeSyntaxBool(h, 1, v) })
 }
+func (s *Syntax) SetIndentGuides(v bool) error {
+	if s == nil {
+		return ErrInvalidState
+	}
+	return withOwner(s.state, func(h nativeHandle) error { return nativeSyntaxBool(h, 2, v) })
+}
 func (s *Syntax) SetLineRange(v LineRange) error {
 	if s == nil {
 		return ErrInvalidState
@@ -55,6 +62,34 @@ func (s *Syntax) Finish() (*Renderable, error) {
 		return nil, ErrInvalidState
 	}
 	return finishOwner(s.state)
+}
+
+// NewPretty creates an owning native Pretty builder from a preformatted
+// Debug/repr expression. It does not parse JSON or invoke a Go formatter.
+func NewPretty(debugRepresentation string) (*Pretty, error) {
+	h, err := nativePrettyNew(debugRepresentation)
+	if err != nil {
+		return nil, err
+	}
+	return &Pretty{state: newOwnerState(hPretty, h)}, nil
+}
+func (p *Pretty) Close() error {
+	if p == nil {
+		return nil
+	}
+	return closeOwner(p.state)
+}
+func (p *Pretty) SetIndentGuides(v bool) error {
+	if p == nil {
+		return ErrInvalidState
+	}
+	return withOwner(p.state, func(h nativeHandle) error { return nativePrettyIndentGuides(h, v) })
+}
+func (p *Pretty) Finish() (*Renderable, error) {
+	if p == nil {
+		return nil, ErrInvalidState
+	}
+	return finishOwner(p.state)
 }
 
 func NewMarkdown(source string) (*Markdown, error) {

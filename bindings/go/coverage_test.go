@@ -34,19 +34,22 @@ func TestCanonicalHeaderSymbolCoverage(t *testing.T) {
 	sort.Strings(headerSymbols)
 	inventory := append([]string(nil), nativeSymbolInventory...)
 	sort.Strings(inventory)
-	if len(headerSymbols) != 113 {
-		t.Fatalf("header symbols = %d, want 113", len(headerSymbols))
+	if len(headerSymbols) != 125 {
+		t.Fatalf("header symbols = %d, want 125", len(headerSymbols))
 	}
 	if strings.Join(headerSymbols, "\n") != strings.Join(inventory, "\n") {
 		t.Fatalf("symbol inventory drift\nheader=%v\ninventory=%v", headerSymbols, inventory)
 	}
-	bridge, err := os.ReadFile("native_cgo.go")
-	if err != nil {
-		t.Fatal(err)
+	var bridgeText string
+	for _, path := range []string{"native_cgo.go", "custom.go"} {
+		bridge, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		bridgeText += strings.Split(string(bridge), "// This exhaustive inventory")[0]
 	}
-	bridgeText := strings.Split(string(bridge), "// This exhaustive inventory")[0]
 	for _, symbol := range headerSymbols {
-		if !strings.Contains(bridgeText, "C."+symbol) {
+		if !strings.Contains(bridgeText, symbol) {
 			t.Errorf("%s has no low-level bridge", symbol)
 		}
 	}

@@ -10,6 +10,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -33,6 +34,7 @@ enum class OwnerKind : std::uint32_t {
   Align,
   Padding,
   Syntax,
+  Pretty,
   Markdown,
   Json,
   Progress,
@@ -54,7 +56,13 @@ struct AddonData {
   Napi::FunctionReference rich_error;
   std::uint64_t test_buffer_frees{0};
   std::uint64_t test_owner_frees{0};
+  std::uint64_t test_custom_drops{0};
+  std::uint64_t test_custom_renders{0};
   bool test_fail_owner_allocation{false};
+  Napi::FunctionReference render_options_constructor;
+  Napi::FunctionReference measurement_constructor;
+  Napi::FunctionReference segment_sink_constructor;
+  std::thread::id creator_thread;
 
   ~AddonData();
 };
@@ -108,6 +116,13 @@ private:
 [[nodiscard]] bool IsInternalConstruction(const Napi::CallbackInfo& info);
 void EnsureConstructCall(const Napi::CallbackInfo& info, std::string_view name);
 void EnsureAbi(Napi::Env env);
+void EnsureOrdinaryCallAllowed(Napi::Env env, std::string_view operation);
+[[nodiscard]] bool InCustomCallback();
+void EnterCustomCallback();
+void LeaveCustomCallback();
+void RecordPendingException(napi_env env, napi_value exception) noexcept;
+void RecordPendingError(napi_env env, const char* message) noexcept;
+[[nodiscard]] bool RestorePendingException(napi_env env) noexcept;
 void CheckResult(Napi::Env env, RichResult result, std::string_view operation);
 [[noreturn]] void ThrowRich(Napi::Env env, std::uint32_t code, std::string_view operation,
                             std::string_view detail = {});

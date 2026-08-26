@@ -93,6 +93,7 @@ public sealed class OwnershipTests
         Align align = new(content, HorizontalAlignment.Left); DisposeTwice(align);
         Padding padding = new(content, 0, 0, 0, 0); DisposeTwice(padding);
         Syntax syntax = new("x", "text"); DisposeTwice(syntax);
+        Pretty pretty = new("{'x': 1}"); DisposeTwice(pretty);
         Markdown markdown = new("text"); DisposeTwice(markdown);
         Json json = new("{}"); DisposeTwice(json);
         Progress progress = new(); DisposeTwice(progress);
@@ -169,6 +170,11 @@ public sealed class OwnershipTests
         table.AddRow(strings);
         Assert.Equal(0, strings.CountReads);
         Assert.Equal(0, strings.IndexReads);
+
+        UnstableReadOnlyList<string> rowStyles = new("", "dim");
+        table.SetRowStyles(rowStyles);
+        Assert.Equal(0, rowStyles.CountReads);
+        Assert.Equal(0, rowStyles.IndexReads);
 
         UnstableReadOnlyList<Renderable> renderables = new(first, second);
         table.AddRow(renderables);

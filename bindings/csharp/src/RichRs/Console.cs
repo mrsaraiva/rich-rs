@@ -4,13 +4,14 @@ namespace RichRs;
 public static unsafe class RichRuntime
 {
     /// <summary>The compiled native ABI version.</summary>
-    public const uint AbiVersion = 1;
+    public const uint AbiVersion = 2;
     private static readonly object Sync = new();
     private static volatile bool validated;
 
     /// <summary>Validates the loaded native library ABI.</summary>
     public static void EnsureAbi()
     {
+        CallbackGuard.ThrowIfActive();
         if (validated)
         {
             return;
@@ -45,6 +46,8 @@ public static unsafe class RichRuntime
 /// <summary>An owned reusable native renderable.</summary>
 public sealed class Renderable : IDisposable
 {
+    // Focused managed-allocation failure injection for tests; null in production.
+    internal static Action? AfterNativeCreateForTest { get; set; }
     private readonly RenderableHandle handle;
     private readonly NativeOwner<RenderableHandle> owner;
 
@@ -61,6 +64,22 @@ public sealed class Renderable : IDisposable
         try
         {
             builder.Finish(finish, result.handle);
+            return result;
+        }
+        catch
+        {
+            result.Dispose();
+            throw;
+        }
+    }
+
+    internal static Renderable Create(NewHandleCall create)
+    {
+        Renderable result = new();
+        try
+        {
+            NativeFactory.Initialize(result.handle, create);
+            AfterNativeCreateForTest?.Invoke();
             return result;
         }
         catch
@@ -132,8 +151,22 @@ public sealed unsafe class RichConsole : IDisposable
     public string Render(Renderable renderable)
     {
         ArgumentNullException.ThrowIfNull(renderable);
-        return owner.Use(console => renderable.Borrow(content =>
-            NativeBuffer.Call(output => NativeMethods.ConsoleRender(console, content, output))));
+        CallbackGuard.ThrowIfActive();
+        CallbackGuard.BeginOuterRender();
+        try
+        {
+            return owner.Use(console => renderable.Borrow(content =>
+                NativeBuffer.Call(output => NativeMethods.ConsoleRender(console, content, output))));
+        }
+        catch
+        {
+            CallbackGuard.ThrowCapturedException();
+            throw;
+        }
+        finally
+        {
+            CallbackGuard.EndOuterRender();
+        }
     }
 
     /// <summary>Releases the native console.</summary>

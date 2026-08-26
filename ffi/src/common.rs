@@ -22,11 +22,22 @@ pub(crate) fn ffi_call(f: impl FnOnce() -> Result<(), RichResult>) -> RichResult
     }
 }
 
+pub(crate) fn guard_ordinary_call() -> Result<(), RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        Err(RICH_ERROR_INVALID_STATE)
+    } else {
+        Ok(())
+    }
+}
+
 pub(crate) unsafe fn init_out<T>(out: *mut *mut T) -> Result<(), RichResult> {
     if out.is_null() {
         return Err(RICH_ERROR_NULL_ARGUMENT);
     }
     unsafe { *out = ptr::null_mut() };
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     Ok(())
 }
 
@@ -35,10 +46,16 @@ pub(crate) unsafe fn init_scalar_out<T: Default>(out: *mut T) -> Result<(), Rich
         return Err(RICH_ERROR_NULL_ARGUMENT);
     }
     unsafe { *out = T::default() };
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     Ok(())
 }
 
 pub(crate) unsafe fn required_ref<'a, T>(ptr: *const T) -> Result<&'a T, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     if ptr.is_null() {
         Err(RICH_ERROR_NULL_ARGUMENT)
     } else {
@@ -47,6 +64,9 @@ pub(crate) unsafe fn required_ref<'a, T>(ptr: *const T) -> Result<&'a T, RichRes
 }
 
 pub(crate) unsafe fn required_mut<'a, T>(ptr: *mut T) -> Result<&'a mut T, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     if ptr.is_null() {
         Err(RICH_ERROR_NULL_ARGUMENT)
     } else {
@@ -55,6 +75,9 @@ pub(crate) unsafe fn required_mut<'a, T>(ptr: *mut T) -> Result<&'a mut T, RichR
 }
 
 pub(crate) unsafe fn rich_str<'a>(value: RichStr) -> Result<&'a str, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     if value.data.is_null() {
         return if value.len == 0 {
             Ok("")
@@ -71,6 +94,9 @@ pub(crate) unsafe fn rich_str<'a>(value: RichStr) -> Result<&'a str, RichResult>
 }
 
 pub(crate) fn strict_bool(value: u8) -> Result<bool, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     match value {
         0 => Ok(false),
         1 => Ok(true),
@@ -81,11 +107,26 @@ pub(crate) fn strict_bool(value: u8) -> Result<bool, RichResult> {
 #[cfg(test)]
 thread_local! {
     static FORCE_BOUNDARY_PANIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FORCE_FINISH_PANIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
 pub(crate) fn force_next_boundary_panic() {
     FORCE_BOUNDARY_PANIC.with(|value| value.set(true));
+}
+
+#[cfg(test)]
+pub(crate) fn force_next_finish_panic() {
+    FORCE_FINISH_PANIC.with(|value| value.set(true));
+}
+
+fn maybe_test_finish_panic() {
+    #[cfg(test)]
+    FORCE_FINISH_PANIC.with(|value| {
+        if value.replace(false) {
+            panic!("forced post-transfer finish panic");
+        }
+    });
 }
 
 pub(crate) fn maybe_test_boundary_panic() {
@@ -98,6 +139,9 @@ pub(crate) fn maybe_test_boundary_panic() {
 }
 
 pub(crate) fn count(value: u32) -> Result<usize, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     usize::try_from(value).map_err(|_| RICH_ERROR_INVALID_ARGUMENT)
 }
 
@@ -106,10 +150,16 @@ pub(crate) unsafe fn init_buffer(out: *mut RichBuffer) -> Result<(), RichResult>
         return Err(RICH_ERROR_NULL_ARGUMENT);
     }
     unsafe { *out = RichBuffer::default() };
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     Ok(())
 }
 
 pub(crate) unsafe fn write_buffer(out: *mut RichBuffer, bytes: Vec<u8>) -> Result<(), RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     if bytes.is_empty() {
         return Ok(());
     }
@@ -121,6 +171,9 @@ pub(crate) unsafe fn write_buffer(out: *mut RichBuffer, bytes: Vec<u8>) -> Resul
 }
 
 pub(crate) fn parse_style(value: &str) -> Result<Style, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     let parsed = Style::parse(value).ok_or(RICH_ERROR_INVALID_ARGUMENT)?;
     if parsed.is_null() {
         Err(RICH_ERROR_INVALID_ARGUMENT)
@@ -169,6 +222,9 @@ pub(crate) unsafe fn finish<B, T: Renderable + 'static>(
 ) -> RichResult {
     ffi_call(|| {
         unsafe { init_out(out)? };
+        if crate::custom::ordinary_call_forbidden() {
+            return Err(RICH_ERROR_INVALID_STATE);
+        }
         if builder.is_null() {
             return Err(RICH_ERROR_NULL_ARGUMENT);
         }
@@ -179,12 +235,16 @@ pub(crate) unsafe fn finish<B, T: Renderable + 'static>(
         let boxed = unsafe { Box::from_raw(raw) };
         unsafe { *builder = ptr::null_mut() };
         let value = take(*boxed).ok_or(RICH_ERROR_INVALID_STATE)?;
+        maybe_test_finish_panic();
         unsafe { *out = new_renderable(value) };
         Ok(())
     })
 }
 
 pub(crate) unsafe fn destroy<T>(ptr: *mut T) {
+    if crate::custom::callback_active() {
+        return;
+    }
     if ptr.is_null() {
         return;
     }
@@ -194,6 +254,9 @@ pub(crate) unsafe fn destroy<T>(ptr: *mut T) {
 }
 
 pub(crate) fn box_from_id(id: u32) -> Result<RichBox, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     match id {
         0 => Ok(r#box::ROUNDED),
         1 => Ok(r#box::HEAVY),
@@ -214,6 +277,9 @@ pub(crate) fn box_from_id(id: u32) -> Result<RichBox, RichResult> {
 }
 
 pub(crate) fn align_from_id(id: u32) -> Result<AlignMethod, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     match id {
         0 => Ok(AlignMethod::Left),
         1 => Ok(AlignMethod::Center),
@@ -223,6 +289,9 @@ pub(crate) fn align_from_id(id: u32) -> Result<AlignMethod, RichResult> {
 }
 
 pub(crate) fn vertical_from_id(id: u32) -> Result<VerticalAlignMethod, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     match id {
         0 => Ok(VerticalAlignMethod::Top),
         1 => Ok(VerticalAlignMethod::Middle),
@@ -232,6 +301,9 @@ pub(crate) fn vertical_from_id(id: u32) -> Result<VerticalAlignMethod, RichResul
 }
 
 pub(crate) fn justify_from_id(id: u32) -> Result<JustifyMethod, RichResult> {
+    if crate::custom::ordinary_call_forbidden() {
+        return Err(RICH_ERROR_INVALID_STATE);
+    }
     match id {
         0 => Ok(JustifyMethod::Default),
         1 => Ok(JustifyMethod::Left),

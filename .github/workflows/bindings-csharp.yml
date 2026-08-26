@@ -5,6 +5,10 @@ on:
     paths:
       - "bindings/csharp/**"
       - "ffi/**"
+      - "examples/demo.rs"
+      - "tests/demo-parity/**"
+      - "tests/golden/demo-120-truecolor.ansi"
+      - "docs/devel/BINDINGS_DEMO_PARITY_SPEC.md"
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -13,6 +17,10 @@ on:
     paths:
       - "bindings/csharp/**"
       - "ffi/**"
+      - "examples/demo.rs"
+      - "tests/demo-parity/**"
+      - "tests/golden/demo-120-truecolor.ansi"
+      - "docs/devel/BINDINGS_DEMO_PARITY_SPEC.md"
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -36,7 +44,9 @@ jobs:
           cache: true
           cache-dependency-path: bindings/csharp/**/packages.lock.json
       - name: Build native library
-        run: cargo build --release --manifest-path ffi/Cargo.toml
+        run: cargo build --release --manifest-path ffi/Cargo.toml --features parity-trace
+      - name: Verify canonical demo sources
+        run: bash tests/demo-parity/check-sources.sh
       - name: Restore managed dependencies
         run: dotnet restore bindings/csharp/RichRs.sln --locked-mode
       - name: Verify managed formatting
@@ -46,11 +56,29 @@ jobs:
       - name: Test managed bindings
         env:
           RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so
-        run: dotnet test bindings/csharp/RichRs.sln --configuration Release --no-build
-      - name: Run demo
+        run: dotnet test bindings/csharp/RichRs.sln --configuration Release --no-build --no-restore
+      - name: Run and compare canonical demo
         env:
           RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so
-        run: dotnet run --project bindings/csharp/examples/RichRs.Demo --configuration Release --no-build
+          RICH_FFI_PARITY_TRACE: ${{ runner.temp }}/csharp-parity.trace
+        run: |
+          bindings/csharp/examples/RichRs.Demo/bin/Release/net10.0/RichRs.Demo --parity \
+            > "$RUNNER_TEMP/csharp-parity.ansi"
+          python3 tests/demo-parity/normalize.py \
+            "$RUNNER_TEMP/csharp-parity.ansi" "$RUNNER_TEMP/csharp-parity.normalized.ansi"
+          cmp tests/golden/demo-120-truecolor.ansi "$RUNNER_TEMP/csharp-parity.normalized.ansi"
+          python3 - "$RICH_FFI_PARITY_TRACE" <<'PY'
+          import json, pathlib, sys
+          events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+          required = {"table_grid", "table_none", "table_pad_edge", "table_row_styles",
+                      "table_column_options", "syntax_indent_guides", "pretty_new", "pretty_finish",
+                      "custom_new", "custom_measure", "custom_render", "sink_push", "sink_line"}
+          names = [event["event"] for event in events]
+          missing = sorted(required - set(names))
+          drops = names.count("custom_drop")
+          if missing or drops != 1:
+              raise SystemExit(f"invalid C# parity trace: missing={missing}, custom_drop={drops}")
+          PY
       - name: Pack and inspect NuGet artifact
         env:
           RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so

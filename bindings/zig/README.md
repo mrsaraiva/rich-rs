@@ -1,8 +1,9 @@
 # rich-rs for Zig
 
-Safe Zig 0.16.0 bindings for the `rich-ffi` native ABI. The Zig package owns no
+Safe Zig 0.16.0 bindings for the `rich-ffi` ABI version 2. The Zig package owns no
 rendering logic: it checks and projects the generated C ABI while rich-rs does
-all parsing and rendering.
+all parsing and rendering. Its low-level import exhaustively checks the frozen
+125-function inventory.
 
 ## Requirements
 
@@ -26,6 +27,18 @@ zig build --build-file bindings/zig/build.zig check \
   -Drich-ffi-include-dir=../../ffi/include \
   -Drich-ffi-static=../../ffi/target/debug/librich_ffi.a
 ```
+
+The example is the Zig projection of the canonical Rust demo. Its deterministic
+120-column forced-terminal mode is:
+
+```sh
+zig build --build-file bindings/zig/build.zig example -- --parity
+```
+
+In parity mode it uses native table layout, Pretty, Syntax indentation guides,
+and a synchronous Zig-defined ColorBox renderable. Only the two measured timing
+numbers vary; the repository parity runner requires every other output byte to
+match the Rust demo.
 
 Paths supplied with `-Drich-ffi-include-dir` and `-Drich-ffi-static` are
 resolved from the Zig package root; absolute paths are accepted. The defaults
@@ -111,8 +124,42 @@ Node IDs contain no native pointer and are useful only with the still-live
 `Tree` that created them.
 
 `Progress`, `Status`, and `Spinner` are caller-driven frame renderers. The Zig
-binding creates no timer, callback, background thread, or cursor-control loop;
+binding creates no timer, background thread, or cursor-control loop;
 the application chooses when to request and display each frame.
+
+## ABI v2 layout and content
+
+`Table.initGrid`, `setPadEdge`, `setRowStyles`, and `addColumnOptions` project
+the native layout engine directly. `ColumnOptions` uses optionals for justify,
+vertical alignment, fixed width, minimum width, and ratio; `null` means the
+native Column default. `.none` is valid for `Table.setBox` and intentionally
+remains invalid for Panel. Headers and style slices are borrowed only for the
+call and copied/retained by native code.
+
+`Pretty` is an ordinary owning builder with `init`, `setIndentGuides`, `finish`,
+and idempotent `deinit`. `Syntax.setIndentGuides` enables the same native guide
+renderer. Neither feature is implemented with JSON or host-side highlighting.
+
+## Scoped custom renderables
+
+`customRenderable(context, callbacks)` creates an Arc-backed native renderable.
+The render callback is required; measure and drop are optional. A non-null
+context requires drop. On successful construction its ownership transfers to
+native code, and the drop callback runs exactly once when the last reference
+retained by any container is released. On construction failure it remains with
+the caller. Last release may occur on any thread that owns a retained native
+reference, so the callback state, user context, and drop callback must all be
+safe to access and destroy on that thread.
+
+Callbacks run synchronously on the thread executing `Console.render`; native
+code never queues or background-dispatches them. Calls for one adapter are
+serialized. The callback receives copied `RenderOptions` and a scoped
+`SegmentSink`. `push` and `line` copy their inputs into native transactional
+storage. The wrapper tombstones the sink when the callback returns, so retained
+or wrong-thread uses fail locally with `error.InvalidState`. Do not copy live
+sink/owner structs, panic from a callback, re-enter rich APIs, or destroy rich
+owners inside a callback. The wrapper's small callback-state record uses the C
+allocator and is released by its native last-reference drop trampoline.
 
 ## Native targets
 

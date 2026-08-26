@@ -102,6 +102,7 @@ test('all owners close idempotently and reject later access locally', () => {
   own(new rich.Align(renderable, rich.HorizontalAlign.Left));
   own(new rich.Padding(renderable, 0, 0, 0, 0));
   own(new rich.Syntax('x', 'text'));
+  own(new rich.Pretty("{'x': 1}"));
   own(new rich.Markdown('x'));
   own(new rich.Json('{}'));
   own(new rich.Progress());

@@ -7,6 +7,10 @@ license = "MIT"
 description = "Stable native ABI foundation for rich-rs language bindings"
 publish = false
 
+[features]
+default = []
+parity-trace = []
+
 [lib]
 # `rich_ffi` is the symbol/library base name: librich_ffi.a / .so, rich_ffi.lib / .dll
 name = "rich_ffi"
