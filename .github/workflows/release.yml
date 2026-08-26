@@ -141,6 +141,32 @@ jobs:
           path: ${{ steps.pkg.outputs.name }}.tar.gz
           if-no-files-found: error
 
+  go-package:
+    name: Go source package
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.0"
+      - name: Package Go source projection
+        id: pkg
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          output="$(mktemp -d)"
+          bindings/go/package-release.sh "$version" "$output"
+          name="rich-go-${version}"
+          cp "$output/${name}.tar.gz" .
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          tar -tzf "${name}.tar.gz"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: go-source
+          path: ${{ steps.pkg.outputs.name }}.tar.gz
+          if-no-files-found: error
+
   publish:
     runs-on: ubuntu-latest
     permissions:
@@ -149,7 +175,7 @@ jobs:
     # Gate crate publish on ALL ffi-build arches succeeding: a release is
     # atomic — if any platform's library fails to build, we publish nothing
     # (no crates.io upload, no GitHub Release).
-    needs: [test, parity, package, ffi-build, zig-package]
+    needs: [test, parity, package, ffi-build, zig-package, go-package]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -190,7 +216,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [test, parity, package, publish, ffi-build, zig-package]
+    needs: [test, parity, package, publish, ffi-build, zig-package, go-package]
     steps:
       - uses: actions/checkout@v7
       - name: Download FFI artifacts
@@ -203,6 +229,11 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: zig-source
+          path: dist
+      - name: Download Go source artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: go-source
           path: dist
       - name: Generate SHA256SUMS
         run: |

@@ -1,0 +1,77 @@
+name: bindings-go
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bindings/go/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-go.yml"
+  pull_request:
+    paths:
+      - "bindings/go/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-go.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Go 1.27.0 (x86_64 Linux)
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      CGO_ENABLED: "1"
+      CGO_CFLAGS: -I${{ github.workspace }}/ffi/include
+      CGO_LDFLAGS: ${{ github.workspace }}/ffi/target/debug/librich_ffi.a
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.0"
+          cache-dependency-path: bindings/go/go.mod
+      - name: Build native FFI
+        run: cargo build --manifest-path ffi/Cargo.toml
+      - name: Check formatting
+        run: test -z "$(gofmt -l bindings/go)"
+      - name: Vet
+        working-directory: bindings/go
+        run: go vet ./...
+      - name: Test
+        working-directory: bindings/go
+        run: go test ./...
+      - name: Strict cgo pointer checks
+        working-directory: bindings/go
+        env:
+          GOEXPERIMENT: cgocheck2
+        run: go test ./...
+      - name: Race test
+        working-directory: bindings/go
+        run: go test -race ./...
+      - name: Demo
+        working-directory: bindings/go
+        run: go run ./cmd/demo
+      - name: External consumer
+        run: |
+          consumer=$(mktemp -d)
+          cd "$consumer"
+          go mod init example.com/rich-consumer
+          go mod edit -require github.com/mrsaraiva/rich-rs/bindings/go@v0.0.0
+          go mod edit -replace github.com/mrsaraiva/rich-rs/bindings/go=${GITHUB_WORKSPACE}/bindings/go
+          printf '%s\n' 'package main' 'import rich "github.com/mrsaraiva/rich-rs/bindings/go"' 'func main() { c, err := rich.NewConsole(); if err != nil { panic(err) }; defer c.Close(); if _, err = c.RenderMarkup("hello"); err != nil { panic(err) } }' > main.go
+          go run .
+      - name: Package release source
+        run: |
+          output=$(mktemp -d)
+          version=$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)
+          bindings/go/package-release.sh "$version" "$output"
+          archive="$output/rich-go-$version.tar.gz"
+          test -f "$archive"
+          tar -tzf "$archive" | grep -Fx "rich-go-$version/include/rich.h" >/dev/null
+          if tar -tzf "$archive" | grep -E '\.(a|lib|so|dylib|dll)$'; then exit 1; fi

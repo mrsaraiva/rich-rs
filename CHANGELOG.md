@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Go 1.27 bindings for the complete native API.** The cgo module provides
+  copy-safe synchronized owners, idempotent `Close` with finalizer fallback,
+  exact typed errors, copied native output, borrowed reusable-renderable
+  composition, and stable tree/task IDs. Race and strict cgo tests, a demo,
+  dedicated CI, and the reproducible `rich-go-<version>.tar.gz` source release
+  artifact are included.
+
 - **Zig 0.16.0 bindings for the complete native API.** The checked, owning
   wrapper copies output into caller allocators, provides explicit idempotent
   `deinit`, borrows reusable renderables for composition, and represents tree
