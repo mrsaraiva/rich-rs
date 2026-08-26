@@ -203,6 +203,41 @@ jobs:
           path: ${{ steps.pkg.outputs.name }}
           if-no-files-found: error
 
+  node-package:
+    name: Node source package
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3
+      - name: Build native FFI
+        run: cargo build --release --manifest-path ffi/Cargo.toml
+      - name: Package Node source projection
+        id: pkg
+        env:
+          RICH_FFI_STATIC: ${{ github.workspace }}/ffi/target/release/librich_ffi.a
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          output="$(mktemp -d)"
+          bindings/node/package-release.sh "$version" "$output"
+          name="rich-rs-native-${version}.tgz"
+          cp "$output/$name" .
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          tar -tzf "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: node-source
+          path: ${{ steps.pkg.outputs.name }}
+          if-no-files-found: error
+
   publish:
     runs-on: ubuntu-latest
     permissions:
@@ -211,7 +246,7 @@ jobs:
     # Gate crate publish on ALL ffi-build arches succeeding: a release is
     # atomic — if any platform's library fails to build, we publish nothing
     # (no crates.io upload, no GitHub Release).
-    needs: [test, parity, package, ffi-build, zig-package, go-package, csharp-package]
+    needs: [test, parity, package, ffi-build, zig-package, go-package, csharp-package, node-package]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -252,7 +287,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [test, parity, package, publish, ffi-build, zig-package, go-package, csharp-package]
+    needs: [test, parity, package, publish, ffi-build, zig-package, go-package, csharp-package, node-package]
     steps:
       - uses: actions/checkout@v7
       - name: Download FFI artifacts
@@ -276,11 +311,16 @@ jobs:
         with:
           name: csharp-package
           path: dist
+      - name: Download Node source artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: node-source
+          path: dist
       - name: Generate SHA256SUMS
         run: |
           set -euo pipefail
           cd dist
-          sha256sum *.tar.gz *.nupkg | tee SHA256SUMS
+          sha256sum *.tar.gz *.nupkg *.tgz | tee SHA256SUMS
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -288,4 +328,5 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.nupkg
+            dist/*.tgz
             dist/SHA256SUMS

@@ -1,0 +1,37 @@
+{
+   node-openssl-process-global
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:CRYPTO_malloc
+   fun:ossl_load_builtin_compressions
+   ...
+}
+{
+   node-test-worker-contextify
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:_Znwm
+   fun:_ZN4node10contextify16ContextifyScript3NewEPNS_11EnvironmentEN2v85LocalINS4_6ObjectEEE
+   ...
+}
+{
+   v8-cppgc-conservative-stack-iteration-condition
+   Memcheck:Cond
+   fun:_ZN4heap4base12_GLOBAL__N_122IteratePointersInStackEPNS0_12StackVisitorERKNS0_5Stack7SegmentE
+   fun:_ZNK4heap4base5Stack26IteratePointersUntilMarkerEPNS0_12StackVisitorE
+   fun:_ZN5cppgc8internal10MarkerBase15VisitLocalRootsENS_18EmbedderStackStateE
+   fun:_ZN5cppgc8internal10MarkerBase16EnterAtomicPauseENS_18EmbedderStackStateE
+   fun:_ZN2v88internal7CppHeap15EnterFinalPauseEN5cppgc18EmbedderStackStateE
+   ...
+}
+{
+   v8-cppgc-conservative-pointer-trace-condition
+   Memcheck:Cond
+   fun:_ZN5cppgc8internal26ConservativeTracingVisitor27TraceConservativelyIfNeededEPKv
+   fun:_ZN2v88internal12_GLOBAL__N_137UnifiedHeapConservativeMarkingVisitor27TraceConservativelyIfNeededEPKv
+   fun:_ZN4heap4base12_GLOBAL__N_122IteratePointersInStackEPNS0_12StackVisitorERKNS0_5Stack7SegmentE
+   fun:_ZNK4heap4base5Stack26IteratePointersUntilMarkerEPNS0_12StackVisitorE
+   fun:_ZN5cppgc8internal10MarkerBase15VisitLocalRootsENS_18EmbedderStackStateE
+   ...
+}

@@ -1,0 +1,100 @@
+name: Node bindings
+
+on:
+  push:
+    paths:
+      - "bindings/node/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-node.yml"
+  pull_request:
+    paths:
+      - "bindings/node/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-node.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node ${{ matrix.node }} / Node-API 10
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
+
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang-format python3
+
+      - name: Build rich-ffi static library
+        run: cargo build --manifest-path ffi/Cargo.toml
+
+      - name: Install pinned Node dependencies
+        working-directory: bindings/node
+        run: npm ci
+
+      - name: Verify formatting and native inventory
+        working-directory: bindings/node
+        run: |
+          npm run format:check
+          npm run package:check
+
+      - name: Build warnings-clean Node-API addon
+        working-directory: bindings/node
+        run: >-
+          npm run build --
+          --rich_ffi_include_dir=${{ github.workspace }}/ffi/include
+          --rich_ffi_static=${{ github.workspace }}/ffi/target/debug/librich_ffi.a
+
+      - name: Test addon, declarations, and demo
+        working-directory: bindings/node
+        run: |
+          npm test
+          npm run typecheck
+          npm run demo > /tmp/rich-node-demo.txt
+          test -s /tmp/rich-node-demo.txt
+
+      - name: Valgrind native bridge test suite
+        if: matrix.node == '24'
+        working-directory: bindings/node
+        run: |
+          sudo apt-get install -y valgrind
+          timeout 240s valgrind --quiet --error-exitcode=1 --leak-check=full \
+            --show-leak-kinds=definite,indirect \
+            --errors-for-leak-kinds=definite,indirect --num-callers=30 \
+            --suppressions=test/node-runtime.supp \
+            node --expose-gc --test --test-isolation=none test/*.test.js
+
+      - name: Assemble and inspect source package
+        if: matrix.node == '24'
+        working-directory: bindings/node
+        run: |
+          ./package-release.sh 1.2.2 /tmp/rich-node-package
+          tar -tzf /tmp/rich-node-package/rich-rs-native-1.2.2.tgz
+
+      - name: Upload source package proof
+        if: matrix.node == '24'
+        uses: actions/upload-artifact@v7
+        with:
+          name: rich-node-source-package
+          path: /tmp/rich-node-package/rich-rs-native-1.2.2.tgz
+          if-no-files-found: error

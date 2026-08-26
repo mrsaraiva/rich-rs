@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Node.js 24/22 bindings through Node-API 10.** The complete owning addon
+  and TypeScript API project all 113 native functions with exception-safe
+  output-buffer RAII, BigInt tree/task IDs, explicit `close`/GC lifecycles,
+  and borrowed reusable-renderable composition. Binding tests, a deterministic
+  demo, dedicated CI, and the reproducible `rich-rs-native-<version>.tgz`
+  source npm artifact are included.
+
 - **.NET 10 bindings for the complete native API.** The `RichRs.Native`
   package provides a checked `SafeHandle`/`IDisposable` projection with strict
   UTF-8 input, copied native output, failure-safe builder transfers, reusable

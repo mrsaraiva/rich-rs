@@ -1,0 +1,51 @@
+{
+  "name": "@rich-rs/native",
+  "version": "1.2.2",
+  "description": "Complete Node-API bindings for rich-rs terminal rendering",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mrsaraiva/rich-rs.git",
+    "directory": "bindings/node"
+  },
+  "homepage": "https://github.com/mrsaraiva/rich-rs#readme",
+  "bugs": {
+    "url": "https://github.com/mrsaraiva/rich-rs/issues"
+  },
+  "private": false,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    ".clang-format",
+    "binding.gyp",
+    "index.js",
+    "index.d.ts",
+    "package-release.sh",
+    "README.md",
+    "src/",
+    "scripts/",
+    "include/rich.h",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "install": "node scripts/install.js",
+    "build": "node-gyp rebuild --release",
+    "build:debug": "node-gyp rebuild --debug",
+    "test": "node scripts/build-test-addon.mjs && node --expose-gc --test test/*.test.js",
+    "demo": "node examples/demo.js",
+    "format:check": "node scripts/format-check.mjs",
+    "typecheck": "tsc -p test/types/tsconfig.json",
+    "package:check": "node scripts/package-check.mjs"
+  },
+  "dependencies": {
+    "node-addon-api": "8.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "node-gyp": "13.0.1",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "noImplicitAny": true,
+    "strict": true,
+    "target": "ES2022"
+  },
+  "files": ["consumer.ts"]
+}
