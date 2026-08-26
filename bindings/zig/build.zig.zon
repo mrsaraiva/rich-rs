@@ -1,0 +1,18 @@
+.{
+    .name = .rich,
+    .version = "1.2.2",
+    .fingerprint = 0xaacd96aa763413f5, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+        "src",
+        "examples",
+        "tests",
+        // Present in release source archives; monorepo builds use the repository copies.
+        "include",
+        "LICENSE",
+    },
+}

@@ -112,6 +112,35 @@ jobs:
           path: ${{ steps.pkg.outputs.name }}.tar.gz
           if-no-files-found: error
 
+  zig-package:
+    name: Zig source package
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Package Zig source projection
+        id: pkg
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="rich-zig-${version}"
+          root="pkg/${name}"
+          grep -Fq ".version = \"${version}\"" bindings/zig/build.zig.zon
+          mkdir -p "${root}/include"
+          cp bindings/zig/build.zig bindings/zig/build.zig.zon \
+             bindings/zig/README.md "${root}/"
+          cp -R bindings/zig/src bindings/zig/examples "${root}/"
+          cp ffi/include/rich.h "${root}/include/"
+          cp LICENSE "${root}/"
+          tar -C pkg -czf "${name}.tar.gz" "${name}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          tar -tzf "${name}.tar.gz"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: zig-source
+          path: ${{ steps.pkg.outputs.name }}.tar.gz
+          if-no-files-found: error
+
   publish:
     runs-on: ubuntu-latest
     permissions:
@@ -120,7 +149,7 @@ jobs:
     # Gate crate publish on ALL ffi-build arches succeeding: a release is
     # atomic — if any platform's library fails to build, we publish nothing
     # (no crates.io upload, no GitHub Release).
-    needs: [test, parity, package, ffi-build]
+    needs: [test, parity, package, ffi-build, zig-package]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -161,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [test, parity, package, publish, ffi-build]
+    needs: [test, parity, package, publish, ffi-build, zig-package]
     steps:
       - uses: actions/checkout@v7
       - name: Download FFI artifacts
@@ -170,6 +199,11 @@ jobs:
           pattern: ffi-*
           path: dist
           merge-multiple: true
+      - name: Download Zig source artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: zig-source
+          path: dist
       - name: Generate SHA256SUMS
         run: |
           set -euo pipefail

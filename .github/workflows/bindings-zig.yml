@@ -1,0 +1,48 @@
+name: bindings-zig
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bindings/zig/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-zig.yml"
+  pull_request:
+    paths:
+      - "bindings/zig/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-zig.yml"
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Zig 0.16.0 (x86_64 Linux)
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build rich-ffi static library
+        run: cargo build --manifest-path ffi/Cargo.toml
+      - name: Zig formatting
+        run: zig fmt --check bindings/zig
+      - name: Zig tests
+        run: zig build --build-file bindings/zig/build.zig test
+      - name: Zig example
+        run: zig build --build-file bindings/zig/build.zig example
+      - name: Zig compile checks
+        run: zig build --build-file bindings/zig/build.zig check
+
+  # Cross-target Zig checks require the matching native archive. The FFI CI
+  # workflow builds macOS ARM64 and Windows x86_64/ARM64 on native runners;
+  # this workflow intentionally never substitutes the Linux archive for them.

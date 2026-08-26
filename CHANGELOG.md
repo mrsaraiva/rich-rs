@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Zig 0.16.0 bindings for the complete native API.** The checked, owning
+  wrapper copies output into caller allocators, provides explicit idempotent
+  `deinit`, borrows reusable renderables for composition, and represents tree
+  nodes with stable scalar IDs. Binding tests, a leak-checked demo, dedicated
+  CI, and the `rich-zig-<version>.tar.gz` release source artifact are included.
+
 ### Changed
 
 - **Redesigned the experimental native ABI as the shared Zig, C#, Go, and Node
