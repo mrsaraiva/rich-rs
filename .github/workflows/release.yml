@@ -6,6 +6,9 @@ on:
       - "v*"
 
 jobs:
+  demo-parity:
+    uses: ./.github/workflows/bindings-demo-parity.yml
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -87,22 +90,32 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Build static + shared libraries
         run: cargo build --release --manifest-path ffi/Cargo.toml --target ${{ matrix.target }}
-      - name: Package (include/ + lib/ + headers)
+      - name: Package (include/ + lib/ + headers + demos)
         id: pkg
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           name="rich-ffi-${version}-${{ matrix.target }}"
           out="ffi/target/${{ matrix.target }}/release"
-          mkdir -p "pkg/${name}/include" "pkg/${name}/lib"
+          grep -Fxq '#define RICH_FFI_ABI_VERSION 2' ffi/include/rich.h
+          test "$(grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(' ffi/include/rich.h)" -eq 125
+          mkdir -p "pkg/${name}/include" "pkg/${name}/lib" "pkg/${name}/examples"
           cp ffi/include/rich.h ffi/include/rich.hpp "pkg/${name}/include/"
+          cp ffi/examples/demo.c ffi/examples/demo.cpp "pkg/${name}/examples/"
+          cp ffi/README.md "pkg/${name}/README.md"
           # Copy whichever library artifacts this platform produced.
           for f in librich_ffi.a librich_ffi.so librich_ffi.dylib \
                    rich_ffi.lib rich_ffi.dll rich_ffi.dll.lib; do
             if [ -f "${out}/${f}" ]; then cp "${out}/${f}" "pkg/${name}/lib/"; fi
           done
+          find "pkg/${name}/lib" -maxdepth 1 -type f -print -quit | grep -q .
           cp LICENSE "pkg/${name}/" 2>/dev/null || true
           tar -C pkg -czf "${name}.tar.gz" "${name}"
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/include/rich.h" >/dev/null
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/examples/demo.c" >/dev/null
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/examples/demo.cpp" >/dev/null
+          test "$(tar -xOzf "${name}.tar.gz" "${name}/include/rich.h" | \
+            grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(')" -eq 125
           echo "name=${name}" >> "$GITHUB_OUTPUT"
           echo "--- packaged ${name}.tar.gz ---"
           tar -tzf "${name}.tar.gz"
@@ -126,6 +139,8 @@ jobs:
           name="rich-zig-${version}"
           root="pkg/${name}"
           grep -Fq ".version = \"${version}\"" bindings/zig/build.zig.zon
+          grep -Fxq '#define RICH_FFI_ABI_VERSION 2' ffi/include/rich.h
+          test "$(grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(' ffi/include/rich.h)" -eq 125
           mkdir -p "${root}/include"
           cp bindings/zig/build.zig bindings/zig/build.zig.zon \
              bindings/zig/README.md "${root}/"
@@ -133,6 +148,12 @@ jobs:
           cp ffi/include/rich.h "${root}/include/"
           cp LICENSE "${root}/"
           tar -C pkg -czf "${name}.tar.gz" "${name}"
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/include/rich.h" >/dev/null
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/examples/demo.zig" >/dev/null
+          tar -xOzf "${name}.tar.gz" "${name}/include/rich.h" | \
+            grep -Fx '#define RICH_FFI_ABI_VERSION 2' >/dev/null
+          test "$(tar -xOzf "${name}.tar.gz" "${name}/include/rich.h" | \
+            grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(')" -eq 125
           echo "name=${name}" >> "$GITHUB_OUTPUT"
           tar -tzf "${name}.tar.gz"
       - uses: actions/upload-artifact@v7
@@ -159,6 +180,12 @@ jobs:
           bindings/go/package-release.sh "$version" "$output"
           name="rich-go-${version}"
           cp "$output/${name}.tar.gz" .
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/include/rich.h" >/dev/null
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/cmd/demo/main.go" >/dev/null
+          tar -xOzf "${name}.tar.gz" "${name}/include/rich.h" | \
+            grep -Fx '#define RICH_FFI_ABI_VERSION 2' >/dev/null
+          test "$(tar -xOzf "${name}.tar.gz" "${name}/include/rich.h" | \
+            grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(')" -eq 125
           echo "name=${name}" >> "$GITHUB_OUTPUT"
           tar -tzf "${name}.tar.gz"
       - uses: actions/upload-artifact@v7
@@ -181,6 +208,8 @@ jobs:
           cache-dependency-path: bindings/csharp/**/packages.lock.json
       - name: Build native and managed libraries
         run: |
+          grep -Fxq '#define RICH_FFI_ABI_VERSION 2' ffi/include/rich.h
+          test "$(grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(' ffi/include/rich.h)" -eq 125
           cargo build --release --manifest-path ffi/Cargo.toml
           dotnet restore bindings/csharp/RichRs.sln --locked-mode
           dotnet build bindings/csharp/RichRs.sln --configuration Release --no-restore
@@ -218,7 +247,14 @@ jobs:
       - name: Install native build prerequisites
         run: sudo apt-get update && sudo apt-get install -y build-essential python3
       - name: Build native FFI
-        run: cargo build --release --manifest-path ffi/Cargo.toml
+        run: |
+          grep -Fxq '#define RICH_FFI_ABI_VERSION 2' ffi/include/rich.h
+          test "$(grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(' ffi/include/rich.h)" -eq 125
+          cargo build --release --manifest-path ffi/Cargo.toml
+      - name: Install pinned Node dependencies and verify package inventory
+        run: |
+          npm ci --prefix bindings/node --ignore-scripts --no-audit --no-fund
+          node bindings/node/scripts/package-check.mjs
       - name: Package Node source projection
         id: pkg
         env:
@@ -230,6 +266,12 @@ jobs:
           bindings/node/package-release.sh "$version" "$output"
           name="rich-rs-native-${version}.tgz"
           cp "$output/$name" .
+          tar -tzf "$name" | grep -Fx 'package/include/rich.h' >/dev/null
+          tar -tzf "$name" | grep -Fx 'package/examples/demo.js' >/dev/null
+          tar -xOzf "$name" package/include/rich.h | \
+            grep -Fx '#define RICH_FFI_ABI_VERSION 2' >/dev/null
+          test "$(tar -xOzf "$name" package/include/rich.h | \
+            grep -Ec '^(RichResult|void|uint32_t) rich_[a-z0-9_]+\(')" -eq 125
           echo "name=$name" >> "$GITHUB_OUTPUT"
           tar -tzf "$name"
       - uses: actions/upload-artifact@v7
@@ -243,10 +285,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # Gate crate publish on ALL ffi-build arches succeeding: a release is
-    # atomic — if any platform's library fails to build, we publish nothing
-    # (no crates.io upload, no GitHub Release).
-    needs: [test, parity, package, ffi-build, zig-package, go-package, csharp-package, node-package]
+    # Gate crate publish on canonical demo parity, every package, and ALL
+    # ffi-build arches: the release is atomic, so any failure publishes nothing.
+    needs: [demo-parity, test, parity, package, ffi-build, zig-package, go-package, csharp-package, node-package]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -287,7 +328,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [test, parity, package, publish, ffi-build, zig-package, go-package, csharp-package, node-package]
+    needs: [demo-parity, test, parity, package, publish, ffi-build, zig-package, go-package, csharp-package, node-package]
     steps:
       - uses: actions/checkout@v7
       - name: Download FFI artifacts
@@ -320,11 +361,26 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          sha256sum *.tar.gz *.nupkg *.tgz | tee SHA256SUMS
+          shopt -s nullglob
+          ffi=(rich-ffi-*.tar.gz)
+          tarballs=(*.tar.gz)
+          nupkgs=(*.nupkg)
+          tgzs=(*.tgz)
+          test "${#ffi[@]}" -eq 5
+          test "${#tarballs[@]}" -eq 7
+          test "${#nupkgs[@]}" -eq 1
+          test "${#tgzs[@]}" -eq 1
+          test -f "rich-zig-${GITHUB_REF_NAME#v}.tar.gz"
+          test -f "rich-go-${GITHUB_REF_NAME#v}.tar.gz"
+          test -f "RichRs.Native.${GITHUB_REF_NAME#v}.nupkg"
+          test -f "rich-rs-native-${GITHUB_REF_NAME#v}.tgz"
+          sha256sum "${tarballs[@]}" "${nupkgs[@]}" "${tgzs[@]}" | tee SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 9
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz
             dist/*.nupkg
