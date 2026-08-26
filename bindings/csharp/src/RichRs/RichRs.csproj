@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RichRs</AssemblyName>
+    <RootNamespace>RichRs</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>RichRs.Native</PackageId>
+    <Title>rich-rs native bindings for .NET</Title>
+    <Description>Safe .NET 10 bindings for the rich-rs native rendering library.</Description>
+    <PackageTags>terminal;rich;native;ffi</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/mrsaraiva/rich-rs</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <IncludeSymbols>false</IncludeSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="README.md" />
+    <None Include="../../../../LICENSE" Pack="true" PackagePath="" />
+    <InternalsVisibleTo Include="RichRs.Tests" />
+  </ItemGroup>
+</Project>

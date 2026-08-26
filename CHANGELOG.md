@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **.NET 10 bindings for the complete native API.** The `RichRs.Native`
+  package provides a checked `SafeHandle`/`IDisposable` projection with strict
+  UTF-8 input, copied native output, failure-safe builder transfers, reusable
+  renderable composition, and stable tree IDs. Full tests, a demo, dedicated
+  CI, and the deterministic `RichRs.Native.<version>.nupkg` release artifact
+  are included.
+
 - **Go 1.27 bindings for the complete native API.** The cgo module provides
   copy-safe synchronized owners, idempotent `Close` with finalizer fallback,
   exact typed errors, copied native output, borrowed reusable-renderable

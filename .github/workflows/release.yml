@@ -167,6 +167,42 @@ jobs:
           path: ${{ steps.pkg.outputs.name }}.tar.gz
           if-no-files-found: error
 
+  csharp-package:
+    name: C# NuGet package
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: bindings/csharp/**/packages.lock.json
+      - name: Build native and managed libraries
+        run: |
+          cargo build --release --manifest-path ffi/Cargo.toml
+          dotnet restore bindings/csharp/RichRs.sln --locked-mode
+          dotnet build bindings/csharp/RichRs.sln --configuration Release --no-restore
+      - name: Package managed projection
+        id: pkg
+        env:
+          RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          output="$(mktemp -d)"
+          bindings/csharp/package-release.sh "$version" "$output"
+          name="RichRs.Native.${version}.nupkg"
+          cp "$output/$name" .
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          unzip -Z1 "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: csharp-package
+          path: ${{ steps.pkg.outputs.name }}
+          if-no-files-found: error
+
   publish:
     runs-on: ubuntu-latest
     permissions:
@@ -175,7 +211,7 @@ jobs:
     # Gate crate publish on ALL ffi-build arches succeeding: a release is
     # atomic — if any platform's library fails to build, we publish nothing
     # (no crates.io upload, no GitHub Release).
-    needs: [test, parity, package, ffi-build, zig-package, go-package]
+    needs: [test, parity, package, ffi-build, zig-package, go-package, csharp-package]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -216,7 +252,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [test, parity, package, publish, ffi-build, zig-package, go-package]
+    needs: [test, parity, package, publish, ffi-build, zig-package, go-package, csharp-package]
     steps:
       - uses: actions/checkout@v7
       - name: Download FFI artifacts
@@ -235,15 +271,21 @@ jobs:
         with:
           name: go-source
           path: dist
+      - name: Download C# package artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: csharp-package
+          path: dist
       - name: Generate SHA256SUMS
         run: |
           set -euo pipefail
           cd dist
-          sha256sum *.tar.gz | tee SHA256SUMS
+          sha256sum *.tar.gz *.nupkg | tee SHA256SUMS
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
             dist/*.tar.gz
+            dist/*.nupkg
             dist/SHA256SUMS

@@ -1,0 +1,62 @@
+name: C# bindings
+
+on:
+  push:
+    paths:
+      - "bindings/csharp/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-csharp.yml"
+  pull_request:
+    paths:
+      - "bindings/csharp/**"
+      - "ffi/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings-csharp.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: bindings/csharp/**/packages.lock.json
+      - name: Build native library
+        run: cargo build --release --manifest-path ffi/Cargo.toml
+      - name: Restore managed dependencies
+        run: dotnet restore bindings/csharp/RichRs.sln --locked-mode
+      - name: Verify managed formatting
+        run: dotnet format bindings/csharp/RichRs.sln --verify-no-changes --no-restore
+      - name: Build managed projects
+        run: dotnet build bindings/csharp/RichRs.sln --configuration Release --no-restore
+      - name: Test managed bindings
+        env:
+          RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so
+        run: dotnet test bindings/csharp/RichRs.sln --configuration Release --no-build
+      - name: Run demo
+        env:
+          RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so
+        run: dotnet run --project bindings/csharp/examples/RichRs.Demo --configuration Release --no-build
+      - name: Pack and inspect NuGet artifact
+        env:
+          RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so
+        run: bindings/csharp/package-release.sh 1.2.2 "$RUNNER_TEMP/rich-csharp-package"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rich-csharp-nuget
+          path: ${{ runner.temp }}/rich-csharp-package/RichRs.Native.1.2.2.nupkg
+          if-no-files-found: error
