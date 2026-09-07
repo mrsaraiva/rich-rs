@@ -93,11 +93,20 @@ pub struct RichStr {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 /// Rust-allocated output bytes released and cleared by `rich_buffer_free`.
 pub struct RichBuffer {
     pub data: *mut u8,
     pub len: u64,
+}
+
+impl Default for RichBuffer {
+    fn default() -> Self {
+        Self {
+            data: ptr::null_mut(),
+            len: 0,
+        }
+    }
 }
 
 /// Owning capture-console handle. Setters return a result and rendering writes
@@ -153,11 +162,11 @@ pub extern "C" fn rich_buffer_free(buffer: *mut RichBuffer) {
     }
     let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
         let value = &mut *buffer;
-        if !value.data.is_null()
-            && let Ok(len) = usize::try_from(value.len)
-        {
-            let slice = ptr::slice_from_raw_parts_mut(value.data, len);
-            drop(Box::<[u8]>::from_raw(slice));
+        if !value.data.is_null() {
+            if let Ok(len) = usize::try_from(value.len) {
+                let slice = ptr::slice_from_raw_parts_mut(value.data, len);
+                drop(Box::<[u8]>::from_raw(slice));
+            }
         }
         *value = RichBuffer::default();
     }));

@@ -28,7 +28,7 @@ public sealed class EncodingBufferTests : IDisposable
     {
         (nint Pointer, ulong Length) after = ((nint)1, 1);
         NativeBuffer.AfterFreeForTest = (pointer, length) => after = (pointer, length);
-        Assert.Equal("1.2.2", RichRuntime.Version);
+        Assert.Equal("1.3.0", RichRuntime.Version);
         Assert.Equal(nint.Zero, after.Pointer);
         Assert.Equal(0UL, after.Length);
     }

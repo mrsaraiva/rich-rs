@@ -10,8 +10,8 @@ public sealed class AbiTests
     {
         RichRuntime.EnsureAbi();
         Assert.Equal(2U, RichRuntime.AbiVersion);
-        Assert.Equal("1.2.2", RichRuntime.Version);
-        Assert.Equal(new Version(1, 2, 2, 0), typeof(RichRuntime).Assembly.GetName().Version);
+        Assert.Equal("1.3.0", RichRuntime.Version);
+        Assert.Equal(new Version(1, 3, 0, 0), typeof(RichRuntime).Assembly.GetName().Version);
         Assert.Equal(new JsonOptions(2, true, false), new JsonOptions());
         Assert.Equal(IntPtr.Size + sizeof(ulong), Marshal.SizeOf<NativeRichStr>());
         Assert.Equal(IntPtr.Size + sizeof(ulong), Marshal.SizeOf<NativeRichBuffer>());

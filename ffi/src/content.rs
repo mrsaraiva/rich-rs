@@ -146,10 +146,10 @@ pub extern "C" fn rich_syntax_set_line_range(
         } else {
             None
         };
-        if let (Some(start), Some(end)) = (start, end)
-            && (start == 0 || end == 0 || start > end)
-        {
-            return Err(RICH_ERROR_INVALID_ARGUMENT);
+        if let (Some(start), Some(end)) = (start, end) {
+            if start == 0 || end == 0 || start > end {
+                return Err(RICH_ERROR_INVALID_ARGUMENT);
+            }
         }
         map_builder!(syntax, |syntax: Syntax| syntax.with_line_range(start, end))
     })

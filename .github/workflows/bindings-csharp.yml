@@ -82,9 +82,11 @@ jobs:
       - name: Pack and inspect NuGet artifact
         env:
           RICH_RS_NATIVE_LIBRARY: ${{ github.workspace }}/ffi/target/release/librich_ffi.so
-        run: bindings/csharp/package-release.sh 1.2.2 "$RUNNER_TEMP/rich-csharp-package"
+        run: |
+          version=$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)
+          bindings/csharp/package-release.sh "$version" "$RUNNER_TEMP/rich-csharp-package"
       - uses: actions/upload-artifact@v7
         with:
           name: rich-csharp-nuget
-          path: ${{ runner.temp }}/rich-csharp-package/RichRs.Native.1.2.2.nupkg
+          path: ${{ runner.temp }}/rich-csharp-package/RichRs.Native.*.nupkg
           if-no-files-found: error

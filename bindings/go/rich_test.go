@@ -44,7 +44,7 @@ func TestABIErrorAndLayoutContract(t *testing.T) {
 	requireNoError(t, EnsureABI())
 	version, err := Version()
 	requireNoError(t, err)
-	if version != "1.2.2" {
+	if version != "1.3.0" {
 		t.Fatalf("version = %q", version)
 	}
 	l := nativeLayoutInfo()

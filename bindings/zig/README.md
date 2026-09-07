@@ -56,8 +56,8 @@ URL, version, and package hash with values from the release):
 ```zig
 .dependencies = .{
     .rich = .{
-        .url = "https://github.com/mrsaraiva/rich-rs/releases/download/v1.2.2/rich-zig-1.2.2.tar.gz",
-        .hash = "rich-1.2.2-<zig-package-hash>",
+        .url = "https://github.com/mrsaraiva/rich-rs/releases/download/v1.3.0/rich-zig-1.3.0.tar.gz",
+        .hash = "rich-1.3.0-<zig-package-hash>",
     },
 },
 ```

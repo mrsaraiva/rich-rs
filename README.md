@@ -22,7 +22,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rich-rs = "1.2.1"
+rich-rs = "1.3.0"
 ```
 
 Run the demo to see rich-rs in action:

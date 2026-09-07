@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-07
+
 ### Added
 
 - **Canonical demo parity across Rust, C, C++, Zig, Go, C#, and Node.** Every
@@ -69,6 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointers; and ABI/package metadata allows bindings to reject mismatched
   native libraries. Header generation is deterministic and fatal, with C11,
   C++ RAII, ASan, and UBSan smoke coverage.
+
+### Fixed
+
+- **Restored the declared Rust 1.85 MSRV** in core and FFI code by avoiding
+  newer let-chain syntax and standard-library pointer defaults, so the release
+  builds with the same toolchain required by its canonical binding-parity gate.
 
 ## [1.2.2] - 2026-07-14
 

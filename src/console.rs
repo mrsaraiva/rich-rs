@@ -60,8 +60,9 @@ fn parse_bool_env(value: &str) -> Option<bool> {
 }
 
 fn detect_legacy_windows_default() -> bool {
-    if let Ok(value) = env::var("RICH_RS_LEGACY_WINDOWS")
-        && let Some(parsed) = parse_bool_env(&value)
+    if let Some(parsed) = env::var("RICH_RS_LEGACY_WINDOWS")
+        .ok()
+        .and_then(|value| parse_bool_env(&value))
     {
         return parsed;
     }

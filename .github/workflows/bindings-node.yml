@@ -91,13 +91,14 @@ jobs:
         if: matrix.node == '24'
         working-directory: bindings/node
         run: |
-          ./package-release.sh 1.2.2 /tmp/rich-node-package
-          tar -tzf /tmp/rich-node-package/rich-rs-native-1.2.2.tgz
+          version=$(awk -F '"' '/^version = / { print $2; exit }' ../../Cargo.toml)
+          ./package-release.sh "$version" /tmp/rich-node-package
+          tar -tzf "/tmp/rich-node-package/rich-rs-native-$version.tgz"
 
       - name: Upload source package proof
         if: matrix.node == '24'
         uses: actions/upload-artifact@v7
         with:
           name: rich-node-source-package
-          path: /tmp/rich-node-package/rich-rs-native-1.2.2.tgz
+          path: /tmp/rich-node-package/rich-rs-native-*.tgz
           if-no-files-found: error

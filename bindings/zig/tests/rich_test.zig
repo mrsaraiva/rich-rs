@@ -199,7 +199,7 @@ test "ABI metadata, exact errors, strings, and buffers" {
     const allocator = std.testing.allocator;
     const package_version = try rich.version(allocator);
     defer allocator.free(package_version);
-    try std.testing.expectEqualStrings("1.2.2", package_version);
+    try std.testing.expectEqualStrings("1.3.0", package_version);
 
     var console = try plainConsole();
     defer console.deinit();

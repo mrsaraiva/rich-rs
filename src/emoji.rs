@@ -136,9 +136,7 @@ impl Emoji {
                 let name = caps.get(1).map(|m| m.as_str().to_lowercase());
                 let variant = caps.get(2).map(|m| m.as_str());
 
-                if let Some(name) = name
-                    && let Some(emoji_char) = EMOJI.get(name.as_str())
-                {
+                if let Some(emoji_char) = name.as_deref().and_then(|name| EMOJI.get(name)) {
                     // Only append variant selector if emoji doesn't already have one
                     let has_selector =
                         emoji_char.ends_with('\u{fe0e}') || emoji_char.ends_with('\u{fe0f}');

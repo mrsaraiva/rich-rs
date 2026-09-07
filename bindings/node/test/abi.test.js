@@ -10,7 +10,7 @@ const rich = require('..');
 
 test('ABI, package version, layouts, and stable result mapping', () => {
   assert.doesNotThrow(() => rich.ensureAbi());
-  assert.equal(rich.version(), '1.2.2');
+  assert.equal(rich.version(), '1.3.0');
   assert.equal(rich._testing.constants.ABI_VERSION, 2);
   assert.equal(rich._testing.constants.RESULT_SIZE, 4);
   assert.ok(rich._testing.constants.STR_SIZE >= 16);
@@ -41,7 +41,7 @@ test('ABI, package version, layouts, and stable result mapping', () => {
 
 test('native buffer RAII covers success and every exception path', () => {
   const before = rich._testing.buffer('stats');
-  assert.equal(rich._testing.buffer('success'), '1.2.2');
+  assert.equal(rich._testing.buffer('success'), '1.3.0');
   assert.equal(rich._testing.buffer('stats'), before + 1n);
   assert.throws(() => rich._testing.buffer('throw'), /injected/);
   assert.equal(rich._testing.buffer('stats'), before + 2n);

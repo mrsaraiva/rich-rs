@@ -25,17 +25,17 @@ fn output() -> Option<&'static Mutex<File>> {
 
 pub(crate) fn event(name: &str, width: Option<u32>) {
     #[cfg(feature = "parity-trace")]
-    if let Some(output) = output()
-        && let Ok(mut output) = output.lock()
-    {
-        let thread = format!("{:?}", std::thread::current().id());
-        let _ = match width {
-            Some(width) => writeln!(
-                output,
-                "{{\"event\":\"{name}\",\"thread\":\"{thread}\",\"width\":{width}}}"
-            ),
-            None => writeln!(output, "{{\"event\":\"{name}\",\"thread\":\"{thread}\"}}"),
-        };
+    if let Some(output) = output() {
+        if let Ok(mut output) = output.lock() {
+            let thread = format!("{:?}", std::thread::current().id());
+            let _ = match width {
+                Some(width) => writeln!(
+                    output,
+                    "{{\"event\":\"{name}\",\"thread\":\"{thread}\",\"width\":{width}}}"
+                ),
+                None => writeln!(output, "{{\"event\":\"{name}\",\"thread\":\"{thread}\"}}"),
+            };
+        }
     }
 
     #[cfg(not(feature = "parity-trace"))]

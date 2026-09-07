@@ -75,13 +75,24 @@ pub struct RichSegmentSink {
     first_error: Option<RichResult>,
 }
 
-#[derive(Default)]
 struct InvocationState {
     first_error: Option<RichResult>,
     callback_active: bool,
     adapter_id: usize,
     active_sink: *mut RichSegmentSink,
     sink_call_active: bool,
+}
+
+impl Default for InvocationState {
+    fn default() -> Self {
+        Self {
+            first_error: None,
+            callback_active: false,
+            adapter_id: 0,
+            active_sink: ptr::null_mut(),
+            sink_call_active: false,
+        }
+    }
 }
 
 thread_local! {
@@ -140,10 +151,10 @@ fn normalize_callback_result(result: RichResult) -> RichResult {
 fn record_error(error: RichResult) {
     let error = normalize_callback_result(error);
     INVOCATION.with(|slot| {
-        if let Some(state) = slot.borrow_mut().as_mut()
-            && state.first_error.is_none()
-        {
-            state.first_error = Some(error);
+        if let Some(state) = slot.borrow_mut().as_mut() {
+            if state.first_error.is_none() {
+                state.first_error = Some(error);
+            }
         }
     });
 }

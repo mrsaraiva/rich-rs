@@ -30,8 +30,8 @@ test('multiple Worker environments have isolated constructor and error state', a
     });
   const results = await Promise.all([run(), run(), run()]);
   assert.deepEqual(results, [
-    { version: '1.2.2', output: 'worker custom', isolated: true },
-    { version: '1.2.2', output: 'worker custom', isolated: true },
-    { version: '1.2.2', output: 'worker custom', isolated: true },
+    { version: '1.3.0', output: 'worker custom', isolated: true },
+    { version: '1.3.0', output: 'worker custom', isolated: true },
+    { version: '1.3.0', output: 'worker custom', isolated: true },
   ]);
 });

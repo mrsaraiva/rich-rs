@@ -8,11 +8,11 @@ exceptions, and exposes every native family without exposing raw pointers.
 ## Requirements and native loading
 
 - .NET 10 LTS.
-- A target-matching `rich-ffi` shared library at version 1.2.2.
+- A target-matching `rich-ffi` shared library at version 1.3.0.
 
 The NuGet package intentionally contains only managed assemblies, XML API
 documentation, and metadata. Pair it with the matching
-`rich-ffi-1.2.2-<target>` release artifact. A Linux library cannot be used on
+`rich-ffi-1.3.0-<target>` release artifact. A Linux library cannot be used on
 macOS or Windows, and architecture must match the process.
 
 The resolver first honors an absolute `RICH_RS_NATIVE_LIBRARY` path. Otherwise
@@ -43,7 +43,7 @@ RICH_RS_NATIVE_LIBRARY="$PWD/ffi/target/debug/librich_ffi.so" \
     --configuration Release --no-build -- --parity
 
 RICH_RS_NATIVE_LIBRARY="$PWD/ffi/target/debug/librich_ffi.so" \
-  bindings/csharp/package-release.sh 1.2.2 /tmp/rich-csharp-package
+  bindings/csharp/package-release.sh 1.3.0 /tmp/rich-csharp-package
 ```
 
 On Windows, set the override to `rich_ffi.dll`; on macOS, use

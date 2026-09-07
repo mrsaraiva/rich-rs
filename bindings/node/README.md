@@ -149,7 +149,7 @@ CSI nor OSC control sequences.
 npm run format:check
 npm run typecheck
 npm run package:check
-./package-release.sh 1.2.2 /tmp/rich-node-package
+./package-release.sh 1.3.0 /tmp/rich-node-package
 ```
 
 The package check compares the compiled symbol inventory with all 125 declarations in the

@@ -144,12 +144,13 @@ jobs:
           mkdir -p "${root}/include"
           cp bindings/zig/build.zig bindings/zig/build.zig.zon \
              bindings/zig/README.md "${root}/"
-          cp -R bindings/zig/src bindings/zig/examples "${root}/"
+          cp -R bindings/zig/src bindings/zig/examples bindings/zig/tests "${root}/"
           cp ffi/include/rich.h "${root}/include/"
           cp LICENSE "${root}/"
           tar -C pkg -czf "${name}.tar.gz" "${name}"
           tar -tzf "${name}.tar.gz" | grep -Fx "${name}/include/rich.h" >/dev/null
           tar -tzf "${name}.tar.gz" | grep -Fx "${name}/examples/demo.zig" >/dev/null
+          tar -tzf "${name}.tar.gz" | grep -Fx "${name}/tests/rich_test.zig" >/dev/null
           tar -xOzf "${name}.tar.gz" "${name}/include/rich.h" | \
             grep -Fx '#define RICH_FFI_ABI_VERSION 2' >/dev/null
           test "$(tar -xOzf "${name}.tar.gz" "${name}/include/rich.h" | \

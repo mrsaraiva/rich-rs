@@ -167,11 +167,13 @@ impl Theme {
             }
 
             // Parse key = value in styles section
-            if in_styles_section && let Some((name, style_str)) = line.split_once('=') {
-                let name = name.trim().to_string();
-                let style_str = style_str.trim();
-                if let Some(style) = Style::parse(style_str) {
-                    styles.insert(name, style);
+            if in_styles_section {
+                if let Some((name, style_str)) = line.split_once('=') {
+                    let name = name.trim().to_string();
+                    let style_str = style_str.trim();
+                    if let Some(style) = Style::parse(style_str) {
+                        styles.insert(name, style);
+                    }
                 }
             }
         }

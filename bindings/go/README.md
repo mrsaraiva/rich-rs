@@ -14,7 +14,7 @@ module never runs Cargo and never downloads a native artifact.
 
 The module path is `github.com/mrsaraiva/rich-rs/bindings/go`. Because it is a
 nested module, a future module-proxy release tag must use the nested-module tag
-form (for example, `bindings/go/v1.2.2`). No proxy publication policy is made
+form (for example, `bindings/go/v1.3.0`). No proxy publication policy is made
 by this source release.
 
 ## Build from the monorepo
@@ -161,9 +161,9 @@ using a local `replace`. All require the explicit cgo environment above.
 From a repository checkout:
 
 ```sh
-./package-release.sh 1.2.2 /tmp/rich-go-package
+./package-release.sh 1.3.0 /tmp/rich-go-package
 ```
 
-This produces `rich-go-1.2.2.tar.gz` with the Go module, tests, README,
+This produces `rich-go-1.3.0.tar.gz` with the Go module, tests, README,
 canonical header under `include/`, and LICENSE. It intentionally contains no
 host native library and must be paired with the exact target FFI artifact.
