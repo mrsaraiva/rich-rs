@@ -39,7 +39,6 @@ jobs:
     timeout-minutes: 45
     env:
       CARGO_INCREMENTAL: "0"
-      RICH_PARITY_EVIDENCE_DIR: ${{ runner.temp }}/binding-demo-parity-evidence
     steps:
       - uses: actions/checkout@v7
 
@@ -77,6 +76,8 @@ jobs:
           npm ci --prefix bindings/node --ignore-scripts --no-audit --no-fund
 
       - name: Verify all canonical demos and feature traces
+        env:
+          RICH_PARITY_EVIDENCE_DIR: ${{ runner.temp }}/binding-demo-parity-evidence
         run: bash tests/demo-parity/run.sh
 
       - name: Upload parity evidence
