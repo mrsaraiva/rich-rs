@@ -142,7 +142,12 @@ zig_command="cd '$repo_root/bindings/zig' && '$zig_bin' build example -Doptimize
     -Drich-ffi-static="$native_archive" -Drich-ffi-include-dir="$repo_root/ffi/include")
 (cd bindings/zig && "$zig_bin" build test -Doptimize=ReleaseSafe \
     -Drich-ffi-static="$native_archive" -Drich-ffi-include-dir="$repo_root/ffi/include")
-zig_executable="$(find bindings/zig/.zig-cache -type f -name rich-zig-demo -executable -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+zig_cache_dir="${ZIG_LOCAL_CACHE_DIR:-$repo_root/bindings/zig/.zig-cache}"
+zig_executable="$(find "$zig_cache_dir" -type f -name rich-zig-demo -executable -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+if [[ -z $zig_executable ]]; then
+    echo "unable to locate rich-zig-demo in Zig local cache: $zig_cache_dir" >&2
+    exit 1
+fi
 capture_and_compare zig "$zig_command" "$zig_executable" "$work_dir/zig.trace.jsonl" "" \
     "cd '$repo_root/bindings/zig' && '$zig_bin' build test -Doptimize=ReleaseSafe -Drich-ffi-static='$native_archive' -Drich-ffi-include-dir='$repo_root/ffi/include'"
 
