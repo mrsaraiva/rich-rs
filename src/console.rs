@@ -78,7 +78,7 @@ fn detect_legacy_windows_default() -> bool {
     }
 }
 
-fn debug_segments_log(line: &str) {
+fn debug_segments_log(line: std::fmt::Arguments<'_>) {
     static PATH: OnceLock<Option<String>> = OnceLock::new();
     let path = PATH.get_or_init(|| env::var("RICH_RS_DEBUG_SEGMENTS_FILE").ok());
     let Some(path) = path.as_ref() else {
@@ -89,7 +89,7 @@ fn debug_segments_log(line: &str) {
     }
 }
 
-fn debug_ansi_log(line: &str) {
+fn debug_ansi_log(line: std::fmt::Arguments<'_>) {
     static PATH: OnceLock<Option<String>> = OnceLock::new();
     let path = PATH.get_or_init(|| env::var("RICH_RS_DEBUG_ANSI_FILE").ok());
     let Some(path) = path.as_ref() else {
@@ -1356,7 +1356,7 @@ impl<W: Write> Console<W> {
 
         for segment in segments.iter() {
             if let Some(control) = &segment.control {
-                debug_segments_log(&format!("[control][streaming] {:?}", control));
+                debug_segments_log(format_args!("[control][streaming] {:?}", control));
                 // Emit terminal controls regardless of style state.
                 // Control sequences generally do not alter SGR state.
                 match control {
@@ -1439,7 +1439,7 @@ impl<W: Write> Console<W> {
 
             if let Some(color_system) = self.color_system {
                 if debug_segments_match_text(&segment.text) {
-                    debug_segments_log(&format!(
+                    debug_segments_log(format_args!(
                         "[segment][streaming] text={:?} style={:?} color_system={:?}",
                         segment.text, segment.style, self.color_system
                     ));
@@ -1449,7 +1449,7 @@ impl<W: Write> Console<W> {
                 if !diff.is_empty() {
                     write!(self.writer, "\x1b[{}m", diff)?;
                     if debug_segments_match_text(&segment.text) {
-                        debug_ansi_log(&format!(
+                        debug_ansi_log(format_args!(
                             "[ansi][streaming] text={:?} sgr=\\x1b[{}m target={:?}",
                             segment.text, diff, target
                         ));
@@ -1460,7 +1460,7 @@ impl<W: Write> Console<W> {
                 current = target;
             } else {
                 if debug_segments_match_text(&segment.text) {
-                    debug_segments_log(&format!(
+                    debug_segments_log(format_args!(
                         "[segment][streaming] text={:?} style={:?} color_system=None",
                         segment.text, segment.style
                     ));
@@ -1477,7 +1477,7 @@ impl<W: Write> Console<W> {
         // Reset at the end so terminal state doesn't leak past the renderable.
         if self.color_system.is_some() && used_sgr && current != StyleState::DEFAULT {
             write!(self.writer, "\x1b[0m")?;
-            debug_ansi_log("[ansi][streaming] tail-reset=\\x1b[0m");
+            debug_ansi_log(format_args!("[ansi][streaming] tail-reset=\\x1b[0m"));
         }
 
         self.writer.flush()
@@ -1490,7 +1490,7 @@ impl<W: Write> Console<W> {
 
         for segment in segments.iter() {
             if let Some(control) = &segment.control {
-                debug_segments_log(&format!("[control][segment] {:?}", control));
+                debug_segments_log(format_args!("[control][segment] {:?}", control));
                 match control {
                     ControlType::Bell => write!(self.writer, "\x07")?,
                     ControlType::CarriageReturn => write!(self.writer, "\r")?,
@@ -1564,7 +1564,7 @@ impl<W: Write> Console<W> {
 
             if let Some(style) = segment.style {
                 if debug_segments_match_text(&segment.text) {
-                    debug_segments_log(&format!(
+                    debug_segments_log(format_args!(
                         "[segment][segment] text={:?} style={:?} color_system={:?}",
                         segment.text, style, self.color_system
                     ));
@@ -1576,7 +1576,7 @@ impl<W: Write> Console<W> {
                             .strip_prefix("\x1b[")
                             .and_then(|rest| rest.split_once('m').map(|(a, _)| a))
                             .unwrap_or("<none>");
-                        debug_ansi_log(&format!(
+                        debug_ansi_log(format_args!(
                             "[ansi][segment] text={:?} sgr=\\x1b[{}m style={:?} color_system={:?}",
                             segment.text, sgr, style, self.color_system
                         ));
@@ -1587,7 +1587,7 @@ impl<W: Write> Console<W> {
                 }
             } else {
                 if debug_segments_match_text(&segment.text) {
-                    debug_segments_log(&format!(
+                    debug_segments_log(format_args!(
                         "[segment][segment] text={:?} style=None color_system={:?}",
                         segment.text, self.color_system
                     ));
