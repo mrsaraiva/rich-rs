@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Cursor};
 use std::path::Path;
+use std::sync::{Arc, OnceLock};
 
 use once_cell::sync::Lazy;
 
@@ -293,15 +294,16 @@ impl Theme {
 /// from top to bottom.
 #[derive(Debug, Clone)]
 pub struct ThemeStack {
-    /// Merged style dictionaries at each level.
-    entries: Vec<HashMap<String, Style>>,
+    /// Merged style dictionaries at each level, shared so that cloning a
+    /// stack (and the `ConsoleOptions` holding it) does not copy them.
+    entries: Vec<Arc<HashMap<String, Style>>>,
 }
 
 impl ThemeStack {
     /// Create a new theme stack with a base theme.
     pub fn new(theme: Theme) -> Self {
         ThemeStack {
-            entries: vec![theme.styles],
+            entries: vec![Arc::new(theme.styles)],
         }
     }
 
@@ -311,13 +313,13 @@ impl ThemeStack {
     /// with the new theme's styles.
     pub fn push(&mut self, theme: Theme, inherit: bool) {
         let styles = if inherit && !self.entries.is_empty() {
-            let mut merged = self.entries.last().unwrap().clone();
+            let mut merged = HashMap::clone(self.entries.last().unwrap());
             merged.extend(theme.styles);
             merged
         } else {
             theme.styles
         };
-        self.entries.push(styles);
+        self.entries.push(Arc::new(styles));
     }
 
     /// Alias for `push` with inherit=true.
@@ -355,8 +357,14 @@ impl ThemeStack {
 }
 
 impl Default for ThemeStack {
+    /// A stack holding the default theme. The default styles are built once
+    /// and shared by every default stack.
     fn default() -> Self {
-        Self::new(Theme::new())
+        static DEFAULT_STYLES: OnceLock<Arc<HashMap<String, Style>>> = OnceLock::new();
+        let styles = DEFAULT_STYLES.get_or_init(|| Arc::new(default_styles()));
+        ThemeStack {
+            entries: vec![Arc::clone(styles)],
+        }
     }
 }
 
